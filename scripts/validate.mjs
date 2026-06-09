@@ -44,11 +44,16 @@ if (manifest.action?.default_popup) {
     `action.default_popup missing: ${manifest.action.default_popup}`);
 }
 
-// icons (action + top-level)
+// icons (action + top-level). Each may be a single path string or a
+// size→path map.
 const iconSets = [manifest.action?.default_icon, manifest.icons].filter(Boolean);
 for (const set of iconSets) {
-  for (const [size, path] of Object.entries(set)) {
-    need(fileExists(path), `icon (${size}px) missing: ${path}`);
+  if (typeof set === "string") {
+    need(fileExists(set), `icon missing: ${set}`);
+  } else {
+    for (const [size, path] of Object.entries(set)) {
+      need(fileExists(path), `icon (${size}px) missing: ${path}`);
+    }
   }
 }
 

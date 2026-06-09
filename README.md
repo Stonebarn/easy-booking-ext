@@ -110,7 +110,7 @@ easy-booking-ext/
 ├── content-scheduler.js   # auto-fills the booking form email input
 ├── popup.html             # toolbar popup UI
 ├── popup.js               # popup logic + manual "Fill now"
-├── icons/                 # 16 / 48 / 128 px action icons
+├── icons/                 # ext_icon.png (toolbar + store icon)
 ├── scripts/
 │   └── validate.mjs       # validates manifest + referenced files (used by CI)
 └── README.md
