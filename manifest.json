@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Easy Booking — Nooks → Scheduler Autofill",
+  "version": "0.1.0",
+  "description": "Grabs the current prospect's email from the Nooks dialer and auto-fills it into the booking form on scheduler.default.com.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.nooks.in/*",
+    "https://scheduler.default.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.nooks.in/*"],
+      "js": ["content-nooks.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://scheduler.default.com/*"],
+      "js": ["content-scheduler.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Easy Booking",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

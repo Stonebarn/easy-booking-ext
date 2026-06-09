@@ -1,0 +1,57 @@
+name: Bug report
+description: The extension isn't capturing or filling the email correctly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please **redact prospect PII** in any screenshots or logs.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it break?
+      options:
+        - Capture (Nooks dialer — wrong/no email detected)
+        - Fill (booking form — field not populated)
+        - Popup
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect vs. what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Load prospect in Nooks dialer
+        2. Open booking link …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: booking-url
+    attributes:
+      label: Booking URL
+      placeholder: https://scheduler.default.com/...
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Any `[EasyBooking]` logs from DevTools.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      placeholder: "0.1.0 (see manifest.json)"
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome version

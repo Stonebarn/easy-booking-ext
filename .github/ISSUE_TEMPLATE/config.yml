@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sales team Slack
+    url: https://wiza.slack.com
+    about: For quick questions or urgent breakage, ping the team in Slack first.

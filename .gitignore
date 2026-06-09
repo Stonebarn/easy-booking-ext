@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build / packaging output
+*.zip
+*.crx
+*.pem
+dist/
+build/
+default-site-page.html
+nooks-dialing-page.html
+samples/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Env / secrets
+.env
+.env.*
