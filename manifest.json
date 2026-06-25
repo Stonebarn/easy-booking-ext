@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Easy Booking — Nooks → Scheduler Autofill",
-  "version": "0.1.0",
-  "description": "Grabs the current prospect's email from the Nooks dialer and auto-fills it into the booking form on scheduler.default.com.",
-  "permissions": ["storage"],
+  "version": "0.2.0",
+  "description": "Grabs the current prospect's email and timezone from the Nooks dialer and auto-fills them into the booking form on scheduler.default.com (public links and internal queue/member pages).",
+  "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://*.nooks.in/*",
     "https://scheduler.default.com/*"
