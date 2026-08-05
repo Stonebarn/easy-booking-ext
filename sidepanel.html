@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Easy Booking</title>
+    <title>Dialer Helper Pro</title>
     <style>
       :root {
         /* Carried over from the popup so the panel, the on-page banner and the
@@ -83,6 +83,24 @@
         text-transform: uppercase;
       }
       header .src { font-size: 11px; opacity: 0.55; font-weight: 500; }
+      /* Pushes the refresh control to the right edge at any panel width. */
+      header .spacer { flex: 1 1 auto; }
+      header .hdr-btn {
+        margin: 0;
+        width: auto;
+        flex: 0 0 auto;
+        padding: 4px 9px;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.14);
+        color: var(--header-fg);
+      }
+      header .hdr-btn:disabled {
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.35);
+        cursor: default;
+      }
 
       /* The panel is full-height; only this region scrolls. */
       main {
@@ -186,8 +204,8 @@
         cursor: default;
       }
 
-      /* Placeholder sections for the phases still to land (HubSpot context,
-         notes sync). Structure only — intentionally muted. */
+      /* Placeholder treatment for the one section still to land (notes sync,
+         Phase 4). Structure only — intentionally muted. */
       .placeholder {
         border: 1px dashed var(--line);
         border-radius: 8px;
@@ -200,7 +218,6 @@
         margin: 0;
       }
       .placeholder button { margin-top: 10px; }
-      #hs-placeholders { opacity: 0.75; }
       .divider {
         border: 0;
         border-top: 1px solid var(--line);
@@ -250,13 +267,131 @@
         margin: 10px 0 0;
         overflow-wrap: anywhere;
       }
+
+      /* ---- CRM sections (Phase 3) -------------------------------------- */
+      /* Everything below has to survive a 320px-wide panel, so: no fixed
+         widths, no multi-column grids, and every long value wraps. */
+      .crm-body { display: flex; flex-direction: column; gap: 8px; }
+      .crm-note { font-size: 12px; color: var(--muted); margin: 0; }
+      .crm-note.bad { color: var(--danger-fg); }
+
+      /* Record title line: a link plus any number of pills, wrapping. */
+      .rec-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .rec-name { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+      a.rec-name, a.link { color: var(--purple); text-decoration: none; }
+      a.rec-name:hover, a.link:hover { text-decoration: underline; }
+
+      /* Label→value rows. Label above value keeps long values readable at the
+         panel's minimum width instead of squeezing them into a side column. */
+      .kv { display: flex; flex-direction: column; gap: 1px; }
+      .kv-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .kv-value { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+      /* Two per row when there is room; one when there isn't. */
+      .kv-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+      }
+
+      .pill.info {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        font-weight: 600;
+      }
+      .pill.stage { background: rgba(147, 113, 240, 0.14); color: var(--purple); }
+      .pill.closed { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+      .pill.won { background: var(--green-bg); color: var(--green-fg); }
+
+      /* Deal rows */
+      .deal + .deal { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+      .deal-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 10px;
+        margin-top: 3px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .deal-amount { font-weight: 700; color: var(--ink); }
+
+      /* Activity rows: fixed-width type gutter, everything else fluid. */
+      .act { display: flex; gap: 8px; }
+      .act + .act { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+      .act-icon {
+        flex: 0 0 auto;
+        width: 20px;
+        text-align: center;
+        font-size: 13px;
+        line-height: 18px;
+      }
+      .act-main { min-width: 0; flex: 1 1 auto; }
+      .act-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .act-type { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+      .act-summary {
+        font-size: 13px;
+        font-weight: 500;
+        margin-top: 1px;
+        overflow-wrap: anywhere;
+      }
+      .act-detail { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+      /* Loading skeletons — per section, so a slow Activity fetch doesn't hide
+         a Contact card that already arrived. */
+      .skel {
+        height: 11px;
+        border-radius: 4px;
+        background: var(--line);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .skel.wide { width: 100%; }
+      .skel.mid { width: 65%; }
+      .skel.narrow { width: 38%; }
+      .skel.tall { height: 15px; }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.45; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .skel { animation: none; }
+      }
     </style>
   </head>
   <body>
     <header id="header">
       <span class="dot"></span>
-      <h1>Easy Booking</h1>
-      <span class="src">· from Nooks</span>
+      <h1>Dialer Helper Pro</h1>
+      <span class="src">· from dialer</span>
+      <span class="spacer"></span>
+      <!-- One refresh for the whole CRM view: it busts the cached bundle for
+           the current prospect and refetches. -->
+      <button
+        type="button"
+        class="hdr-btn"
+        id="crm-refresh"
+        title="Refresh HubSpot data for this prospect"
+        disabled
+      >
+        Refresh
+      </button>
     </header>
 
     <main>
@@ -282,7 +417,7 @@
         </div>
         <div id="empty" class="empty" style="display: none">
           <div class="big">No prospect captured yet</div>
-          <div class="small">Open the Nooks dialer with a prospect loaded.</div>
+          <div class="small">Open the dialer with a prospect loaded.</div>
         </div>
       </section>
 
@@ -306,63 +441,55 @@
         </div>
       </section>
 
-      <div id="hs-placeholders">
-        <section>
-          <div class="section-head">
-            <span class="section-title">Contact</span>
-            <span class="pill soon">Coming soon</span>
-          </div>
-          <div class="placeholder">
-            <p class="hint">Lifecycle stage, owner, last activity.</p>
-          </div>
-        </section>
+      <!-- Live CRM context. Each body is filled from JS with textContent only —
+           HubSpot property values are untrusted, so no innerHTML anywhere. -->
+      <section id="crm-contact-section">
+        <div class="section-head">
+          <span class="section-title">Contact</span>
+          <span class="pill info" id="crm-contact-pill" style="display: none"></span>
+        </div>
+        <div class="card crm-body" id="crm-contact"></div>
+      </section>
 
-        <section>
-          <div class="section-head">
-            <span class="section-title">Company</span>
-            <span class="pill soon">Coming soon</span>
-          </div>
-          <div class="placeholder">
-            <p class="hint">Name, domain, industry, size, owner.</p>
-          </div>
-        </section>
+      <section id="crm-company-section">
+        <div class="section-head">
+          <span class="section-title">Company</span>
+        </div>
+        <div class="card crm-body" id="crm-company"></div>
+      </section>
 
-        <section>
-          <div class="section-head">
-            <span class="section-title">Deals</span>
-            <span class="pill soon">Coming soon</span>
-          </div>
-          <div class="placeholder">
-            <p class="hint">Open deals with stage, amount and close date.</p>
-          </div>
-        </section>
+      <section id="crm-deals-section">
+        <div class="section-head">
+          <span class="section-title">Deals</span>
+          <span class="pill info" id="crm-deals-pill" style="display: none"></span>
+        </div>
+        <div class="card crm-body" id="crm-deals"></div>
+      </section>
 
-        <section>
-          <div class="section-head">
-            <span class="section-title">Recent activity</span>
-            <span class="pill soon">Coming soon</span>
-          </div>
-          <div class="placeholder">
-            <p class="hint">Latest calls, emails, meetings, notes and tasks.</p>
-          </div>
-        </section>
+      <section id="crm-activity-section">
+        <div class="section-head">
+          <span class="section-title">Recent activity</span>
+        </div>
+        <div class="card crm-body" id="crm-activity"></div>
+      </section>
 
-        <section>
-          <div class="section-head">
-            <span class="section-title">Notes</span>
-            <span class="pill soon">Coming soon</span>
-          </div>
-          <div class="placeholder">
-            <p class="hint">Call notes from Nooks, ready to sync to HubSpot.</p>
-          </div>
-        </section>
-      </div>
+      <section>
+        <div class="section-head">
+          <span class="section-title">Notes</span>
+          <span class="pill soon">Coming soon</span>
+        </div>
+        <div class="placeholder">
+          <p class="hint">Call notes from the dialer, ready to sync to HubSpot.</p>
+        </div>
+      </section>
     </main>
 
     <!-- Load order is the dependency graph: config, then auth (reads config),
-         then the panel (reads both). No modules — see the note in each file. -->
+         then data (reads auth), then the panel (reads all three). No modules —
+         see the note in each file. -->
     <script src="hubspot-config.js"></script>
     <script src="hubspot-auth.js"></script>
+    <script src="hubspot-data.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>

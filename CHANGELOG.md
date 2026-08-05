@@ -7,6 +7,57 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Live HubSpot CRM context in the side panel** — the Contact, Company, Deals
+  and Recent activity placeholders are now real. Loading a prospect in the dialer
+  resolves them in HubSpot and renders: contact name (linked to the record) with
+  a lifecycle-stage pill, lead status, title, phone and owner; company name
+  (linked), domain, industry, employee count and owner; one row per deal with a
+  human-readable stage, formatted amount and close date; and the 10 most recent
+  calls, emails, meetings, notes and tasks merged newest-first with relative
+  timestamps and direction arrows. Each section has its own loading placeholder
+  and its own error state, and a **Refresh** button in the panel header busts the
+  cache for the current prospect.
+  - HubSpot property values are rendered with `textContent` only — never
+    `innerHTML`. Note bodies (which are stored as HTML) are regex-stripped for a
+    one-line summary rather than parsed into live nodes.
+- **`content-nooks.js` now also captures prospect context** — name, title,
+  company, phone and, most importantly, the **HubSpot contact and company record
+  IDs** that the dialer's own HubSpot panes render. Anchored on the
+  `data-testid` attributes documented in `docs/nooks-dom-recon.md` (primary) with
+  label text as the fallback, per the no-generated-CSS-classes convention.
+  - This goes in a **new storage key, `eb:prospectContext`**, with its own
+    change-signature dedupe. `eb:currentProspect` is untouched — same fields,
+    same write cadence — because `content-scheduler.js` resets its fill state and
+    un-dismisses its banner on any write to that key, and the record IDs
+    typically arrive a second *after* the email as the dialer's HubSpot panes
+    hydrate.
+  - New config knobs: `TESTID_ANCHORS`, `CONTEXT_LABELS`,
+    `HEADER_MAX_LEVELS_UP`, `RECORD_ID_MIN_DIGITS`.
+- **`hubspot-data.js`** — the CRM read layer (`EB.hubspotData`), built around the
+  portal's *shared* rate limits: CRM Search allows **5 req/s for the whole
+  portal** across all ~8 reps, separate from the general 110 req/10s pool.
+  - Resolution waterfall: a scraped record ID means a direct `GET` and **no
+    search at all**; without one, a single contact search (email `EQ`, plus a
+    filter group on `hs_additional_emails CONTAINS_TOKEN`). Company: scraped ID →
+    the contact's first associated company → company search by email domain
+    (skipped for free-mail domains). A scraped ID that 404s falls back to search
+    rather than reporting "not found".
+  - Deals come from the contact's associations via one `batch/read`; the deal
+    pipeline/stage label map is fetched **once per session** so stages render as
+    words. Activity is v4 association reads in parallel, then a `batch/read` per
+    type that actually has associations — types with none cost no batch call.
+  - Caching is load-bearing, not an optimization: 5-minute per-email bundle
+    cache, in-flight dedup so five rapid prospect switches make one round trip,
+    and session caches for owner names and pipeline labels. Partially failed
+    bundles are not cached, so a failed section retries on the next render.
+  - Errors are typed — `NOT_FOUND`, `RATE_LIMITED` (carrying `Retry-After`),
+    `AUTH`, `TRANSIENT` — so the panel renders four distinct states instead of
+    one generic failure. On a 429 it counts the wait down in the UI and retries
+    once, rather than hammering a limit the whole team shares.
+- README: a **CRM sidebar** subsection under Usage, config tables for the new
+  `content-nooks.js` knobs and for `hubspot-data.js`, `hubspot-data.js` in the
+  project structure, seven new troubleshooting rows, and an updated data-flow
+  diagram showing both storage keys.
 - **Side panel** (`sidepanel.html` / `sidepanel.js`): clicking the toolbar icon
   now opens Chrome's side panel instead of a popup. It carries over everything
   the popup showed — captured email, timezone (`IST · UTC+5:30` plus the
@@ -17,8 +68,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   interaction, and ticks every 30s so the "captured Nm ago" line stays honest.
   The layout is fluid (works down to Chrome's ~320px floor) and follows the OS
   light/dark preference.
-- Placeholder sections in the panel for the v3 work still to land — Contact,
-  Company, Deals, Recent activity, Notes. Structure only.
+- A placeholder Notes section in the panel for the sync work still to land.
+  (The Contact, Company, Deals and Recent activity placeholders added alongside
+  it are live as of the CRM-context entry above.)
 - **Per-SDR HubSpot connection** (`hubspot-config.js` / `hubspot-auth.js` + the
   panel's HubSpot section): each rep connects their own HubSpot login via
   `chrome.identity.launchWebAuthFlow`, so future notes and activity are

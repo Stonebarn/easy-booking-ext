@@ -38,17 +38,30 @@ booking site live in separate tabs); the service worker drives the toolbar badge
 │  content-nooks.js             │        │  content-scheduler.js          │
 │   • reads the prospect's      │        │   • fills the email input      │
 │     Email + Time Zone         │        │   • selects the timezone       │
-│   • writes to storage ────────┼───┐    │   • shows the on-page panel    │
-└───────────────────────────────┘   │    └───▲────────────────────────────┘
+│   • reads identity + HubSpot  │        │   • shows the on-page panel    │
+│     record IDs                │        │                                │
+│   • writes to storage ────────┼───┐    └───▲────────────────────────────┘
+└───────────────────────────────┘   │        │
                                      │        │
                               chrome.storage.local
-                              key: "eb:currentProspect"
+                    keys: "eb:currentProspect"   (email + timezone)
+                          "eb:prospectContext"   (identity + HubSpot IDs)
                                      │
                        ┌─────────────┴──────────────┐
                 background.js                 sidepanel.js
                        │                            │
               toolbar badge (green ✓)      side panel (live, storage.onChanged)
+                                                    │
+                                            hubspot-data.js
+                                                    │
+                                      api.hubapi.com (contact, company,
+                                       deals, activity — cached 5 min)
 ```
+
+The two storage keys are deliberately separate: `content-scheduler.js` resets its
+fill state and re-shows its on-page banner on **any** write to
+`eb:currentProspect`, so the CRM-facing data (which updates again a moment later,
+when the dialer's HubSpot panes finish loading) lives under its own key.
 
 1. **`content-nooks.js`** (runs on `*.nooks.in`) watches the dialer's React DOM
    for the prospect contact card. It locates the email by anchoring on the
@@ -80,7 +93,16 @@ booking site live in separate tabs); the service worker drives the toolbar badge
    timezone (with a friendly `IST · UTC+5:30` line and the prospect's local
    time), how long ago the capture happened, and a manual "Fill now" button as a
    fallback. Unlike the old popup it stays open while you move between tabs and
-   **updates live** as prospects change in the dialer.
+   **updates live** as prospects change in the dialer. It also renders the live
+   CRM context — see [CRM sidebar](#crm-sidebar).
+5. **`hubspot-data.js`** does the CRM reads for the panel: it resolves the
+   prospect to a HubSpot contact and company, then loads deals and recent
+   activity. Resolution prefers the **record IDs scraped from the dialer's
+   HubSpot panes** (a direct `GET` by ID) and only falls back to CRM Search —
+   which is capped at **5 requests/second for the entire portal**, shared by
+   every rep — when there is no ID to use. Results are cached per email for 5
+   minutes, concurrent lookups for the same prospect share one request, and a
+   `429` is surfaced as a countdown rather than a retry storm.
 
 ---
 
@@ -122,9 +144,9 @@ and activity are attributed to you rather than to a shared service account.
    **Disconnect** to remove the stored tokens.
 
 Each rep connects once. The connection survives browser restarts — the access
-token is refreshed automatically in the background as it expires. Nothing is
-read from or written to HubSpot yet beyond identifying you; the Contact,
-Company, Deals, Activity and Notes sections land in later phases.
+token is refreshed automatically in the background as it expires. Once connected,
+the panel starts filling in the CRM sections below; the Notes sync is the one
+piece still to land.
 
 **There is nothing to configure.** `hubspot-config.js` already carries the app's
 client ID and the deployed token-service URL, so loading the extension unpacked
@@ -135,6 +157,31 @@ stored only in Lovable Cloud's secret store (as `HUBSPOT_CLIENT_SECRET`), where
 the token-exchange function reads it — see
 [`lovable/hubspot-token-function.ts`](./lovable/hubspot-token-function.ts). The
 client ID that *is* checked in is a public identifier, not a credential.
+
+### CRM sidebar
+
+With HubSpot connected, loading a prospect in the dialer fills four sections in
+the side panel. Everything is read-only, and every record name links out to
+HubSpot (opens in a new tab).
+
+| Section | What it shows |
+|---|---|
+| **Contact** | Name (linked), lifecycle-stage pill, lead status, job title, phone, owner, and how long ago the last activity was logged. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"*. |
+| **Company** | Name (linked), domain, industry, employee count, owner. Matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. |
+| **Deals** | One row per associated deal — name (linked), human-readable stage, amount, close date, owner. Open deals sort first; closed-won gets a green pill. Empty: *"No open deals"*. |
+| **Recent activity** | The 10 most recent calls, emails, meetings, notes and tasks merged into one list, newest first, with a relative timestamp, a one-line summary and ↑/↓ direction arrows on calls and emails. |
+
+- Sections show **loading placeholders** while a lookup is in flight, and each
+  one reports its own failure — a rate-limited Deals fetch doesn't blank the
+  Contact card that already loaded.
+- **Refresh** (top-right of the panel header) discards the cached data for the
+  current prospect and refetches. Otherwise a prospect's data is cached for 5
+  minutes, so switching back and forth is instant and costs no API calls.
+- If HubSpot's rate limit is hit, the section shows *"HubSpot rate limit —
+  retrying in Xs"* and retries itself once the wait is over. The limit is shared
+  by the whole team, so the panel waits it out rather than retrying immediately.
+- Not connected → *"Connect HubSpot to see CRM data"*. No prospect loaded → a
+  muted empty state.
 
 ---
 
@@ -152,9 +199,17 @@ Most behavior is tunable at the top of each content script.
 | `PRECISE_SELECTORS` | Optional exact CSS selectors (highest priority) | `[]` |
 | `IGNORE_SUBSTRINGS` | Emails to never treat as a prospect | nooks/no-reply/support |
 | `DEBOUNCE_MS` | Debounce for DOM-change rescans | `300` |
+| `TESTID_ANCHORS` | `data-testid` of each card the context scraper reads — prospect name, prospect fields, account fields, and the two HubSpot panes. **Primary** anchor strategy (see [the recon notes](./docs/nooks-dom-recon.md)); the label arrays are the fallback | 5 entries |
+| `CONTEXT_LABELS` | Label text used to pick a value row out of one of those cards: `RECORD_ID`, `TITLE`, `COMPANY`, `PHONE` | `["Record ID", …]`, … |
+| `HEADER_MAX_LEVELS_UP` | How far to climb from the prospect-name element looking for the header's `Company • Title` line and phone | `4` |
+| `RECORD_ID_MIN_DIGITS` | Minimum digit run to accept as a HubSpot record ID (keeps employee counts and grades out) | `5` |
 
 `TZ_FIELD_RE` parses the field as `ABBR (h:mm AM/PM)`; the abbreviation and the
 UTC offset derived from that clock are stored and resolved on the scheduler side.
+
+The context scraper writes a **separate** storage key (`eb:prospectContext`) and
+dedupes on its own signature, so the record IDs appearing a second after the
+email does not disturb the booking tab.
 
 **`content-scheduler.js`:**
 
@@ -173,6 +228,22 @@ UTC offset derived from that clock are stored and resolved on the scheduler side
 | `MAX_AGE_MS` | Age at which a capture is shown as stale (keep in sync with `background.js` / `content-scheduler.js`) | `30 * 60 * 1000` (30 min) |
 | `TICK_MS` | How often the "captured Nm ago" line is refreshed | `30 * 1000` (30 s) |
 | `NOTICE_MS` | How long a transient status message ("Fill triggered.") replaces the age line | `4000` |
+| `CRM_DEBOUNCE_MS` | Coalesces the burst of `eb:prospectContext` writes a prospect change produces into one CRM fetch | `500` |
+
+**`hubspot-data.js` → `EB.hubspotData.CONFIG`:**
+
+| Key | Purpose | Default |
+|---|---|---|
+| `CACHE_TTL_MS` | How long a resolved prospect bundle is reused before refetching (**Refresh** ignores it) | `5 * 60 * 1000` (5 min) |
+| `ACTIVITY_LIMIT` | Activity rows kept after merging all five engagement types | `10` |
+| `BATCH_MAX` | Objects per `batch/read` and IDs per association read (HubSpot's own ceiling) | `100` |
+| `RETRY_AFTER_FALLBACK_S` | Wait used when a `429` carries no usable `Retry-After` header | `10` |
+| `CONTACT_PROPERTIES` | Contact properties requested | firstname, lastname, email, jobtitle, phone, lifecyclestage, hs_lead_status, hubspot_owner_id, notes_last_updated |
+| `COMPANY_PROPERTIES` | Company properties requested | name, domain, industry, numberofemployees, hubspot_owner_id |
+| `DEAL_PROPERTIES` | Deal properties requested | dealname, dealstage, pipeline, amount, closedate, hubspot_owner_id |
+| `ACTIVITY_TYPES` | The five engagement types, their display labels and per-type properties | calls, emails, meetings, notes, tasks |
+| `FREE_EMAIL_DOMAINS` | Domains the company-by-domain fallback refuses to search on (a `gmail.com` search matches something irrelevant) | gmail, outlook, yahoo, … |
+| `CURRENCY` / `LOCALE` | Currency and locale used to format deal amounts and dates | `USD` / `en-US` |
 
 **`hubspot-config.js` → `EB.hubspotConfig`:**
 
@@ -199,14 +270,18 @@ UTC offset derived from that clock are stored and resolved on the scheduler side
 easy-booking-ext/
 ├── manifest.json          # MV3 config: hosts, content scripts, action, side panel, icons
 ├── background.js          # service worker: toolbar badge + side-panel-on-click
-├── content-nooks.js       # captures prospect email + timezone → chrome.storage
+├── content-nooks.js       # captures prospect email + timezone, identity + HubSpot record IDs
 ├── content-scheduler.js   # fills email, selects timezone, shows on-page panel
-├── sidepanel.html         # side panel UI (captured prospect + manual fill)
-├── sidepanel.js           # side panel logic: live storage subscription, "Fill now"
+├── sidepanel.html         # side panel UI (captured prospect, HubSpot, CRM sections)
+├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", CRM rendering
 ├── hubspot-config.js      # HubSpot OAuth app config (client id, scopes — no secret)
 ├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
+├── hubspot-data.js        # CRM reads: contact/company resolution, deals, activity, caching
 ├── lovable/
 │   └── hubspot-token-function.ts  # hosted token exchange (holds the secret; deployed to Lovable Cloud)
+├── docs/
+│   ├── PLAN-v3-hubspot-sidebar.md # the v3 plan and its settled decisions
+│   └── nooks-dom-recon.md         # live-DOM anchors the scrapers are built on
 ├── icons/                 # ext_icon.png (toolbar + store icon)
 ├── scripts/
 │   └── validate.mjs       # validates manifest + referenced files (used by CI)
@@ -255,6 +330,12 @@ DOM**, not the static HTML snapshots:
 | Panel or badge not showing | Reload the tab after updating the extension; both appear only for a fresh (<30 min) capture. |
 | Stale email | Captures older than 30 min are skipped; re-open the prospect in the dialer. |
 | Extension doesn't run on booking page | Confirm the URL matches `https://scheduler.default.com/*` in `manifest.json`. |
+| CRM sections say "Connect HubSpot to see CRM data" | You're signed out — use **Connect HubSpot** in the panel's HubSpot section. |
+| "No HubSpot contact for …" for a prospect you know exists | The address in the dialer isn't the one on the HubSpot record (and isn't in `hs_additional_emails` either). Check the contact in HubSpot, or look for a duplicate record. |
+| CRM data looks out of date | Click **Refresh** in the panel header — data is cached for 5 minutes per prospect. |
+| "HubSpot rate limit — retrying in Xs" | Expected under heavy parallel dialing: HubSpot's search limit is 5 req/s for the whole portal. It retries itself. If it's constant, the dialer's HubSpot panes probably aren't rendering the Record ID rows, so every lookup is falling back to search — check `TESTID_ANCHORS` / `CONTEXT_LABELS.RECORD_ID`. |
+| Deal stages show as raw IDs like `appointmentscheduled` | The one-off `GET /crm/v3/pipelines/deals` call failed (usually a missing `crm.objects.deals.read` scope). Reconnect HubSpot; the console logs the failure. |
+| Company section empty but the contact has one | No company association on the contact, and the email domain didn't match a company's `domain` property (free-mail domains are deliberately not searched). |
 
 Open the page's DevTools console and look for `[EasyBooking]` debug logs.
 
@@ -294,11 +375,18 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for conventions and the PR checklist.
     tokens plus your HubSpot email/ID. It exists so the client secret never
     ships in the extension (SOC 2 secrets management); it is locked to this
     extension's origin and stores nothing.
-  - **`api.hubapi.com`** receives your access token on ordinary CRM reads (so
-    far just the owner lookup that resolves your HubSpot owner ID).
+  - **`api.hubapi.com`** receives your access token on CRM reads. Those reads
+    are **read-only** and send the prospect's email address (or, when the dialer
+    supplies it, their HubSpot record ID) so HubSpot can return the matching
+    contact, company, deals and recent activity. Nothing is written, and nothing
+    about a prospect is sent anywhere other than HubSpot — the portal that
+    already holds their record.
 
-  The captured prospect email is still never transmitted anywhere; it only moves
-  from the dialer tab to the booking tab through local storage.
+  The captured prospect email is not transmitted anywhere else: for the booking
+  flow it only moves from the dialer tab to the booking tab through local
+  storage.
+- **CRM data is cached in the panel's memory only** (5 minutes, or until you
+  click Refresh or close the panel). It is never written to disk.
 - Your HubSpot **refresh token** lives in `chrome.storage.local` and the
   short-lived access token in `chrome.storage.session` (discarded when Chrome
   closes). **Disconnect** deletes both.
