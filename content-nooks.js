@@ -259,7 +259,7 @@
   // Initial scan.
   scheduleScan();
 
-  // Allow the popup / scheduler to ask for the latest detection on demand.
+  // Allow the side panel / scheduler to ask for the latest detection on demand.
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg && msg.type === "EB_REQUEST_EMAIL") {
       sendResponse(detectProspect());

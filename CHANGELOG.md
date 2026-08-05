@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Side panel** (`sidepanel.html` / `sidepanel.js`): clicking the toolbar icon
+  now opens Chrome's side panel instead of a popup. It carries over everything
+  the popup showed — captured email, timezone (`IST · UTC+5:30` plus the
+  prospect's local time), capture age with staleness coloring, and the manual
+  "Fill now" button — and adds behavior a popup could not have: it stays open
+  while you move between the dialer and booking tabs, **subscribes to
+  `chrome.storage.onChanged`** so a newly loaded prospect appears without any
+  interaction, and ticks every 30s so the "captured Nm ago" line stays honest.
+  The layout is fluid (works down to Chrome's ~320px floor) and follows the OS
+  light/dark preference.
+- Placeholder sections in the panel for the v3 work still to land — HubSpot
+  connect, Contact, Company, Deals, Recent activity, Notes. Structure only; no
+  HubSpot code, credentials or network requests exist yet.
+- `manifest.json`: `sidePanel` permission, `side_panel.default_path`, and
+  `minimum_chrome_version: "114"` (the side panel API's floor).
+- `scripts/validate.mjs`: validates `side_panel.default_path` exists, that the
+  `sidePanel` permission accompanies a `side_panel` key, that
+  `minimum_chrome_version` is set, and that the toolbar `action` still has an
+  icon.
+
+### Changed
+- `background.js`: sets `sidePanel.setPanelBehavior({ openPanelOnActionClick:
+  true })` on install and startup so the toolbar icon opens the panel. Badge and
+  alarm behavior is unchanged.
+- CI (`.github/workflows/validate.yml`): the JS syntax check now globs
+  git-tracked `*.js`/`*.mjs` instead of a hard-coded file list, so new scripts
+  can't slip through unchecked.
+
+### Removed
+- **`popup.html` / `popup.js`** and `action.default_popup` — replaced by the
+  side panel. (A manifest popup would suppress `openPanelOnActionClick`.) The
+  `action` entry itself remains, with its title and icon.
+
 ## [0.2.0] - 2026-06-25
 
 ### Added

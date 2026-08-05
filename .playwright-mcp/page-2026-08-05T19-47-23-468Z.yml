@@ -1,0 +1,601 @@
+- generic [ref=e1]:
+  - text: Cookies
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - button
+            - generic:
+              - button
+            - generic:
+              - button [disabled]
+            - separator
+            - generic:
+              - button
+            - separator
+            - generic:
+              - link:
+                - /url: /workspaces/kB1XU447kvwf7qQq/phone-numbers/enrich
+            - separator
+            - generic:
+              - link:
+                - /url: /workspaces/kB1XU447kvwf7qQq/reporting
+            - generic:
+              - link:
+                - /url: /workspaces/kB1XU447kvwf7qQq/call-library
+            - generic:
+              - link:
+                - /url: /workspaces/kB1XU447kvwf7qQq/battlecards
+          - generic:
+            - button
+            - generic:
+              - button
+        - text: (
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - generic [ref=e22]:
+            - combobox [ref=e23] [cursor=pointer]:
+              - paragraph [ref=e26]: Wiza
+            - textbox: kB1XU447kvwf7qQq
+          - button [ref=e27] [cursor=pointer]
+        - generic [ref=e30]:
+          - generic [ref=e31]:
+            - generic [ref=e32]:
+              - button [ref=e5870] [cursor=pointer]:
+                - paragraph [ref=e40]: Home
+              - generic [ref=e5871]:
+                - button [disabled]:
+                  - generic:
+                    - generic:
+                      - paragraph: Salesfloor
+            - generic [ref=e44]:
+              - separator [ref=e45]
+              - heading [level=5] [ref=e5872]: Engage
+              - button [ref=e5873] [cursor=pointer]:
+                - paragraph [ref=e54]: Dialer
+            - generic [ref=e55]:
+              - separator [ref=e56]
+              - heading [level=5] [ref=e5874]: Prospect
+              - link [ref=e5875] [cursor=pointer]:
+                - /url: /workspaces/kB1XU447kvwf7qQq/phone-numbers/enrich
+                - paragraph [ref=e67]: Nooks Numbers
+            - generic [ref=e68]:
+              - separator [ref=e69]
+              - heading [level=5] [ref=e5876]: Coach
+              - link [ref=e5877] [cursor=pointer]:
+                - /url: /workspaces/kB1XU447kvwf7qQq/reporting
+                - paragraph [ref=e78]: Reporting
+              - link [ref=e5878] [cursor=pointer]:
+                - /url: /workspaces/kB1XU447kvwf7qQq/call-library
+                - paragraph [ref=e86]: Call Library
+              - link [ref=e5879] [cursor=pointer]:
+                - /url: /workspaces/kB1XU447kvwf7qQq/battlecards
+                - paragraph [ref=e95]: Battlecards
+          - generic [ref=e96]:
+            - separator [ref=e97]
+            - button [ref=e5880] [cursor=pointer]:
+              - paragraph [ref=e104]: Help
+            - button [ref=e5881] [cursor=pointer]:
+              - paragraph [ref=e112]: Settings
+    - generic [ref=e135]:
+      - generic [ref=e137]:
+        - paragraph [ref=e143]:
+          - text: The Nooks chrome extension is
+          - strong [ref=e144]: required
+          - text: to enable all features
+        - generic [ref=e145]:
+          - button [ref=e5882] [cursor=pointer]: Install extension
+          - button [ref=e5883] [cursor=pointer]: Dismiss
+      - generic [ref=e148]:
+        - generic [ref=e150]:
+          - generic [ref=e151]:
+            - generic [ref=e152]:
+              - generic [ref=e153]:
+                - generic [ref=e156]:
+                  - combobox [ref=e5884] [cursor=pointer]:
+                    - paragraph [ref=e159]: All Tasks
+                  - textbox: outreach-all tasks
+                  - group
+                - paragraph [ref=e168]: "1"
+              - generic [ref=e170]:
+                - generic [ref=e171]: User to view as
+                - generic [ref=e172]:
+                  - combobox [ref=e5886] [cursor=pointer]:
+                    - generic [ref=e174]: Jack Foley
+                  - textbox: "1"
+                  - group:
+                    - generic: User to view as__
+              - generic [ref=e177]:
+                - combobox [invalid] [ref=e178] [cursor=pointer]:
+                  - paragraph [ref=e182]: Add phone
+                - textbox [invalid]
+                - group
+              - generic [ref=e186]:
+                - combobox [ref=e187] [cursor=pointer]:
+                  - generic [ref=e188]:
+                    - paragraph [ref=e189]: Power
+                    - button [disabled]:
+                      - paragraph: "1"
+                - textbox: "1"
+                - group
+            - generic [ref=e190]:
+              - button [ref=e5887] [cursor=pointer]
+              - group [ref=e195]:
+                - button [ref=e197] [cursor=pointer]
+                - button [ref=e203] [cursor=pointer]
+              - button [ref=e5889] [cursor=pointer]
+          - generic [ref=e210]:
+            - generic [ref=e5890]:
+              - button [disabled]: One-Off Call
+            - group [ref=e212]:
+              - button [ref=e5891] [cursor=pointer]: Start session
+              - button [disabled]
+        - generic [ref=e220]:
+          - generic [ref=e221]:
+            - button [ref=e5893] [cursor=pointer]:
+              - paragraph [ref=e227]: Filter
+            - button [ref=e5895] [cursor=pointer]:
+              - paragraph [ref=e234]: Group by
+            - button [ref=e5897] [cursor=pointer]:
+              - paragraph [ref=e240]: Sort
+            - button [ref=e242] [cursor=pointer]
+            - separator [ref=e245]
+            - generic [ref=e247]:
+              - paragraph [ref=e252]: "1"
+              - separator [ref=e253]
+              - paragraph [ref=e257]: "0"
+          - generic [ref=e258]:
+            - button [ref=e5900] [cursor=pointer]:
+              - paragraph [ref=e266]: 3m ago
+            - button [ref=e5901] [cursor=pointer]:
+              - paragraph [ref=e278]: Display
+      - table [ref=e5902]:
+        - rowgroup [ref=e281]:
+          - row [ref=e5903]:
+            - columnheader [ref=e283]
+            - columnheader [ref=e5904]:
+              - paragraph [ref=e286]: Status
+            - columnheader [ref=e5905]:
+              - generic [ref=e288]:
+                - paragraph [ref=e289]: Name
+                - button [ref=e292] [cursor=pointer]
+            - columnheader [ref=e5907]:
+              - generic [ref=e296]:
+                - paragraph [ref=e297]: Phone
+                - button [ref=e300] [cursor=pointer]
+            - columnheader [ref=e5909]:
+              - generic [ref=e304]:
+                - paragraph [ref=e305]: Title
+                - button [ref=e308] [cursor=pointer]
+            - columnheader [ref=e5911]:
+              - generic [ref=e312]:
+                - paragraph [ref=e313]: Account
+                - button [ref=e316] [cursor=pointer]
+            - columnheader [ref=e5913]:
+              - generic [ref=e320]:
+                - paragraph [ref=e321]: Sequence Step
+                - button [ref=e324] [cursor=pointer]
+            - columnheader [ref=e5915]:
+              - generic [ref=e328]:
+                - paragraph [ref=e329]: Sequence
+                - button [ref=e332] [cursor=pointer]
+            - columnheader [ref=e5917]:
+              - generic [ref=e336]:
+                - paragraph [ref=e337]: Tags
+                - button [ref=e340] [cursor=pointer]
+            - columnheader [ref=e5919]:
+              - paragraph [ref=e345]: Prospect Note
+            - columnheader [ref=e5920]:
+              - generic [ref=e347]:
+                - paragraph [ref=e348]: Time Zone
+                - button [ref=e351] [cursor=pointer]
+            - columnheader [ref=e5922]:
+              - generic [ref=e355]:
+                - paragraph [ref=e356]: Connect Rate
+                - button [ref=e359] [cursor=pointer]
+            - columnheader [ref=e5924]:
+              - generic [ref=e363]:
+                - paragraph [ref=e364]: Number of Dials
+                - button [ref=e367] [cursor=pointer]
+        - row [ref=e5926]:
+          - cell [ref=e5927]:
+            - generic [ref=e4022]:
+              - checkbox [disabled] [ref=e4025]
+              - paragraph [ref=e4029]: 1 calls (1 prospects)
+        - rowgroup [ref=e4030] [cursor=pointer]:
+          - row [ref=e5929]:
+            - cell [ref=e4032]:
+              - checkbox [ref=e4035]
+            - cell [ref=e5930]:
+              - generic [ref=e4043]:
+                - paragraph [ref=e4048]: Pending
+                - button [ref=e4049]
+            - cell [ref=e5931]:
+              - generic [ref=e4055]:
+                - paragraph [ref=e4057]: Jim Foley
+                - generic [ref=e4058]:
+                  - button [ref=e4060]
+                  - button [ref=e5933]
+                  - button [ref=e5934]
+            - cell [ref=e5935]:
+              - generic [ref=e4072]:
+                - generic [ref=e5936]:
+                  - generic [ref=e4074]:
+                    - button [disabled]
+                  - paragraph [ref=e4077]: (301) 873-9777
+                - button [ref=e5937]
+            - cell [ref=e5938]:
+              - paragraph [ref=e4082]: VP/Chief Business Development Officer
+            - cell [ref=e5939]:
+              - paragraph [ref=e4085]: Intercoastal Mortgage
+            - cell [ref=e5940]:
+              - paragraph [ref=e4088]: "Step #1 (Phone Call)"
+            - cell [ref=e5941]:
+              - paragraph [ref=e4091]: OB - SaaS - BDR - Call Only - Sequence
+            - cell [ref=e4092]
+            - cell [ref=e5942]:
+              - paragraph [ref=e4095]: No Notes
+            - cell [ref=e5943]:
+              - paragraph [ref=e4098]: EDT (3:45 PM)
+            - cell [ref=e5944]:
+              - paragraph [ref=e4104]: "-"
+            - cell [ref=e5946]:
+              - paragraph [ref=e4107]: "0"
+          - row [ref=e4108]:
+            - cell [ref=e4109]
+            - cell [ref=e4110]
+            - cell [ref=e4111]
+          - row [ref=e5947]:
+            - cell [ref=e5948]:
+              - generic [ref=e5169]:
+                - generic [ref=e5170]:
+                  - generic [ref=e5174]:
+                    - generic [ref=e5175]:
+                      - generic [ref=e5176]:
+                        - heading [level=3] [ref=e5949]: Jim Foley
+                        - button [ref=e5178]
+                      - separator [ref=e5181]
+                      - heading [level=4] [ref=e5951]: (301) 873-9777
+                      - button [ref=e5952]:
+                        - paragraph [ref=e5196]: Enrich
+                    - paragraph [ref=e5200]: Intercoastal Mortgage • VP/Chief Business Development Officer
+                  - generic [ref=e5206]:
+                    - generic [ref=e5207]: Bridge number
+                    - generic [ref=e5208]:
+                      - textbox [ref=e5953]:
+                        - /placeholder: Choose number
+                      - group:
+                        - generic: Bridge number
+                - generic [ref=e5216]:
+                  - generic [ref=e5217]:
+                    - tablist [ref=e5954]:
+                      - tab [selected] [ref=e5955]:
+                        - paragraph [ref=e5225]: Dashboard
+                      - tab [ref=e5956]:
+                        - paragraph [ref=e5228]: Activity
+                      - tab [ref=e5957]:
+                        - paragraph [ref=e5231]: Battlecards
+                      - tab [ref=e5958]:
+                        - paragraph [ref=e5234]: Transcript
+                    - button [ref=e5959]:
+                      - generic [ref=e5243]: Customize View
+                  - tabpanel [ref=e5244]:
+                    - generic [ref=e5247]:
+                      - generic [ref=e5249]:
+                        - generic [ref=e5250]:
+                          - generic [ref=e5251]:
+                            - paragraph [ref=e5256]: Hubspot Account
+                            - button [ref=e5258]
+                          - generic [ref=e5264]:
+                            - generic [ref=e5265]:
+                              - paragraph [ref=e5270]:
+                                - strong [ref=e5271]: Account Grade v1
+                              - generic [ref=e5273]:
+                                - combobox [ref=e5274]: A
+                                - textbox: A
+                                - group
+                            - separator [ref=e5275]
+                            - generic [ref=e5276]:
+                              - paragraph [ref=e5281]: AE Team Size
+                              - paragraph [ref=e5283]
+                            - separator [ref=e5284]
+                            - generic [ref=e5285]:
+                              - paragraph [ref=e5290]: AI Intel
+                              - paragraph [ref=e5292]
+                            - separator [ref=e5293]
+                            - generic [ref=e5294]:
+                              - paragraph [ref=e5299]:
+                                - strong [ref=e5300]: Company Status
+                              - generic [ref=e5302]:
+                                - combobox [ref=e5303]: New
+                                - textbox: New
+                                - group
+                            - separator [ref=e5304]
+                            - generic [ref=e5305]:
+                              - paragraph [ref=e5310]: Record ID
+                              - paragraph [ref=e5312]: "54934007447"
+                            - separator [ref=e5313]
+                            - generic [ref=e5314]:
+                              - paragraph [ref=e5319]: LinkedIn Company Page
+                              - generic [ref=e5320]:
+                                - paragraph [ref=e5321]: https://linkedin.com/company/intercoastal-mortgage
+                                - button [ref=e5960]
+                            - separator [ref=e5325]
+                            - generic [ref=e5326]:
+                              - paragraph [ref=e5331]: LinkedIn Bio
+                              - paragraph [ref=e5333]
+                            - separator [ref=e5334]
+                            - generic [ref=e5335]:
+                              - paragraph [ref=e5340]: Number of Employees
+                              - paragraph [ref=e5342]: "125"
+                            - separator [ref=e5343]
+                            - generic [ref=e5344]:
+                              - paragraph [ref=e5349]: OB Team Size
+                              - paragraph [ref=e5351]
+                            - separator [ref=e5352]
+                            - generic [ref=e5353]:
+                              - paragraph [ref=e5358]:
+                                - strong [ref=e5359]: Prospecting Status
+                              - generic [ref=e5361]:
+                                - combobox [ref=e5362]: Ready For Outbound
+                                - textbox: Ready For Outbound
+                                - group
+                            - separator [ref=e5363]
+                            - generic [ref=e5364]:
+                              - paragraph [ref=e5369]: Sales Leadership Team Size
+                              - paragraph [ref=e5371]
+                            - separator [ref=e5372]
+                        - generic [ref=e5373]:
+                          - generic [ref=e5374]:
+                            - paragraph [ref=e5379]: Prospect Fields
+                            - generic [ref=e5380]:
+                              - button [ref=e5961]: "5"
+                              - button [ref=e5388]
+                          - generic [ref=e5393]:
+                            - generic [ref=e5394]:
+                              - generic [ref=e5395]:
+                                - paragraph [ref=e5400]: Email
+                                - paragraph [ref=e5402]: jimfoley@icmtg.com
+                              - separator [ref=e5403]
+                            - generic [ref=e5404]:
+                              - generic [ref=e5405]:
+                                - paragraph [ref=e5410]: Title
+                                - paragraph [ref=e5412]: VP/Chief Business Development Officer
+                              - separator [ref=e5413]
+                            - generic [ref=e5414]:
+                              - generic [ref=e5415]:
+                                - paragraph [ref=e5420]: Sequence
+                                - paragraph [ref=e5422]: OB - SaaS - BDR - Call Only - Sequence
+                              - separator [ref=e5423]
+                            - generic [ref=e5424]:
+                              - generic [ref=e5425]:
+                                - paragraph [ref=e5430]: AI Intel
+                                - paragraph [ref=e5432]
+                              - separator [ref=e5433]
+                            - generic [ref=e5434]:
+                              - generic [ref=e5435]:
+                                - paragraph [ref=e5440]: Time Zone
+                                - paragraph [ref=e5442]: EDT (3:45 PM)
+                              - separator [ref=e5443]
+                            - generic [ref=e5444]:
+                              - generic [ref=e5445]:
+                                - paragraph [ref=e5450]: Activity
+                                - paragraph [ref=e5452]:
+                                  - paragraph [ref=e5453]: None
+                              - separator [ref=e5454]
+                            - generic [ref=e5455]:
+                              - generic [ref=e5456]:
+                                - paragraph [ref=e5461]: HubSpot Profile
+                                - paragraph [ref=e5463]: https://app.hubspot.com/contacts/40063500/record/0-1/197518588973
+                                - button [ref=e5962]
+                              - separator [ref=e5467]
+                            - generic [ref=e5468]:
+                              - generic [ref=e5469]:
+                                - paragraph [ref=e5474]: Company Size
+                                - paragraph [ref=e5476]: "125"
+                              - separator [ref=e5477]
+                            - generic [ref=e5478]:
+                              - generic [ref=e5479]:
+                                - paragraph [ref=e5484]: addressCity
+                                - paragraph [ref=e5486]: Massachusetts
+                              - separator [ref=e5487]
+                            - generic [ref=e5488]:
+                              - generic [ref=e5489]:
+                                - paragraph [ref=e5494]: addressCountry
+                                - paragraph [ref=e5496]: United States
+                              - separator [ref=e5497]
+                            - generic [ref=e5498]:
+                              - generic [ref=e5499]:
+                                - paragraph [ref=e5504]: HubSpot Contact Record ID
+                                - paragraph [ref=e5506]: "197518588973"
+                              - separator [ref=e5507]
+                        - generic [ref=e5508]:
+                          - generic [ref=e5509]:
+                            - paragraph [ref=e5515]: Account Fields
+                            - generic [ref=e5516]:
+                              - button [ref=e5963]: "1"
+                              - button [ref=e5524]
+                          - generic [ref=e5529]:
+                            - generic [ref=e5530]:
+                              - generic [ref=e5531]:
+                                - paragraph [ref=e5536]: Account Name
+                                - paragraph [ref=e5538]: Intercoastal Mortgage
+                              - separator [ref=e5539]
+                            - generic [ref=e5540]:
+                              - generic [ref=e5541]:
+                                - paragraph [ref=e5546]: Description
+                                - paragraph [ref=e5548]
+                              - separator [ref=e5549]
+                            - generic [ref=e5550]:
+                              - generic [ref=e5551]:
+                                - paragraph [ref=e5556]: AI Intel
+                                - paragraph [ref=e5558]
+                              - separator [ref=e5559]
+                            - generic [ref=e5560]:
+                              - generic [ref=e5561]:
+                                - paragraph [ref=e5566]: domain
+                                - paragraph [ref=e5568]: https://intercoastalmortgage.com
+                                - button [ref=e5964]
+                              - separator [ref=e5572]
+                            - generic [ref=e5573]:
+                              - generic [ref=e5574]:
+                                - paragraph [ref=e5579]: industry
+                                - paragraph [ref=e5581]: Financial Services
+                              - separator [ref=e5582]
+                            - generic [ref=e5583]:
+                              - generic [ref=e5584]:
+                                - paragraph [ref=e5589]: Company Status
+                                - paragraph [ref=e5591]: New
+                              - separator [ref=e5592]
+                            - generic [ref=e5593]:
+                              - generic [ref=e5594]:
+                                - paragraph [ref=e5599]: Company OB Stage
+                                - paragraph [ref=e5601]: Ready For Outbound
+                              - separator [ref=e5602]
+                            - generic [ref=e5603]:
+                              - generic [ref=e5604]:
+                                - paragraph [ref=e5609]: Website
+                                - generic [ref=e5610]:
+                                  - paragraph [ref=e5611]: intercoastalmortgage.com
+                                  - button [ref=e5965]
+                              - separator [ref=e5615]
+                            - generic [ref=e5616]:
+                              - generic [ref=e5617]:
+                                - paragraph [ref=e5622]: LinkedIn
+                                - generic [ref=e5623]:
+                                  - paragraph [ref=e5624]: https://linkedin.com/company/intercoastal-mortgage
+                                  - button [ref=e5966]
+                              - separator [ref=e5628]
+                            - generic [ref=e5629]:
+                              - generic [ref=e5630]:
+                                - paragraph [ref=e5635]: Grade
+                                - paragraph [ref=e5637]: A
+                              - separator [ref=e5638]
+                            - generic [ref=e5639]:
+                              - generic [ref=e5640]:
+                                - paragraph [ref=e5645]: ASM Score
+                                - paragraph [ref=e5647]: "0.8530058994461736"
+                              - separator [ref=e5648]
+                        - generic [ref=e5649]:
+                          - generic [ref=e5650]:
+                            - paragraph [ref=e5655]: Hubspot Contact
+                            - button [ref=e5657]
+                          - generic [ref=e5663]:
+                            - generic [ref=e5664]:
+                              - paragraph [ref=e5669]: Country/Region
+                              - paragraph [ref=e5671]: United States
+                            - separator [ref=e5672]
+                            - generic [ref=e5673]:
+                              - paragraph [ref=e5678]: Email
+                              - paragraph [ref=e5680]: jimfoley@icmtg.com
+                            - separator [ref=e5681]
+                            - generic [ref=e5682]:
+                              - paragraph [ref=e5687]: IP Timezone
+                              - paragraph [ref=e5689]
+                            - separator [ref=e5690]
+                            - generic [ref=e5691]:
+                              - paragraph [ref=e5696]: Record ID
+                              - paragraph [ref=e5698]: "197518588973"
+                            - separator [ref=e5699]
+                            - generic [ref=e5700]:
+                              - paragraph [ref=e5705]: Job Title
+                              - paragraph [ref=e5707]: VP/Chief Business Development Officer
+                            - separator [ref=e5708]
+                            - generic [ref=e5709]:
+                              - paragraph [ref=e5714]: State/Region
+                              - paragraph [ref=e5716]: Massachusetts
+                            - separator [ref=e5717]
+                      - generic [ref=e5719]:
+                        - generic [ref=e5720]:
+                          - generic [ref=e5721]:
+                            - generic [ref=e5722]:
+                              - paragraph [ref=e5726]: Notes
+                              - generic [ref=e5727]:
+                                - paragraph [ref=e5730]: Add note
+                                - button [ref=e5731]
+                              - paragraph [ref=e5735]: (Empty)
+                            - button [ref=e5737]
+                          - generic [ref=e5742]:
+                            - generic [ref=e5743]:
+                              - tab [ref=e5967]: Prospect
+                              - tab [ref=e5968]: Account
+                            - paragraph [ref=e5749]: No notes
+                        - generic [ref=e5750]:
+                          - generic [ref=e5751]:
+                            - generic [ref=e5752]:
+                              - paragraph [ref=e5757]: Activity
+                              - button [ref=e5969]: Configure
+                            - button [ref=e5764]
+                          - generic [ref=e5770]:
+                            - generic [ref=e5771]:
+                              - tab [ref=e5970]:
+                                - generic [ref=e5773]: Prospect
+                              - tab [ref=e5971]:
+                                - generic [ref=e5777]: Account
+                            - generic [ref=e5782]:
+                              - generic [ref=e5783]:
+                                - button [ref=e5972]:
+                                  - generic [ref=e5787]: 0 connect
+                                - button [ref=e5973]:
+                                  - generic [ref=e5792]: 0 unanswered
+                                - button [ref=e5974]:
+                                  - generic [ref=e5796]: 0 replied
+                                - button [ref=e5975]:
+                                  - generic [ref=e5800]: 0 emails
+                              - paragraph [ref=e5801]: No Activity
+                      - generic [ref=e5803]:
+                        - generic [ref=e5805]:
+                          - generic [ref=e5806]:
+                            - paragraph [ref=e5811]: Account Activity
+                            - paragraph [ref=e5812]: (Empty)
+                          - button [ref=e5814]
+                        - generic [ref=e5817]:
+                          - generic [ref=e5818]:
+                            - generic [ref=e5819]:
+                              - paragraph [ref=e5823]: LinkedIn
+                              - button [ref=e5977]: Install Extension
+                              - paragraph [ref=e5829]: (Empty)
+                            - button [ref=e5831]
+                          - generic [ref=e5837]:
+                            - generic [ref=e5838]:
+                              - paragraph [ref=e5841]:
+                                - link [ref=e5979]:
+                                  - /url: https://www.linkedin.com/in/jimmy-foley
+                                  - generic [ref=e5843]: Jim Foley
+                              - paragraph [ref=e5847]: "| United States, United States"
+                            - paragraph [ref=e5848]: About
+                            - generic [ref=e5849]:
+                              - paragraph [ref=e5850]: Jim has been in the mortgage industry since 1985, previously serving in an executive leadership position as a Divisional Vice President for Caliber Home Loans. Jim has been instrumental in creating and executing market penetration strategies designed to take Loan Officers to the next level as well as significant company growth. Responsible for overseeing Caliber's East Division (Maine to Virginia Beach), Jim has produced impressive results with market strategies and growth. Joining Caliber in 2014, the East Region had 5 local offices which has successfully grown to a total of 16 locations (2018 -including satellite offices), under Jim's leadership. Highly motivated, Jim says, "The competition has never scared me; rather feeds my existence" and may be the reason behind his continued success, market presence and ability to recruit Top Producers. <br>Jim has proven leadership skills, the ability to problem solve using a common-sense approach with highly effective communication skills while achieving maximum results.
+                              - paragraph [ref=e5851]: See More
+                        - generic [ref=e5852]:
+                          - generic [ref=e5853]:
+                            - generic [ref=e5854]:
+                              - paragraph [ref=e5859]: Prospect Activity
+                              - paragraph [ref=e5860]: (Empty)
+                            - button [ref=e5862]
+                          - paragraph [ref=e5868]: No Prospect Activity
+      - generic [ref=e3976]:
+        - generic [ref=e3977]:
+          - button [disabled]:
+            - generic:
+              - generic:
+                - paragraph: Mute
+                - paragraph: Default - Anker PowerConf C200 (291a:3369)
+        - button [ref=e3980] [cursor=pointer]
+  - dialog [ref=e5983]:
+    - generic [ref=e5985]:
+      - generic [ref=e5986]:
+        - generic [ref=e5987]:
+          - generic [ref=e5988]: I
+          - generic [ref=e5989]:
+            - paragraph [ref=e5990]: Intercoastal Mortgage
+            - paragraph [ref=e5991]: Account
+        - paragraph [ref=e5993]: Add an Account Note
+        - generic [ref=e5995]:
+          - textbox "Enter your note here..." [ref=e5996]
+          - group
+      - generic [ref=e5998]:
+        - button "Cancel" [ref=e5999] [cursor=pointer]
+        - button "Save" [disabled]

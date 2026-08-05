@@ -38,10 +38,23 @@ for (const cs of manifest.content_scripts ?? []) {
     `content_scripts entry has no "matches"`);
 }
 
-// action popup
-if (manifest.action?.default_popup) {
-  need(fileExists(manifest.action.default_popup),
-    `action.default_popup missing: ${manifest.action.default_popup}`);
+// toolbar action. There is no default_popup any more — clicking the icon opens
+// the side panel (see background.js) — but the action itself must still exist
+// with an icon, or there is nothing to click.
+need(manifest.action && typeof manifest.action === "object",
+  `"action" is required (the toolbar button that opens the side panel)`);
+need(!!manifest.action?.default_icon, "action.default_icon is required");
+
+// side panel
+if (manifest.side_panel) {
+  const path = manifest.side_panel.default_path;
+  need(typeof path === "string" && path, "side_panel.default_path is required");
+  if (path) need(fileExists(path), `side_panel.default_path missing: ${path}`);
+  need((manifest.permissions ?? []).includes("sidePanel"),
+    `"sidePanel" permission is required when a "side_panel" key is present`);
+  // chrome.sidePanel landed in Chrome 114.
+  need(typeof manifest.minimum_chrome_version === "string" && manifest.minimum_chrome_version,
+    "minimum_chrome_version is required (side panel needs Chrome 114+)");
 }
 
 // icons (action + top-level). Each may be a single path string or a

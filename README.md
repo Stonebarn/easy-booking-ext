@@ -44,7 +44,10 @@ booking site live in separate tabs); the service worker drives the toolbar badge
                               chrome.storage.local
                               key: "eb:currentProspect"
                                      │
-                              background.js ──→ toolbar badge (green ✓)
+                       ┌─────────────┴──────────────┐
+                background.js                 sidepanel.js
+                       │                            │
+              toolbar badge (green ✓)      side panel (live, storage.onChanged)
 ```
 
 1. **`content-nooks.js`** (runs on `*.nooks.in`) watches the dialer's React DOM
@@ -72,9 +75,12 @@ booking site live in separate tabs); the service worker drives the toolbar badge
      "Set ✓" as each is applied — so reps can see at a glance it's connected.
 3. **`background.js`** puts a green ✓ **badge** on the toolbar icon while a fresh
    prospect is captured, and clears it once the capture goes stale.
-4. **`popup.html` / `popup.js`** show the currently captured email and timezone
-   (with a friendly `IST · UTC+5:30` line and the prospect's local time), and
-   offer a manual "Fill now" button as a fallback.
+4. **`sidepanel.html` / `sidepanel.js`** are the **side panel** (Chrome 114+),
+   opened by clicking the toolbar icon. It shows the currently captured email and
+   timezone (with a friendly `IST · UTC+5:30` line and the prospect's local
+   time), how long ago the capture happened, and a manual "Fill now" button as a
+   fallback. Unlike the old popup it stays open while you move between tabs and
+   **updates live** as prospects change in the dialer.
 
 ---
 
@@ -96,8 +102,11 @@ booking site live in separate tabs); the service worker drives the toolbar badge
 - A **panel above the booking form** previews the pulled email + timezone and
   shows per-field status ("Filled ✓" / "Set ✓") so you know it's connected.
 - The **toolbar icon** shows a green ✓ while a fresh prospect is captured.
-- Click the icon to see the captured details (email, timezone, age) or to
-  trigger a manual **Fill now**.
+- Click the icon to open the **side panel**, which shows the captured details
+  (email, timezone, capture age) and a manual **Fill now** button. The panel
+  stays open as you switch tabs and refreshes itself the moment a new prospect
+  loads in the dialer — no need to close and re-open it. Drag its inner edge to
+  resize. Requires **Chrome 114+**.
 - The extension **never overwrites** a value a rep has already typed.
 
 ---
@@ -130,18 +139,26 @@ UTC offset derived from that clock are stored and resolved on the scheduler side
 | `FALLBACK_ZONES` | Backup of Default's option list if the live read fails | snapshot of 88 zones |
 | `MAX_AGE_MS` | Ignore captures older than this | `30 * 60 * 1000` (30 min) |
 
+**`sidepanel.js`:**
+
+| Constant | Purpose | Default |
+|---|---|---|
+| `MAX_AGE_MS` | Age at which a capture is shown as stale (keep in sync with `background.js` / `content-scheduler.js`) | `30 * 60 * 1000` (30 min) |
+| `TICK_MS` | How often the "captured Nm ago" line is refreshed | `30 * 1000` (30 s) |
+| `NOTICE_MS` | How long a transient status message ("Fill triggered.") replaces the age line | `4000` |
+
 ---
 
 ## Project structure
 
 ```
 easy-booking-ext/
-├── manifest.json          # MV3 config: hosts, content scripts, action, icons
-├── background.js          # service worker: toolbar badge for fresh captures
+├── manifest.json          # MV3 config: hosts, content scripts, action, side panel, icons
+├── background.js          # service worker: toolbar badge + side-panel-on-click
 ├── content-nooks.js       # captures prospect email + timezone → chrome.storage
 ├── content-scheduler.js   # fills email, selects timezone, shows on-page panel
-├── popup.html             # toolbar popup UI (captured prospect + manual fill)
-├── popup.js               # popup logic + manual "Fill now"
+├── sidepanel.html         # side panel UI (captured prospect + manual fill)
+├── sidepanel.js           # side panel logic: live storage subscription, "Fill now"
 ├── icons/                 # ext_icon.png (toolbar + store icon)
 ├── scripts/
 │   └── validate.mjs       # validates manifest + referenced files (used by CI)
@@ -181,9 +198,10 @@ DOM**, not the static HTML snapshots:
 | Symptom | Likely cause / fix |
 |---|---|
 | Field doesn't fill | Reload both tabs after loading/updating the extension. |
-| "No prospect email captured" in popup | The dialer has no prospect loaded, or the card layout changed — check the `Email` label still exists. |
+| "No prospect captured yet" in the side panel | The dialer has no prospect loaded, or the card layout changed — check the `Email` label still exists. |
+| Clicking the toolbar icon does nothing | The side panel needs **Chrome 114+**. Also reload the extension on `chrome://extensions` — the click-to-open behavior is set on install/startup. |
 | Wrong email captured | Add the unwanted address to `IGNORE_SUBSTRINGS` in `content-nooks.js`. |
-| Timezone not captured | The dialer's "Time Zone" label/format changed — check `TZ_FIELD_RE` / `TIMEZONE_LABELS`. The popup shows what was captured. |
+| Timezone not captured | The dialer's "Time Zone" label/format changed — check `TZ_FIELD_RE` / `TIMEZONE_LABELS`. The side panel shows what was captured. |
 | Wrong timezone selected | A shared abbreviation resolved to the wrong region — adjust `ABBR_HINTS` / `PRIORITY` in `content-scheduler.js`. Console logs the chosen zone. |
 | Timezone shows a raw name like `Asia/Calcutta` | That's correct — it's Default's own value for that zone (= IST / India; the dropdown labels it "India, Sri Lanka Time"). Default just displays the selected value using its IANA name. |
 | Panel or badge not showing | Reload the tab after updating the extension; both appear only for a fresh (<30 min) capture. |
@@ -216,6 +234,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for conventions and the PR checklist.
   booking tab can read it. Nothing is sent to any external server by this
   extension.
 - **`alarms`** — used only to clear the toolbar badge when a capture goes stale.
+- **`sidePanel`** — renders the extension's own UI in Chrome's side panel
+  (clicking the toolbar icon opens it). No page content is read through it.
 - **Host permissions** are limited to `*.nooks.in` and `scheduler.default.com`.
 - The captured email is overwritten as prospects change and is only ever read
   back into the booking form.

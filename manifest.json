@@ -3,7 +3,8 @@
   "name": "Easy Booking — Nooks → Scheduler Autofill",
   "version": "0.2.0",
   "description": "Grabs the current prospect's email and timezone from the Nooks dialer and auto-fills them into the booking form on scheduler.default.com (public links and internal queue/member pages).",
-  "permissions": ["storage", "alarms"],
+  "minimum_chrome_version": "114",
+  "permissions": ["storage", "alarms", "sidePanel"],
   "host_permissions": [
     "https://*.nooks.in/*",
     "https://scheduler.default.com/*"
@@ -25,8 +26,10 @@
       "all_frames": false
     }
   ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "action": {
-    "default_popup": "popup.html",
     "default_title": "Easy Booking",
     "default_icon": "icons/ext_icon.png"
   },

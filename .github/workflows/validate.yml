@@ -19,8 +19,11 @@ jobs:
         run: node scripts/validate.mjs
 
       - name: Check JS syntax
+        # Globbed over git-tracked files so new scripts are never silently
+        # unchecked. Note `node --check` parses .js as CommonJS: keep .js files
+        # free of import/export and put ES modules in .mjs.
         run: |
-          for f in background.js content-nooks.js content-scheduler.js popup.js scripts/validate.mjs; do
+          for f in $(git ls-files '*.js' '*.mjs'); do
             echo "checking $f"
             node --check "$f"
           done
