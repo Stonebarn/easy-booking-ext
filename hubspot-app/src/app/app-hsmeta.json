@@ -1,0 +1,40 @@
+{
+  "uid": "easy_booking_crm_app",
+  "type": "app",
+  "config": {
+    "description": "Internal Wiza SDR tool: HubSpot connection for the Easy Booking Chrome extension. Per-SDR OAuth for reading contact/company/deal context in the extension side panel and syncing Nooks dialer notes to contacts and companies.",
+    "name": "Easy Booking CRM",
+    "distribution": "private",
+    "auth": {
+      "type": "oauth",
+      "redirectUrls": [
+        "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot",
+        "http://localhost:3000"
+      ],
+      "requiredScopes": [
+        "oauth",
+        "crm.objects.contacts.read",
+        "crm.objects.contacts.write",
+        "crm.objects.companies.read",
+        "crm.objects.companies.write",
+        "crm.objects.deals.read",
+        "crm.objects.owners.read"
+      ],
+      "optionalScopes": [],
+      "conditionallyRequiredScopes": []
+    },
+    "permittedUrls": {
+      "fetch": [
+        "https://api.hubapi.com"
+      ],
+      "iframe": [],
+      "img": []
+    },
+    "support": {
+      "supportEmail": "jack.foley@wiza.com",
+      "documentationUrl": "https://github.com/jackfoley-wiza/easy-booking-ext",
+      "supportUrl": "https://github.com/jackfoley-wiza/easy-booking-ext",
+      "supportPhone": "+18005555555"
+    }
+  }
+}

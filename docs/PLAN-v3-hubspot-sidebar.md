@@ -12,7 +12,7 @@ and one-click sync of Nooks call notes into HubSpot on both the contact and comp
 
 | Decision | Choice | Why |
 |---|---|---|
-| OAuth flow | Public HubSpot app + `chrome.identity.launchWebAuthFlow` + **token-exchange backend** | HubSpot does not support PKCE; the client secret must never ship in the extension. A ~50-line Cloudflare Worker (or Supabase edge function) holds the secret and exchanges auth codes / refresh tokens. |
+| OAuth flow | Public HubSpot app + `chrome.identity.launchWebAuthFlow` + **client secret embedded in the extension** (decided 2026-08-05) | HubSpot does not support PKCE, so token exchange needs the secret somewhere. Zero-infrastructure wins for an internal tool: ~8 SDRs, unpacked install, private-distribution app, **private repo**. Conditions: the repo must stay private, and the secret gets rotated if that ever changes (or on any suspected leak). All flows are Ext ↔ HubSpot directly — no backend at all. |
 | App listing | Unlisted public app | Public apps work without marketplace listing; installs are per-user via OAuth, which gives us per-SDR identity (`hubspot_owner_id` on notes). |
 | UI surface | `chrome.sidePanel`, global (not per-tab) | Panel persists while SDR moves between Nooks and scheduler tabs. `openPanelOnActionClick: true`; remove `default_popup`. Chrome 114+ (team is on current Chrome). |
 | Reactive data flow | Keep `chrome.storage.local` as the bus; side panel subscribes via `storage.onChanged` | Matches the existing content-script → storage → consumer pattern; panel document stays alive while open, so no service-worker wake gymnastics for UI updates. |
@@ -62,10 +62,10 @@ Output: a short `docs/nooks-dom-recon.md` with the anchors. Per CONTRIBUTING, no
 
 1. Create the HubSpot public app (classic/legacy style — the new 2025.2+ platform caps unlisted installs; irrelevant for one portal but classic has no cap) in a free developer account; accept the AUP (installs fail without it). Scopes: `crm.objects.contacts.read/write`, `crm.objects.companies.read/write`, `crm.objects.deals.read`, `crm.objects.owners.read`. Engagement reads are historically gated by the contacts scopes; add granular scopes (`crm.objects.notes.read`, `crm.objects.emails.read`, …) only when a MISSING_SCOPES error names them — some don't appear in the scope picker (known HubSpot gap). Do NOT use deprecated `sales-email-read`.
 2. **Spike first (both flagged UNVERIFIED in research):** confirm HubSpot's app settings accept `https://<extension-id>.chromiumapp.org/hubspot` as a redirect URL (meets all documented rules but unconfirmed in the wild; fallback = redirect to a worker-hosted page that `launchWebAuthFlow` intercepts), and smoke-test which engagement scopes are actually needed/selectable.
-3. Stand up the token-exchange worker: `POST /token` (code exchange) and `POST /refresh`, both calling `POST https://api.hubapi.com/oauth/v3/token` (v1 is deprecated). Secret lives only there. **Restrict it** — verify `Origin: chrome-extension://<id>` plus a shared key — or it's an open token-minting oracle for our client ID. At auth time the worker also calls `POST /oauth/v3/token/introspect` (needs the secret) and returns the SDR's email + `hub_id` alongside the tokens.
-4. Extension auth module (`lib/hubspot-auth.mjs`):
-   - `login()` → `chrome.identity.launchWebAuthFlow` → code → worker → `{tokens, user email}`.
-   - `getAccessToken()` → return cached if fresh, else refresh via worker (on-demand is the primary mechanism; single-flight guard); 401 → one refresh-and-retry.
+3. ~~Token-exchange worker~~ **Dropped (2026-08-05): the client secret is embedded in the extension** (`hubspot-config.js`, committed — repo is private). Token exchange and refresh go directly from the extension to `POST https://api.hubapi.com/oauth/v3/token` (v1 is deprecated), form-encoded, via `host_permissions`. Rotate the secret if repo visibility ever changes.
+4. Extension auth module (`hubspot-auth.js`, plain-IIFE style per CI constraint):
+   - `login()` → `chrome.identity.launchWebAuthFlow` → code → direct token exchange → tokens; then `POST /oauth/v3/token/introspect` for the SDR's email/`hub_id`.
+   - `getAccessToken()` → return cached if fresh, else direct refresh (on-demand is the primary mechanism; single-flight guard); 401 → one refresh-and-retry.
    - `logout()` → clear tokens (optionally revoke via `DELETE /oauth/v1/refresh-tokens/{token}`).
    - Map SDR email → `hubspot_owner_id` once via `GET /crm/v3/owners/?email=` (owner ID ≠ user ID) and store it for note attribution.
 5. Panel UI: signed-out state → "Connect HubSpot" button; signed-in state shows SDR name + disconnect.
@@ -116,6 +116,6 @@ On prospect change (email in `eb:currentProspect`), the panel fetches and render
 - **Shared rate limits** — the CRM Search pool (5 req/s, portal-wide) is the tight one; every prospect change starts with a search, multiplied across 8 SDRs dialing in parallel. General pool is 110 req/10s (~10 requests/prospect uncached). Caching in Phase 3 is not optional.
 - **Redirect URI unverified** — `chromiumapp.org` URLs meet HubSpot's documented rules but no confirmed precedent was found; spike it first in Phase 2 (fallback pattern exists).
 - **Engagement scope murkiness** — some granular engagement scopes reportedly don't show in HubSpot's scope picker; plan scope selection empirically, driven by MISSING_SCOPES errors.
-- **Backend dependency** — the token worker is new infra (tiny, but needs a home + deploy story). Cloudflare Workers free tier is sufficient. It must be origin-restricted or it's a token oracle.
+- **Embedded client secret** — acceptable only while the repo is private and the app is private-distribution. If the repo goes public, is forked outside Wiza, or the extension is ever Web-Store-published: rotate the secret and move exchange behind a token worker (a ~100-line Cloudflare Worker: `/token` + `/refresh` endpoints, origin-locked to the extension ID).
 - **HubSpot app approval** — none needed for unlisted classic apps, but each SDR must have portal permissions covering the requested scopes or their individual install fails at consent time.
 - **Convention pressure** — the no-build rule is stated three times across the docs; a framework sidebar would need explicit buy-in. Native ES modules in `lib/` keep us inside the convention.

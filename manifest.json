@@ -3,25 +3,40 @@
   "name": "Easy Booking — Nooks → Scheduler Autofill",
   "version": "0.2.0",
   "description": "Grabs the current prospect's email and timezone from the Nooks dialer and auto-fills them into the booking form on scheduler.default.com (public links and internal queue/member pages).",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxQhL4tkvI7SI+aU2SAb2QfscnW2+wHp2RUFOKH4vE2AcsAmFRv27hJXk0GWm8JZnZhp2/vu8D1xg1WBEbF1O+tfAX1K4vY0GRz96fQSZkIAqhzKr9mZJ2m4Ktz62KJdJ1A45EMpDmtTmpv1+zakYANybsmeYwEBr7GO5YpWeo5yLdKl6uruK6ag/VvMEvqbIg4ZDe3JqmoUBHFm+0gmnUKKS+wG6/HxMULTDUgCYt6SERLZ6V36Ym8FFXogieB2L7Yyb0mv2mwkDwpOKqORZfIDoF9eohgIjI/C71NFVS5r1EnBT47qTHRxR3rt849XD/MiitHe8xZHAykkb2ZbVCwIDAQAB",
   "minimum_chrome_version": "114",
-  "permissions": ["storage", "alarms", "sidePanel"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "sidePanel",
+    "identity"
+  ],
   "host_permissions": [
     "https://*.nooks.in/*",
-    "https://scheduler.default.com/*"
+    "https://scheduler.default.com/*",
+    "https://api.hubapi.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://*.nooks.in/*"],
-      "js": ["content-nooks.js"],
+      "matches": [
+        "https://*.nooks.in/*"
+      ],
+      "js": [
+        "content-nooks.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["https://scheduler.default.com/*"],
-      "js": ["content-scheduler.js"],
+      "matches": [
+        "https://scheduler.default.com/*"
+      ],
+      "js": [
+        "content-scheduler.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }

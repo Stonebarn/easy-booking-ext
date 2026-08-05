@@ -206,6 +206,50 @@
         border-top: 1px solid var(--line);
         margin: 16px 0;
       }
+
+      /* HubSpot connection — live, so a solid border rather than the dashed
+         "coming soon" treatment of the sections below it. */
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        padding: 10px 12px;
+      }
+      .card .hint { font-size: 12px; color: var(--muted); margin: 0; }
+      .pill.off {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+      .pill.warn { background: transparent; color: var(--amber-fg); border: 1px solid currentColor; }
+      .account {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .account .who { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+      /* A text-button, so "Disconnect" never competes with a primary action. */
+      .linkish {
+        margin: 0;
+        width: auto;
+        padding: 0;
+        background: none;
+        border: 0;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-decoration: underline;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      .linkish:disabled { background: none; color: var(--disabled-fg); cursor: default; }
+      .error {
+        font-size: 12px;
+        color: var(--danger-fg);
+        margin: 10px 0 0;
+        overflow-wrap: anywhere;
+      }
     </style>
   </head>
   <body>
@@ -244,18 +288,25 @@
 
       <hr class="divider" />
 
-      <div id="hs-placeholders">
-        <section>
-          <div class="section-head">
-            <span class="section-title">HubSpot</span>
-            <span class="pill soon">Coming soon</span>
+      <section id="hs-section">
+        <div class="section-head">
+          <span class="section-title">HubSpot</span>
+          <span class="pill off" id="hs-pill">Not connected</span>
+        </div>
+        <div class="card">
+          <p class="hint" id="hs-hint">
+            Connect your HubSpot account to see CRM context here.
+          </p>
+          <div class="account" id="hs-account" style="display: none">
+            <span class="who" id="hs-email"></span>
+            <button type="button" class="linkish" id="hs-disconnect">Disconnect</button>
           </div>
-          <div class="placeholder">
-            <p class="hint">Connect your HubSpot account to see CRM context here.</p>
-            <button id="hs-connect" disabled>Connect HubSpot</button>
-          </div>
-        </section>
+          <button type="button" id="hs-connect">Connect HubSpot</button>
+          <p class="error" id="hs-error" style="display: none"></p>
+        </div>
+      </section>
 
+      <div id="hs-placeholders">
         <section>
           <div class="section-head">
             <span class="section-title">Contact</span>
@@ -308,6 +359,10 @@
       </div>
     </main>
 
+    <!-- Load order is the dependency graph: config, then auth (reads config),
+         then the panel (reads both). No modules — see the note in each file. -->
+    <script src="hubspot-config.js"></script>
+    <script src="hubspot-auth.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>

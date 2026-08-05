@@ -17,11 +17,29 @@ adheres to [Semantic Versioning](https://semver.org/).
   interaction, and ticks every 30s so the "captured Nm ago" line stays honest.
   The layout is fluid (works down to Chrome's ~320px floor) and follows the OS
   light/dark preference.
-- Placeholder sections in the panel for the v3 work still to land — HubSpot
-  connect, Contact, Company, Deals, Recent activity, Notes. Structure only; no
-  HubSpot code, credentials or network requests exist yet.
-- `manifest.json`: `sidePanel` permission, `side_panel.default_path`, and
-  `minimum_chrome_version: "114"` (the side panel API's floor).
+- Placeholder sections in the panel for the v3 work still to land — Contact,
+  Company, Deals, Recent activity, Notes. Structure only.
+- **Per-SDR HubSpot connection** (`hubspot-config.js` / `hubspot-auth.js` + the
+  panel's HubSpot section): each rep connects their own HubSpot login via
+  `chrome.identity.launchWebAuthFlow`, so future notes and activity are
+  attributed to them (`hubspot_owner_id`) rather than to a shared account. The
+  panel shows *Not connected → Connecting… → Connected as {email}* with a
+  Disconnect link, and surfaces failures inline.
+  - No backend: token exchange and refresh go straight to HubSpot's
+    `oauth/v3/token`, with the client secret embedded in `hubspot-config.js`
+    (deliberate — see the decision block in that file; it holds only while this
+    repo stays private).
+  - Refresh token in `chrome.storage.local` (survives restarts), access token in
+    `chrome.storage.session`, refreshed on demand 5 min before expiry behind a
+    single-flight guard, plus one refresh-and-retry on a 401.
+  - Identity resolution is best-effort *after* the refresh token is persisted —
+    a failed introspect or owner lookup can no longer strand a rep who is
+    connected in HubSpot but signed out here.
+  - `CLIENT_ID`/`CLIENT_SECRET` ship as `FILL_ME_…` placeholders; until they are
+    filled the section reads **Setup needed** and Connect stays disabled.
+- `manifest.json`: `sidePanel` permission, `side_panel.default_path`,
+  `minimum_chrome_version: "114"` (the side panel API's floor), the `identity`
+  permission, and `https://api.hubapi.com/*` host permission.
 - `scripts/validate.mjs`: validates `side_panel.default_path` exists, that the
   `sidePanel` permission accompanies a `side_panel` key, that
   `minimum_chrome_version` is set, and that the toolbar `action` still has an
@@ -34,6 +52,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 - CI (`.github/workflows/validate.yml`): the JS syntax check now globs
   git-tracked `*.js`/`*.mjs` instead of a hard-coded file list, so new scripts
   can't slip through unchecked.
+- README **Privacy & permissions**: the claim that "nothing is sent to any
+  external server" was true until this phase and is not any more. It now states
+  exactly what goes to `api.hubapi.com`, that no Wiza server is involved, that
+  the captured prospect email is still never transmitted, and where the tokens
+  are stored.
 
 ### Removed
 - **`popup.html` / `popup.js`** and `action.default_popup` — replaced by the

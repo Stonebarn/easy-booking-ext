@@ -1,5 +1,9 @@
 // sidepanel.js — the side panel replaces the old toolbar popup.
 //
+// Two independent concerns live here, each with its own state object and render
+// function: the captured-prospect card (ported from popup.js) and the HubSpot
+// connection (Phase 2). They share nothing but the document.
+//
 // Differences from popup.js that matter: the panel document stays open while the
 // rep moves between the Nooks and scheduler tabs, so it cannot read storage once
 // and be done. It reads storage at load (the source of truth — anything that
@@ -8,8 +12,8 @@
 // age line stays honest without a user action.
 //
 // Plain script (no import/export) on purpose: CI syntax-checks .js with
-// `node --check`, which parses them as CommonJS. Shared ES modules land in a
-// later phase as .mjs.
+// `node --check`, which parses them as CommonJS. hubspot-config.js and
+// hubspot-auth.js load before this file and hand it `window.EB`.
 
 (() => {
   "use strict";
@@ -130,14 +134,13 @@
   // 3) Keep the age line (and the stale flip) honest without any interaction.
   setInterval(() => render(state), TICK_MS);
 
+  // 4) Manual fill: nudge storage so the scheduler content script re-applies.
   fillBtn.addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !SCHEDULER_URL_RE.test(tab.url || "")) {
       setNotice("Open the booking tab first, then click again.");
       return;
     }
-    // Re-trigger the scheduler content script by nudging storage (its onChanged
-    // listener will re-attempt the fill).
     const res = await chrome.storage.local.get(STORAGE_KEY);
     const payload = res[STORAGE_KEY];
     if (payload) {
@@ -149,4 +152,137 @@
       setNotice("Fill triggered.");
     }
   });
+
+  // ==========================================================================
+  // HubSpot connection (Phase 2)
+  //
+  // States: "setup-needed" (client id/secret placeholders still in
+  // hubspot-config.js) → "signed-out" → "connecting" → "connected". `error` is
+  // an overlay on whichever state we're in, not a state of its own, so a failed
+  // attempt leaves the SDR looking at a usable "Connect" button.
+  // ==========================================================================
+  const auth = self.EB && self.EB.hubspotAuth;
+
+  const hsPillEl = document.getElementById("hs-pill");
+  const hsHintEl = document.getElementById("hs-hint");
+  const hsAccountEl = document.getElementById("hs-account");
+  const hsEmailEl = document.getElementById("hs-email");
+  const hsConnectBtn = document.getElementById("hs-connect");
+  const hsDisconnectBtn = document.getElementById("hs-disconnect");
+  const hsErrorEl = document.getElementById("hs-error");
+
+  const hs = { status: "signed-out", email: null, error: null };
+
+  const HS_PILL_TEXT = {
+    "setup-needed": "Setup needed",
+    "signed-out": "Not connected",
+    connecting: "Connecting…",
+    connected: "Connected",
+  };
+
+  function renderHubSpot() {
+    const connected = hs.status === "connected";
+    const connecting = hs.status === "connecting";
+    const setupNeeded = hs.status === "setup-needed";
+
+    hsPillEl.textContent = HS_PILL_TEXT[hs.status] || HS_PILL_TEXT["signed-out"];
+    // Green (the default .pill) only when actually connected.
+    hsPillEl.className = "pill" + (connected ? "" : setupNeeded ? " warn" : " off");
+
+    hsHintEl.style.display = connected ? "none" : "";
+    hsHintEl.textContent = setupNeeded
+      ? "Add CLIENT_ID and CLIENT_SECRET to hubspot-config.js, then reload the extension."
+      : "Connect your HubSpot account to see CRM context here.";
+
+    hsAccountEl.style.display = connected ? "" : "none";
+    // Identity comes from a best-effort introspect call, so a connection
+    // without an email is possible and must still read sensibly.
+    hsEmailEl.textContent = hs.email || "Connected to HubSpot";
+
+    hsConnectBtn.style.display = connected ? "none" : "";
+    hsConnectBtn.disabled = connecting || setupNeeded;
+    hsConnectBtn.textContent = connecting ? "Connecting…" : "Connect HubSpot";
+    hsDisconnectBtn.disabled = connecting;
+
+    hsErrorEl.style.display = hs.error ? "" : "none";
+    hsErrorEl.textContent = hs.error || "";
+  }
+
+  function setHubSpot(patch) {
+    Object.assign(hs, patch);
+    renderHubSpot();
+  }
+
+  function statusFor(authState) {
+    if (!authState.configured) return "setup-needed";
+    return authState.connected ? "connected" : "signed-out";
+  }
+
+  function hsErrorText(e) {
+    const code = e && e.code;
+    if (code === "CANCELLED") return "Connection cancelled.";
+    if (code === "NOT_CONNECTED") return "HubSpot connection expired — connect again.";
+    if (code === "STATE_MISMATCH") return "Connection failed a security check. Try again.";
+    if (code === "CONFIG_MISSING") return "HubSpot client ID/secret missing in hubspot-config.js.";
+    return (e && e.message) || "Something went wrong connecting to HubSpot.";
+  }
+
+  async function refreshHubSpotState() {
+    if (!auth) {
+      setHubSpot({ status: "setup-needed", error: "hubspot-auth.js failed to load." });
+      return;
+    }
+    try {
+      const authState = await auth.getAuthState();
+      setHubSpot({
+        status: statusFor(authState),
+        email: authState.userEmail,
+        error: null,
+      });
+    } catch (e) {
+      setHubSpot({ error: hsErrorText(e) });
+    }
+  }
+
+  if (auth) {
+    hsConnectBtn.addEventListener("click", async () => {
+      setHubSpot({ status: "connecting", error: null });
+      try {
+        const authState = await auth.login();
+        setHubSpot({
+          status: statusFor(authState),
+          email: authState.userEmail,
+          error: null,
+        });
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] HubSpot connected as", authState.userEmail || "(email unknown)");
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] HubSpot connect failed:", (e && e.code) || "", e && e.message);
+        // Re-read rather than assuming signed-out: login() persists the refresh
+        // token before the identity lookups, so a late failure can still leave
+        // us genuinely connected.
+        await refreshHubSpotState();
+        setHubSpot({ error: hsErrorText(e) });
+      }
+    });
+
+    hsDisconnectBtn.addEventListener("click", async () => {
+      try {
+        await auth.logout();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] HubSpot disconnect failed:", e && e.message);
+      }
+      setHubSpot({ status: "signed-out", email: null, error: null });
+    });
+
+    // A second window has its own panel document; keep them in agreement.
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes[auth.AUTH_KEY]) refreshHubSpotState();
+    });
+  }
+
+  renderHubSpot();
+  refreshHubSpotState();
 })();

@@ -109,6 +109,30 @@ booking site live in separate tabs); the service worker drives the toolbar badge
   resize. Requires **Chrome 114+**.
 - The extension **never overwrites** a value a rep has already typed.
 
+### HubSpot connection
+
+The side panel's **HubSpot** section connects your own HubSpot login, so notes
+and activity are attributed to you rather than to a shared service account.
+
+1. Open the side panel → **HubSpot** → **Connect HubSpot**.
+2. A HubSpot window opens; approve the requested permissions for the Wiza
+   portal. (Your HubSpot user needs permission for those scopes, or the install
+   fails at the consent screen.)
+3. The section flips to **Connected** and shows your HubSpot email. Use
+   **Disconnect** to remove the stored tokens.
+
+Each rep connects once. The connection survives browser restarts — the access
+token is refreshed automatically in the background as it expires. Nothing is
+read from or written to HubSpot yet beyond identifying you; the Contact,
+Company, Deals, Activity and Notes sections land in later phases.
+
+**First-time setup (once per repo clone, by whoever maintains this):**
+`hubspot-config.js` ships with `CLIENT_ID: "FILL_ME_CLIENT_ID"` and
+`CLIENT_SECRET: "FILL_ME_CLIENT_SECRET"`. Replace both with the values from the
+HubSpot app's **Auth** tab (developer account → Apps → *Easy Booking CRM* →
+Auth), then reload the extension. Until then the panel shows **Setup needed**
+and the Connect button stays disabled.
+
 ---
 
 ## Configuration
@@ -147,6 +171,23 @@ UTC offset derived from that clock are stored and resolved on the scheduler side
 | `TICK_MS` | How often the "captured Nm ago" line is refreshed | `30 * 1000` (30 s) |
 | `NOTICE_MS` | How long a transient status message ("Fill triggered.") replaces the age line | `4000` |
 
+**`hubspot-config.js` → `EB.hubspotConfig`:**
+
+| Key | Purpose | Default |
+|---|---|---|
+| `CLIENT_ID` | HubSpot app client ID — **paste from the app's Auth tab** | `"FILL_ME_CLIENT_ID"` |
+| `CLIENT_SECRET` | HubSpot app client secret — **paste from the app's Auth tab** | `"FILL_ME_CLIENT_SECRET"` |
+| `REDIRECT_URL` | Must exactly match a redirect URL registered on that Auth tab | `https://<ext-id>.chromiumapp.org/hubspot` |
+| `SCOPES` | Scopes requested at install; must include every scope marked *required* on the app (including `oauth`) | `oauth` + contacts/companies read-write, deals read, owners read |
+| `AUTHORIZE_URL` / `TOKEN_URL` / `INTROSPECT_URL` | HubSpot OAuth endpoints (v3 — v1 is deprecated) | HubSpot defaults |
+| `API_BASE` | CRM API host; must stay covered by `host_permissions` | `https://api.hubapi.com` |
+| `PORTAL_ID` | Wiza portal, for record deep links | `40063500` |
+
+> The client secret is **embedded in the extension** by explicit decision — see
+> the comment block at the top of `hubspot-config.js`. This is only acceptable
+> while the repo stays **private** and the app stays private-distribution;
+> rotate the secret if either changes.
+
 ---
 
 ## Project structure
@@ -159,6 +200,8 @@ easy-booking-ext/
 ├── content-scheduler.js   # fills email, selects timezone, shows on-page panel
 ├── sidepanel.html         # side panel UI (captured prospect + manual fill)
 ├── sidepanel.js           # side panel logic: live storage subscription, "Fill now"
+├── hubspot-config.js      # HubSpot OAuth app config (client id/secret, scopes)
+├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
 ├── icons/                 # ext_icon.png (toolbar + store icon)
 ├── scripts/
 │   └── validate.mjs       # validates manifest + referenced files (used by CI)
@@ -231,11 +274,23 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for conventions and the PR checklist.
 ## Privacy & permissions
 
 - **`storage`** — caches the most recently seen prospect email locally so the
-  booking tab can read it. Nothing is sent to any external server by this
-  extension.
+  booking tab can read it, plus your HubSpot tokens (see below).
 - **`alarms`** — used only to clear the toolbar badge when a capture goes stale.
 - **`sidePanel`** — renders the extension's own UI in Chrome's side panel
   (clicking the toolbar icon opens it). No page content is read through it.
-- **Host permissions** are limited to `*.nooks.in` and `scheduler.default.com`.
+- **`identity`** — opens the HubSpot consent window when you click **Connect
+  HubSpot**, and nothing else.
+- **Host permissions** are limited to `*.nooks.in`, `scheduler.default.com` and
+  `api.hubapi.com`.
+- **What leaves your browser, and where it goes.** Only HubSpot is contacted,
+  and only once you connect: the OAuth authorization code, this app's client
+  credentials, and your access/refresh tokens go to `api.hubapi.com`, which also
+  tells us your HubSpot email and owner ID. There is **no Wiza server** in the
+  middle — nothing is sent anywhere else. The captured prospect email is still
+  never transmitted; it only moves from the dialer tab to the booking tab
+  through local storage.
+- Your HubSpot **refresh token** lives in `chrome.storage.local` and the
+  short-lived access token in `chrome.storage.session` (discarded when Chrome
+  closes). **Disconnect** deletes both.
 - The captured email is overwritten as prospects change and is only ever read
   back into the booking form.
