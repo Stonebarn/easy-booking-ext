@@ -7,6 +7,35 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Wiza product data in the side panel** — a new **Wiza** section answers "do
+  they already use us?" without leaving the dialer. **User** (from the contact):
+  an Active/Closed status pill, sign-up date, plan status · credits · frequency,
+  credits used in the last 30 days, last usage, Wiza ID, and **Open in Wiza
+  Admin** / **Usage logs** links when the record carries them. **Account** (from
+  the company): account ID, subscribed accounts, API credit balance, credits used
+  in 30 days, last credit purchase, ICP, industry, use case and a **Target
+  account** badge.
+  - Built for absence, since most prospects have never signed up: no user data
+    reads *"Not a Wiza user yet"*, and individual empty properties are dropped
+    rather than rendered as blank rows. Dates are humanized and numbers get
+    thousands separators.
+  - URL properties are only turned into links after a scheme check, so a
+    property containing `javascript:` can never become a clickable link.
+- **Activity deep-dive** — the flat top-10 list is now a tabbed view: **All ·
+  Calls · Emails · Meetings · Notes · Tasks**, each tab labelled with its count,
+  holding up to **25 rows per type** (was 10 across all types). Tabs with nothing
+  logged are dimmed and inert; the list scrolls inside a fixed ceiling (~40% of
+  the panel, min 200px) so the section footprint stays small; **All** merges every
+  type newest-first; the chosen tab persists as you move between prospects. Tabs
+  are proper `tablist`/`tab` semantics with arrow/Home/End keyboard support.
+  - **Every row is attributed** — "by Jenny Choi" — resolved through the session
+    owner cache from `hubspot_owner_id`, falling back to `hs_created_by` (looked
+    up by user ID) for engagements logged without an owner. An unresolvable
+    owner renders with no attribution; a raw ID is never shown.
+  - Richer per-type detail: direction arrow + disposition + duration as `mm:ss`
+    on calls, direction + subject on emails, title + outcome on meetings, the
+    first ~120 characters of the body on notes, subject + status on tasks. Every
+    row shows a relative timestamp with the exact date on hover.
 - **Live HubSpot CRM context in the side panel** — the Contact, Company, Deals
   and Recent activity placeholders are now real. Loading a prospect in the dialer
   resolves them in HubSpot and renders: contact name (linked to the record) with
@@ -109,6 +138,15 @@ adheres to [Semantic Versioning](https://semver.org/).
   icon.
 
 ### Changed
+- **The Contact and Company sections are now one compact identity block**: name
+  (linked) with a lifecycle-stage pill, then title *@* company (linked), then
+  owner · phone · lead status — with the company's domain, industry and headcount
+  moved to the link's hover text. Three dense lines instead of two cards; the
+  vertical space goes to the Wiza and Activity sections.
+- `hubspot-data.js` now versions its per-prospect cache (`CACHE_VERSION`), so a
+  bundle cached before an upgrade can't be rendered by code expecting the new
+  fields. `ACTIVITY_LIMIT` (10, merged) is replaced by `ACTIVITY_PER_TYPE_LIMIT`
+  (25, per type). Call durations render as `4:07` rather than `4m 7s`.
 - `background.js`: sets `sidePanel.setPanelBehavior({ openPanelOnActionClick:
   true })` on install and startup so the toolbar icon opens the panel. Badge and
   alarm behavior is unchanged.

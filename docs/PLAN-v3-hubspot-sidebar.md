@@ -97,8 +97,19 @@ On prospect change (email in `eb:currentProspect`), the panel fetches and render
 
 **Exit criteria:** an SDR finishes a call, clicks Sync, and the note appears on both the contact and company timelines in HubSpot attributed to them.
 
-## Phase 5 — Hardening & rollout
+## Phase 6 — Wiza product data + activity deep-dive (added 2026-08-05, runs before Phase 5)
 
+1. **Collapse Contact + Company** into one compact identity block (name · title @ company, record links, owner) freeing vertical space.
+2. **New "Wiza" section** from the portal's product-data properties:
+   - User (contact props): `wiza_status` pill, `wiza_id`, `signed_up_at`, `plan_status`, `plan_credits`, `plan_frequency`, `number_of_credits_used_in_last_30_days`, `date_of_last_wiza_usage`, links from `wiza_admin_url` + `wiza_usage_logs`.
+   - Account (company props): `api_wiza_account_id` / `primary_account_id_associated_wiza`, `number_of_associated_subscribed_accounts`, `api_credit_balance`, `number_of_credits_used_in_last_30_days`, `last_api_credit_purchase`, `account_icp`, `hs_is_target_account`.
+   - Null-safe: non-user prospects show "Not a Wiza user yet".
+3. **Activity deep-dive**: tabs (All | Calls | Emails | Meetings | Notes | Tasks) with per-type counts; every row attributed to its owner ("by Jenny Choi" — `hubspot_owner_id` on each engagement resolved via the owner cache); richer per-type detail (duration/disposition/direction, outcome, task status, note preview); up to 25 per type in a fixed-height scrollable list so the section stays visually small.
+
+## Phase 5 — Hardening, settings UI & rollout (runs LAST, after 4 + 6 merge)
+
+- **Settings popover (added 2026-08-05)**: gear icon in the panel header (top right, next to Refresh); clicking opens a small popover containing the Refresh action and the HubSpot connection controls (connect / connected-as / disconnect). The dedicated HubSpot section leaves the panel body — connection state shows as a subtle header indicator instead.
+- **Full extension audit (added 2026-08-05)**: independent review pass over the merged tree (correctness, security — XSS/token handling/origin assumptions, rate-limit behavior, scraper resilience) by reviewer agents that did not write the code, before rollout.
 - Error surfaces in-panel (token expired, rate limited → retry-after, contact not found).
 - **Tooling debt**: extend `scripts/validate.mjs` to validate `side_panel.default_path`, new permissions, and `minimum_chrome_version`; switch the CI syntax-check loop to a `git ls-files` glob; settle the ESM check (`.mjs` naming or `--input-type=module`).
 - **README rewrite is a deliverable, not polish**: the Privacy & permissions section currently states "Nothing is sent to any external server" — false once HubSpot egress, OAuth tokens, and new host permissions land. The architecture diagram and config tables also change. This is the artifact reps (and whoever approves the rollout) will read.

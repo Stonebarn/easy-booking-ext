@@ -54,7 +54,7 @@ booking site live in separate tabs); the service worker drives the toolbar badge
                                                     │
                                             hubspot-data.js
                                                     │
-                                      api.hubapi.com (contact, company,
+                                      api.hubapi.com (identity, Wiza,
                                        deals, activity — cached 5 min)
 ```
 
@@ -96,8 +96,9 @@ when the dialer's HubSpot panes finish loading) lives under its own key.
    **updates live** as prospects change in the dialer. It also renders the live
    CRM context — see [CRM sidebar](#crm-sidebar).
 5. **`hubspot-data.js`** does the CRM reads for the panel: it resolves the
-   prospect to a HubSpot contact and company, then loads deals and recent
-   activity. Resolution prefers the **record IDs scraped from the dialer's
+   prospect to a HubSpot contact and company (including the Wiza product
+   properties on both), then loads deals and up to 25 engagements per type, each
+   attributed to the rep who logged it. Resolution prefers the **record IDs scraped from the dialer's
    HubSpot panes** (a direct `GET` by ID) and only falls back to CRM Search —
    which is capped at **5 requests/second for the entire portal**, shared by
    every rep — when there is no ID to use. Results are cached per email for 5
@@ -161,15 +162,16 @@ client ID that *is* checked in is a public identifier, not a credential.
 ### CRM sidebar
 
 With HubSpot connected, loading a prospect in the dialer fills four sections in
-the side panel. Everything is read-only, and every record name links out to
-HubSpot (opens in a new tab).
+the side panel — who they are, whether they use Wiza, their deals, and every
+call/email/meeting/note/task on the record. Everything is read-only, and every
+record name links out to HubSpot (opens in a new tab).
 
 | Section | What it shows |
 |---|---|
-| **Contact** | Name (linked), lifecycle-stage pill, lead status, job title, phone, owner, and how long ago the last activity was logged. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"*. |
-| **Company** | Name (linked), domain, industry, employee count, owner. Matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. |
+| **Contact & company** | One compact identity block, three lines: the contact's name (linked to the record) with a lifecycle-stage pill; their job title *@* their company (also linked); then owner, phone and lead status. Hover the company name for its domain, industry and headcount. The company is matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"*; a company matched with no contact record says *"No contact record"*. |
+| **Wiza** | Whether this prospect is a Wiza user, and what their account looks like. **User**: an Active/Closed status pill, sign-up date, plan (status · credits · frequency), credits used in the last 30 days, when they last used Wiza, their Wiza ID, and **Open in Wiza Admin** / **Usage logs** links when the record has them. **Account** (from the company): account ID, subscribed accounts, API credit balance, credits used in 30 days, last credit purchase, ICP, industry, use case, and a **Target account** badge. Most prospects aren't users — those read *"Not a Wiza user yet"*, and any single value that isn't set is left out rather than shown blank. |
 | **Deals** | One row per associated deal — name (linked), human-readable stage, amount, close date, owner. Open deals sort first; closed-won gets a green pill. Empty: *"No open deals"*. |
-| **Recent activity** | The 10 most recent calls, emails, meetings, notes and tasks merged into one list, newest first, with a relative timestamp, a one-line summary and ↑/↓ direction arrows on calls and emails. |
+| **Activity** | A tab per engagement type — **All · Calls · Emails · Meetings · Notes · Tasks** — each with its count, and up to 25 rows per type. Types with nothing logged are dimmed and not clickable. Every row is attributed to whoever logged it ("by Jenny Choi") and carries a relative timestamp with the exact date on hover, plus per-type detail: direction arrow, disposition and duration (`4:07`) on calls; direction and subject on emails; title and outcome on meetings; the first line of the body on notes; subject and status on tasks. **All** merges every type newest-first. The list scrolls inside a fixed height (about 40% of the panel) so the section stays small no matter how much history there is; your chosen tab sticks as you move between prospects. |
 
 - Sections show **loading placeholders** while a lookup is in flight, and each
   one reports its own failure — a rate-limited Deals fetch doesn't blank the
@@ -235,13 +237,15 @@ email does not disturb the booking tab.
 | Key | Purpose | Default |
 |---|---|---|
 | `CACHE_TTL_MS` | How long a resolved prospect bundle is reused before refetching (**Refresh** ignores it) | `5 * 60 * 1000` (5 min) |
-| `ACTIVITY_LIMIT` | Activity rows kept after merging all five engagement types | `10` |
+| `ACTIVITY_PER_TYPE_LIMIT` | Rows kept **per engagement type** (newest first) — what one Activity tab can hold | `25` |
 | `BATCH_MAX` | Objects per `batch/read` and IDs per association read (HubSpot's own ceiling) | `100` |
 | `RETRY_AFTER_FALLBACK_S` | Wait used when a `429` carries no usable `Retry-After` header | `10` |
-| `CONTACT_PROPERTIES` | Contact properties requested | firstname, lastname, email, jobtitle, phone, lifecyclestage, hs_lead_status, hubspot_owner_id, notes_last_updated |
-| `COMPANY_PROPERTIES` | Company properties requested | name, domain, industry, numberofemployees, hubspot_owner_id |
+| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `6` |
+| `NOTE_PREVIEW_CHARS` | Characters of a note body kept for its one-line activity row | `120` |
+| `CONTACT_PROPERTIES` | Contact properties requested | firstname, lastname, email, jobtitle, phone, lifecyclestage, hs_lead_status, hubspot_owner_id, notes_last_updated, **wiza_status, wiza_id, signed_up_at, plan_status, plan_credits, plan_frequency, number_of_credits_used_in_last_30_days, date_of_last_wiza_usage, wiza_admin_url, wiza_usage_logs, wiza_email_confirmed** |
+| `COMPANY_PROPERTIES` | Company properties requested | name, domain, industry, numberofemployees, hubspot_owner_id, **api_wiza_account_id, primary_account_id_associated_wiza, number_of_associated_accounts, number_of_associated_subscribed_accounts, api_credit_balance, number_of_credits_used_in_last_30_days, last_api_credit_purchase, times_api_credits_purchased, account_icp, industry_wiza, hs_is_target_account, use_case** |
 | `DEAL_PROPERTIES` | Deal properties requested | dealname, dealstage, pipeline, amount, closedate, hubspot_owner_id |
-| `ACTIVITY_TYPES` | The five engagement types, their display labels and per-type properties | calls, emails, meetings, notes, tasks |
+| `ACTIVITY_TYPES` | The five engagement types, their display + tab labels and per-type properties (every type also asks for `hubspot_owner_id` and `hs_created_by`, which is how rows get attributed) | calls, emails, meetings, notes, tasks |
 | `FREE_EMAIL_DOMAINS` | Domains the company-by-domain fallback refuses to search on (a `gmail.com` search matches something irrelevant) | gmail, outlook, yahoo, … |
 | `CURRENCY` / `LOCALE` | Currency and locale used to format deal amounts and dates | `USD` / `en-US` |
 
@@ -276,7 +280,7 @@ easy-booking-ext/
 ├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", CRM rendering
 ├── hubspot-config.js      # HubSpot OAuth app config (client id, scopes — no secret)
 ├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
-├── hubspot-data.js        # CRM reads: contact/company resolution, deals, activity, caching
+├── hubspot-data.js        # CRM reads: contact/company resolution, Wiza data, deals, activity, caching
 ├── lovable/
 │   └── hubspot-token-function.ts  # hosted token exchange (holds the secret; deployed to Lovable Cloud)
 ├── docs/
@@ -335,7 +339,10 @@ DOM**, not the static HTML snapshots:
 | CRM data looks out of date | Click **Refresh** in the panel header — data is cached for 5 minutes per prospect. |
 | "HubSpot rate limit — retrying in Xs" | Expected under heavy parallel dialing: HubSpot's search limit is 5 req/s for the whole portal. It retries itself. If it's constant, the dialer's HubSpot panes probably aren't rendering the Record ID rows, so every lookup is falling back to search — check `TESTID_ANCHORS` / `CONTEXT_LABELS.RECORD_ID`. |
 | Deal stages show as raw IDs like `appointmentscheduled` | The one-off `GET /crm/v3/pipelines/deals` call failed (usually a missing `crm.objects.deals.read` scope). Reconnect HubSpot; the console logs the failure. |
-| Company section empty but the contact has one | No company association on the contact, and the email domain didn't match a company's `domain` property (free-mail domains are deliberately not searched). |
+| Identity block shows a name but no company | No company association on the contact, and the email domain didn't match a company's `domain` property (free-mail domains are deliberately not searched). |
+| Wiza section says "Not a Wiza user yet" for someone you know signed up | The Wiza properties live on the HubSpot record — if the sync hasn't written `wiza_status` / `signed_up_at` / `wiza_id` to this contact, the panel has nothing to show. Check the contact in HubSpot first. |
+| An activity row has no "by …" attribution | The engagement has no owner, or its owner/creator no longer exists in the portal (a deactivated user). The panel would rather show nothing than a raw ID. |
+| An Activity tab is dimmed | That type has nothing logged for this prospect. |
 
 Open the page's DevTools console and look for `[EasyBooking]` debug logs.
 
@@ -378,7 +385,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for conventions and the PR checklist.
   - **`api.hubapi.com`** receives your access token on CRM reads. Those reads
     are **read-only** and send the prospect's email address (or, when the dialer
     supplies it, their HubSpot record ID) so HubSpot can return the matching
-    contact, company, deals and recent activity. Nothing is written, and nothing
+    contact, company, Wiza properties, deals and activity. Nothing is written, and nothing
     about a prospect is sent anywhere other than HubSpot — the portal that
     already holds their record.
 

@@ -1,5 +1,5 @@
-// hubspot-data.js — CRM reads for the side panel's Contact / Company / Deals /
-// Activity sections.
+// hubspot-data.js — CRM reads for the side panel's identity block, Wiza, Deals
+// and Activity sections.
 //
 // Every request goes through EB.hubspotAuth.apiFetch (bearer token, on-demand
 // refresh, one retry on 401), so nothing here knows about tokens. What it does
@@ -27,6 +27,15 @@
 // On 429 we surface a typed RATE_LIMITED error carrying Retry-After so the panel
 // can show a countdown rather than hammering a limit the whole team shares.
 //
+// The bundle also carries two view-models the panel renders directly:
+//   wiza      the portal's own product data (is this prospect a Wiza user, what
+//             plan, how many credits, what does their account look like)
+//   activity  up to 25 engagements per type, each attributed to an owner, plus
+//             the tab counts/filters the panel's Activity tab bar is built from
+// Those last helpers are shaped for the UI on purpose: they are pure functions
+// over the fetched items, which is what makes the tab bar unit-testable without
+// a DOM (same reasoning as the exported formatters).
+//
 // Plain IIFE + globals, not an ES module: CI runs `node --check` on .js files,
 // which parses them as CommonJS. Load hubspot-config.js and hubspot-auth.js
 // before this file.
@@ -45,12 +54,21 @@
     // free, short enough that a rep who just edited HubSpot sees it after a
     // Refresh (which busts this anyway).
     CACHE_TTL_MS: 5 * 60 * 1000,
-    // Activity rows rendered in the panel (merged across all five types).
-    ACTIVITY_LIMIT: 10,
+    // Engagements kept per type after the batch read, newest first. The Activity
+    // tab bar shows a per-type list in a fixed-height scroller, so this is what
+    // one tab can hold — not a merged total.
+    ACTIVITY_PER_TYPE_LIMIT: 25,
     // HubSpot's own ceiling for a batch/read call.
     BATCH_MAX: 100,
     // Used when a 429 arrives with no (or an unparseable) Retry-After header.
     RETRY_AFTER_FALLBACK_S: 10,
+    // Bumped whenever the bundle's *shape* changes. It namespaces the per-email
+    // cache, so a bundle cached by an earlier version of this file (same panel
+    // session, before a reload) can never be rendered by newer code that expects
+    // fields it doesn't have.
+    CACHE_VERSION: 6,
+    // Characters of a note body kept for the one-line activity preview.
+    NOTE_PREVIEW_CHARS: 120,
 
     CONTACT_PROPERTIES: [
       "firstname",
@@ -62,8 +80,41 @@
       "hs_lead_status",
       "hubspot_owner_id",
       "notes_last_updated",
+      // Wiza product data on the contact ("is this person a user, and what are
+      // they doing with us"). Property names verified against portal 40063500 —
+      // they are portal-defined, so a typo silently returns nothing.
+      "wiza_status",
+      "wiza_id",
+      "signed_up_at",
+      "plan_status",
+      "plan_credits",
+      "plan_frequency",
+      "number_of_credits_used_in_last_30_days",
+      "date_of_last_wiza_usage",
+      "wiza_admin_url",
+      "wiza_usage_logs",
+      "wiza_email_confirmed",
     ],
-    COMPANY_PROPERTIES: ["name", "domain", "industry", "numberofemployees", "hubspot_owner_id"],
+    COMPANY_PROPERTIES: [
+      "name",
+      "domain",
+      "industry",
+      "numberofemployees",
+      "hubspot_owner_id",
+      // Wiza account data on the company (billing/API side of the same story).
+      "api_wiza_account_id",
+      "primary_account_id_associated_wiza",
+      "number_of_associated_accounts",
+      "number_of_associated_subscribed_accounts",
+      "api_credit_balance",
+      "number_of_credits_used_in_last_30_days",
+      "last_api_credit_purchase",
+      "times_api_credits_purchased",
+      "account_icp",
+      "industry_wiza",
+      "hs_is_target_account",
+      "use_case",
+    ],
     DEAL_PROPERTIES: [
       "dealname",
       "dealstage",
@@ -76,16 +127,69 @@
     // The five engagement object types, in the order ties are broken. There is
     // no single timeline endpoint (legacy engagements v1 is dead), so each type
     // is an association read + a batch read of its own properties.
+    //
+    // hubspot_owner_id and hs_created_by go on every type: the panel attributes
+    // every row ("by Jenny Choi"). hs_created_by is the *user* id of whoever
+    // logged it and is only used when the engagement has no owner — plenty of
+    // dialer-logged calls land that way.
     ACTIVITY_TYPES: [
       {
         type: "calls",
         label: "Call",
-        properties: ["hs_timestamp", "hs_call_title", "hs_call_disposition", "hs_call_direction", "hs_call_duration"],
+        // Tab label in the panel's Activity tab bar.
+        tab: "Calls",
+        properties: [
+          "hs_timestamp",
+          "hs_call_title",
+          "hs_call_disposition",
+          "hs_call_direction",
+          "hs_call_duration",
+          "hubspot_owner_id",
+          "hs_created_by",
+        ],
       },
-      { type: "emails", label: "Email", properties: ["hs_timestamp", "hs_email_subject", "hs_email_direction"] },
-      { type: "meetings", label: "Meeting", properties: ["hs_timestamp", "hs_meeting_title", "hs_meeting_outcome"] },
-      { type: "notes", label: "Note", properties: ["hs_timestamp", "hs_note_body"] },
-      { type: "tasks", label: "Task", properties: ["hs_timestamp", "hs_task_subject", "hs_task_status"] },
+      {
+        type: "emails",
+        label: "Email",
+        tab: "Emails",
+        properties: [
+          "hs_timestamp",
+          "hs_email_subject",
+          "hs_email_direction",
+          "hubspot_owner_id",
+          "hs_created_by",
+        ],
+      },
+      {
+        type: "meetings",
+        label: "Meeting",
+        tab: "Meetings",
+        properties: [
+          "hs_timestamp",
+          "hs_meeting_title",
+          "hs_meeting_outcome",
+          "hubspot_owner_id",
+          "hs_created_by",
+        ],
+      },
+      {
+        type: "notes",
+        label: "Note",
+        tab: "Notes",
+        properties: ["hs_timestamp", "hs_note_body", "hubspot_owner_id", "hs_created_by"],
+      },
+      {
+        type: "tasks",
+        label: "Task",
+        tab: "Tasks",
+        properties: [
+          "hs_timestamp",
+          "hs_task_subject",
+          "hs_task_status",
+          "hubspot_owner_id",
+          "hs_created_by",
+        ],
+      },
     ],
 
     // A company search on one of these would match some unrelated record that
@@ -249,6 +353,50 @@
   const isId = (v) => v != null && /^\d+$/.test(String(v));
   const normEmail = (v) => String(v || "").trim().toLowerCase();
 
+  // HubSpot returns every property as a string, including numbers and booleans,
+  // and an unset property as "" (or omits it). These three keep "0" and "false"
+  // meaningful while treating blanks as absent.
+  const asText = (v) => {
+    const s = v == null ? "" : String(v).trim();
+    return s ? s : null;
+  };
+
+  function asNumber(v) {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function asBool(v) {
+    if (v == null || v === "") return null;
+    return /^(true|yes|1)$/i.test(String(v).trim());
+  }
+
+  // A URL that came out of a CRM property is untrusted input. It is only ever
+  // assigned to an <a href>, so anything that isn't plain http(s) — javascript:,
+  // data:, a relative path — is dropped rather than linked.
+  function safeUrl(v) {
+    const s = asText(v);
+    if (!s || !/^https?:\/\//i.test(s)) return null;
+    try {
+      const u = new URL(s);
+      return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function truncate(text, max) {
+    const s = String(text == null ? "" : text);
+    const limit = Number(max) > 0 ? Number(max) : 0;
+    if (!limit || s.length <= limit) return s;
+    // Prefer a word boundary, but never give back a stub: if the last space is
+    // very early, hard-cut instead.
+    const cut = s.slice(0, limit);
+    const space = cut.lastIndexOf(" ");
+    return (space > limit * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "") + "…";
+  }
+
   function emailDomain(email) {
     const at = normEmail(email).lastIndexOf("@");
     return at > 0 ? normEmail(email).slice(at + 1) : null;
@@ -329,6 +477,37 @@
     }
   }
 
+  // The absolute stamp behind every activity row's relative time (title=…), so
+  // "3h ago" can be resolved to a real moment on hover. Local zone, unlike
+  // formatDate: an engagement is an instant, not a calendar date.
+  function formatDateTime(value) {
+    const ms = toMillis(value);
+    if (!ms) return "";
+    try {
+      return new Intl.DateTimeFormat(CONFIG.LOCALE, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(new Date(ms));
+    } catch (_) {
+      return "";
+    }
+  }
+
+  // Credit balances and plan sizes are the numbers this panel shows most, and
+  // they run to five figures — thousands separators are not decoration.
+  function formatNumber(value) {
+    const n = asNumber(value);
+    if (n == null) return "";
+    try {
+      return new Intl.NumberFormat(CONFIG.LOCALE, { maximumFractionDigits: 2 }).format(n);
+    } catch (_) {
+      return String(n);
+    }
+  }
+
   // "just now" / "14m ago" / "3h ago" / "2d ago" / "5mo ago" / "2y ago".
   function relativeTime(value, now) {
     const ms = toMillis(value);
@@ -380,13 +559,18 @@
     return words.charAt(0).toUpperCase() + words.slice(1);
   }
 
+  // Call length as a clock reading (mm:ss, h:mm:ss past an hour) — reps compare
+  // call durations to each other, and "4:07" scans faster than "4m 7s".
+  // hs_call_duration is milliseconds.
   function formatDuration(ms) {
     const n = Number(ms);
     if (!Number.isFinite(n) || n <= 0) return "";
     const total = Math.round(n / 1000);
-    const m = Math.floor(total / 60);
     const s = total % 60;
-    return m ? `${m}m ${s}s` : `${s}s`;
+    const m = Math.floor(total / 60) % 60;
+    const h = Math.floor(total / 3600);
+    const pad = (v) => String(v).padStart(2, "0");
+    return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
   }
 
   function recordUrl(kind, id) {
@@ -398,10 +582,18 @@
   // Keyed the way the data is shared: pipelines are portal-wide (one promise),
   // owners are per-ID, bundles are per-email.
   let pipelinePromise = null;
-  const ownerCache = new Map(); // id -> { name, email } | null
-  const ownerInFlight = new Map(); // id -> Promise
-  const bundleCache = new Map(); // email -> { at, bundle }
-  const bundleInFlight = new Map(); // email -> Promise
+  // Owner entries are keyed by *how* they were looked up — "o:{ownerId}" for a
+  // hubspot_owner_id, "u:{userId}" for an hs_created_by user id — because the
+  // two id spaces overlap numerically and mean different people.
+  const ownerCache = new Map(); // "o:123" | "u:456" -> { name, email } | null
+  const ownerInFlight = new Map(); // same key -> Promise
+  const bundleCache = new Map(); // cacheKey(email) -> { at, bundle }
+  const bundleInFlight = new Map(); // cacheKey(email) -> Promise
+
+  // Namespacing the bundle cache by CACHE_VERSION means a bundle built by an
+  // older copy of this file (a reloaded panel shares nothing, but a live session
+  // that upgraded mid-flight would) can never be handed to newer render code.
+  const cacheKey = (email) => `v${CONFIG.CACHE_VERSION}|${normEmail(email)}`;
 
   // --- Pipelines / stage labels -------------------------------------------
   // dealstage and pipeline are opaque IDs on the deal record; this is the only
@@ -437,8 +629,13 @@
   }
 
   // --- Owners --------------------------------------------------------------
-  async function fetchOwner(id) {
-    const body = await orNull(request(`/crm/v3/owners/${encodeURIComponent(id)}`));
+  const ownerKey = (id, kind) => `${kind === "user" ? "u" : "o"}:${id}`;
+
+  // kind "owner" → /owners/{ownerId}; kind "user" → the same record looked up by
+  // the HubSpot *user* id that hs_created_by carries (owner id ≠ user id).
+  async function fetchOwner(id, kind) {
+    const query = kind === "user" ? "?idProperty=userId" : "";
+    const body = await orNull(request(`/crm/v3/owners/${encodeURIComponent(id)}${query}`));
     if (!body) return null;
     const name = [body.firstName, body.lastName].filter(Boolean).join(" ").trim();
     return { name: name || body.email || "", email: body.email || "" };
@@ -447,35 +644,38 @@
   // Resolves many owner IDs at once: cache hits are free, misses go out in
   // parallel, and two concurrent callers asking for the same owner share one
   // request. Owner lookups are general-pool, and an SDR team shares owners, so
-  // in practice this is a handful of calls per session.
-  async function resolveOwners(ids) {
+  // in practice this is a handful of calls per session — which is what makes
+  // per-row attribution on 100+ activity rows affordable.
+  async function resolveOwners(ids, options) {
+    const kind = (options && options.kind) === "user" ? "user" : "owner";
     const wanted = [];
     for (const raw of ids || []) {
-      const id = String(raw || "");
+      const id = String(raw == null ? "" : raw);
       if (isId(id) && wanted.indexOf(id) === -1) wanted.push(id);
     }
     await Promise.all(
       wanted.map(async (id) => {
-        if (ownerCache.has(id)) return;
-        if (!ownerInFlight.has(id)) {
-          const p = fetchOwner(id)
+        const key = ownerKey(id, kind);
+        if (ownerCache.has(key)) return;
+        if (!ownerInFlight.has(key)) {
+          const p = fetchOwner(id, kind)
             .catch((e) => {
               // Never let a missing owner name break a section.
-              log("owner lookup failed for", id, "-", e && e.message);
+              log("owner lookup failed for", key, "-", e && e.message);
               return null;
             })
             .then((owner) => {
-              ownerCache.set(id, owner);
-              ownerInFlight.delete(id);
+              ownerCache.set(key, owner);
+              ownerInFlight.delete(key);
               return owner;
             });
-          ownerInFlight.set(id, p);
+          ownerInFlight.set(key, p);
         }
-        await ownerInFlight.get(id);
+        await ownerInFlight.get(key);
       })
     );
     const out = new Map();
-    for (const id of wanted) out.set(id, ownerCache.get(id) || null);
+    for (const id of wanted) out.set(id, ownerCache.get(ownerKey(id, kind)) || null);
     return out;
   }
 
@@ -615,19 +815,26 @@
   }
 
   // --- Activity ------------------------------------------------------------
+  // One row's worth of data. `summary` is the headline, `detail` the per-type
+  // extras (disposition · duration, outcome, task status), `ownerId` /
+  // `createdById` the two attribution candidates — the panel prints a name or
+  // nothing, never a raw id.
   function activityItem(spec, obj) {
-    const p = obj.properties || {};
+    const p = (obj && obj.properties) || {};
     const item = {
-      id: String(obj.id),
+      id: String(obj && obj.id),
       type: spec.type,
       label: spec.label,
       timestamp: toMillis(p.hs_timestamp),
       summary: "",
       direction: null,
       detail: "",
+      ownerId: asText(p.hubspot_owner_id),
+      createdById: asText(p.hs_created_by),
+      ownerName: null,
     };
     if (spec.type === "calls") {
-      item.summary = p.hs_call_title || "Call";
+      item.summary = asText(p.hs_call_title) || "Call";
       item.direction = /^out/i.test(p.hs_call_direction || "") ? "out" : /^in/i.test(p.hs_call_direction || "") ? "in" : null;
       item.detail = [
         CALL_DISPOSITIONS[String(p.hs_call_disposition || "").toLowerCase()] || "",
@@ -636,22 +843,80 @@
         .filter(Boolean)
         .join(" · ");
     } else if (spec.type === "emails") {
-      item.summary = p.hs_email_subject || "Email";
+      item.summary = asText(p.hs_email_subject) || "Email";
       item.direction = /^email_out|^outgoing|^out/i.test(p.hs_email_direction || "")
         ? "out"
         : /^incoming|^in|^forwarded/i.test(p.hs_email_direction || "")
           ? "in"
           : null;
     } else if (spec.type === "meetings") {
-      item.summary = p.hs_meeting_title || "Meeting";
+      item.summary = asText(p.hs_meeting_title) || "Meeting";
       item.detail = humanizeEnum(p.hs_meeting_outcome);
     } else if (spec.type === "notes") {
-      item.summary = stripHtml(p.hs_note_body) || "Note";
+      // Note bodies are HTML and can run for paragraphs; one line is the whole
+      // point of the row. (stripHtml is a display transform onto textContent —
+      // the HTML is never parsed into nodes.)
+      item.summary = truncate(stripHtml(p.hs_note_body), CONFIG.NOTE_PREVIEW_CHARS) || "Note";
     } else if (spec.type === "tasks") {
-      item.summary = p.hs_task_subject || "Task";
+      item.summary = asText(p.hs_task_subject) || "Task";
       item.detail = humanizeEnum(p.hs_task_status);
     }
     return item;
+  }
+
+  // Newest first, with a deterministic tie-break: same-timestamp rows (bulk
+  // imports, a call and its note logged together) would otherwise shuffle
+  // between renders.
+  const typeOrder = (type) => {
+    const i = CONFIG.ACTIVITY_TYPES.findIndex((s) => s.type === type);
+    return i === -1 ? CONFIG.ACTIVITY_TYPES.length : i;
+  };
+
+  function sortActivity(items) {
+    items.sort((a, b) => {
+      if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+      const t = typeOrder(a.type) - typeOrder(b.type);
+      if (t !== 0) return t;
+      return String(b.id).localeCompare(String(a.id));
+    });
+    return items;
+  }
+
+  // --- Activity view-model (pure; drives the panel's tab bar) --------------
+  const ACTIVITY_TABS = ["all"].concat(CONFIG.ACTIVITY_TYPES.map((s) => s.type));
+
+  function filterActivity(items, tab) {
+    const list = items || [];
+    if (!tab || tab === "all") return list.slice();
+    return list.filter((i) => i && i.type === tab);
+  }
+
+  // [{ key, label, count, disabled }] — "All" first, then one per type in
+  // ACTIVITY_TYPES order. A tab with nothing in it is disabled rather than
+  // hidden, so the bar doesn't reflow as you move between prospects.
+  function activityTabs(items) {
+    const list = items || [];
+    const counts = new Map();
+    for (const item of list) {
+      const t = item && item.type;
+      if (!t) continue;
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    const tabs = [{ key: "all", label: "All", count: list.length, disabled: !list.length }];
+    for (const spec of CONFIG.ACTIVITY_TYPES) {
+      const count = counts.get(spec.type) || 0;
+      tabs.push({ key: spec.type, label: spec.tab || spec.label, count, disabled: count === 0 });
+    }
+    return tabs;
+  }
+
+  // The tab to actually render: the remembered one if it still has rows, else
+  // "All". Keeps a rep's choice across prospect switches without ever showing
+  // them an empty list they can't explain.
+  function resolveActivityTab(items, preferred) {
+    const tabs = activityTabs(items);
+    const hit = tabs.find((t) => t.key === preferred);
+    return hit && !hit.disabled ? hit.key : "all";
   }
 
   // v4 associations per type in parallel, then one batch read per type that
@@ -679,13 +944,41 @@
             properties: f.spec.properties,
             inputs: f.ids.map((id) => ({ id })),
           });
-          return ((body && body.results) || []).map((obj) => activityItem(f.spec, obj));
+          const items = ((body && body.results) || []).map((obj) => activityItem(f.spec, obj));
+          // Association reads come back in id order, not time order, so the cap
+          // is applied *after* sorting — otherwise "25 most recent calls" would
+          // really mean "25 oldest". Reading up to BATCH_MAX ids and keeping 25
+          // costs the same one request either way.
+          return sortActivity(items).slice(0, CONFIG.ACTIVITY_PER_TYPE_LIMIT);
         })
     );
 
-    const merged = [].concat.apply([], batches);
-    merged.sort((a, b) => b.timestamp - a.timestamp);
-    return merged.slice(0, CONFIG.ACTIVITY_LIMIT);
+    // Attribution is part of a row, not a later decoration: callers of
+    // getActivity always get rows they can render as-is.
+    return attributeActivity(sortActivity([].concat.apply([], batches)));
+  }
+
+  // Puts a name on every activity row it can, in two batched passes over the
+  // session owner cache: hubspot_owner_id first, then hs_created_by (a *user*
+  // id) for the rows that have no owner — dialer-logged calls often don't. A row
+  // whose ids resolve to nothing keeps ownerName null and simply renders without
+  // attribution; a raw id is never shown to a rep.
+  async function attributeActivity(items) {
+    const list = items || [];
+    if (!list.length) return list;
+
+    const owners = await resolveOwners(list.map((i) => i.ownerId));
+    for (const item of list) item.ownerName = ownerName(owners, item.ownerId);
+
+    const orphans = list.filter((i) => !i.ownerName && i.createdById);
+    if (orphans.length) {
+      const users = await resolveOwners(
+        orphans.map((i) => i.createdById),
+        { kind: "user" }
+      );
+      for (const item of orphans) item.ownerName = ownerName(users, item.createdById);
+    }
+    return list;
   }
 
   // --- Bundle --------------------------------------------------------------
@@ -721,6 +1014,83 @@
       ownerName: ownerName(owners, p.hubspot_owner_id),
       url: recordUrl("company", company.id),
     };
+  }
+
+  // --- Wiza product data ---------------------------------------------------
+  // Most prospects are not Wiza users, so absence is the common case, not the
+  // error case: every field is independently nullable, `isUser` / `hasData` say
+  // whether there is anything to show at all, and the panel drops empty rows
+  // rather than printing labels with blanks under them.
+  function wizaUserView(contact) {
+    const p = (contact && contact.properties) || {};
+    const status = asText(p.wiza_status);
+    const statusKey = /^(active|closed)$/i.test(status || "") ? status.toLowerCase() : null;
+    // wiza_status is stored lowercase ("active"), which humanizeEnum leaves alone
+    // because it already looks like a label — so the pill capitalizes it here.
+    const statusLabel = humanizeEnum(status);
+    const user = {
+      status: statusKey, // "active" | "closed" | null — drives the pill's colour
+      statusLabel: statusLabel ? statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1) : null,
+      wizaId: asText(p.wiza_id),
+      signedUpAt: toMillis(p.signed_up_at) || null,
+      planStatus: humanizeEnum(p.plan_status) || null,
+      planCredits: asNumber(p.plan_credits),
+      planFrequency: humanizeEnum(p.plan_frequency) || null,
+      creditsUsed30d: asNumber(p.number_of_credits_used_in_last_30_days),
+      lastUsageAt: toMillis(p.date_of_last_wiza_usage) || null,
+      adminUrl: safeUrl(p.wiza_admin_url),
+      usageLogsUrl: safeUrl(p.wiza_usage_logs),
+      emailConfirmed: asBool(p.wiza_email_confirmed),
+    };
+    // "Signed up", "has an id", "has a plan", "has used it" — any one of these
+    // means there is a Wiza account behind this contact. A bare
+    // wiza_email_confirmed=false is not enough (imports set it on non-users).
+    user.isUser = !!(
+      user.status ||
+      user.wizaId ||
+      user.signedUpAt ||
+      user.planStatus ||
+      user.planCredits != null ||
+      user.planFrequency ||
+      user.creditsUsed30d != null ||
+      user.lastUsageAt ||
+      user.adminUrl ||
+      user.emailConfirmed === true
+    );
+    return user;
+  }
+
+  function wizaAccountView(company) {
+    const p = (company && company.properties) || {};
+    const account = {
+      accountId: asText(p.api_wiza_account_id),
+      primaryAccountId: asText(p.primary_account_id_associated_wiza),
+      associatedAccounts: asNumber(p.number_of_associated_accounts),
+      subscribedAccounts: asNumber(p.number_of_associated_subscribed_accounts),
+      apiCreditBalance: asNumber(p.api_credit_balance),
+      creditsUsed30d: asNumber(p.number_of_credits_used_in_last_30_days),
+      lastPurchaseAt: toMillis(p.last_api_credit_purchase) || null,
+      timesPurchased: asNumber(p.times_api_credits_purchased),
+      icp: humanizeEnum(p.account_icp) || null,
+      industry: humanizeEnum(p.industry_wiza) || null,
+      useCase: humanizeEnum(p.use_case) || null,
+      isTargetAccount: asBool(p.hs_is_target_account) === true,
+    };
+    account.hasData = !!(
+      account.accountId ||
+      account.primaryAccountId ||
+      account.associatedAccounts != null ||
+      account.subscribedAccounts != null ||
+      account.apiCreditBalance != null ||
+      account.creditsUsed30d != null ||
+      account.lastPurchaseAt ||
+      account.timesPurchased != null ||
+      account.icp ||
+      account.industry ||
+      account.useCase ||
+      account.isTargetAccount
+    );
+    return account;
   }
 
   async function buildBundle(ctx) {
@@ -770,8 +1140,10 @@
 
     return {
       email,
+      version: CONFIG.CACHE_VERSION,
       contact: contactView(contact, owners),
       company: companyView(company, owners),
+      wiza: { user: wizaUserView(contact), account: wizaAccountView(company) },
       deals,
       activity,
       contactVia,
@@ -790,13 +1162,14 @@
       throw new HubSpotDataError("NOT_FOUND", "No prospect email to look up.");
     }
     if (opts.force) clearCache(email);
+    const key = cacheKey(email);
 
-    const hit = bundleCache.get(email);
+    const hit = bundleCache.get(key);
     if (hit && Date.now() - hit.at < CONFIG.CACHE_TTL_MS) {
       log("HubSpot bundle cache hit for", email);
       return hit.bundle;
     }
-    const pending = bundleInFlight.get(email);
+    const pending = bundleInFlight.get(key);
     if (pending) return pending;
 
     const p = (async () => {
@@ -804,20 +1177,20 @@
         const bundle = await buildBundle({ ...ctx, email });
         // A partially failed bundle is renderable but must not be pinned for
         // five minutes — the next render should try the failed section again.
-        if (!bundle.errors) bundleCache.set(email, { at: Date.now(), bundle });
+        if (!bundle.errors) bundleCache.set(key, { at: Date.now(), bundle });
         return bundle;
       } finally {
-        if (bundleInFlight.get(email) === p) bundleInFlight.delete(email);
+        if (bundleInFlight.get(key) === p) bundleInFlight.delete(key);
       }
     })();
-    bundleInFlight.set(email, p);
+    bundleInFlight.set(key, p);
     return p;
   }
 
   function clearCache(email) {
     if (email) {
-      bundleCache.delete(normEmail(email));
-      bundleInFlight.delete(normEmail(email));
+      bundleCache.delete(cacheKey(email));
+      bundleInFlight.delete(cacheKey(email));
       return;
     }
     bundleCache.clear();
@@ -846,14 +1219,30 @@
     // Cache control
     clearCache,
     clearAll,
+    // View-models the panel renders (pure over fetched data; unit-tested)
+    view: {
+      wizaUser: wizaUserView,
+      wizaAccount: wizaAccountView,
+      activityItem,
+    },
+    activity: {
+      TABS: ACTIVITY_TABS,
+      tabs: activityTabs,
+      filter: filterActivity,
+      resolveTab: resolveActivityTab,
+    },
     // Formatting (shared with the panel; unit-tested)
     format: {
       currency: formatCurrency,
       date: formatDate,
+      dateTime: formatDateTime,
+      number: formatNumber,
       relativeTime,
       duration: formatDuration,
       stripHtml,
       humanizeEnum,
+      truncate,
+      safeUrl,
       toMillis,
       recordUrl,
     },

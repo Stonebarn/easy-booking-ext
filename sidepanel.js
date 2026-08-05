@@ -302,7 +302,7 @@
   }
 
   // ==========================================================================
-  // CRM context (Phase 3) — Contact, Company, Deals, Recent activity.
+  // CRM context — identity block, Wiza product data, Deals, Activity.
   //
   // Input is "eb:prospectContext" (email + identity + the HubSpot record IDs
   // content-nooks.js scraped from the Nooks panes), with "eb:currentProspect"'s
@@ -317,14 +317,17 @@
 
   const crmEls = {
     refresh: document.getElementById("crm-refresh"),
-    contact: document.getElementById("crm-contact"),
-    contactPill: document.getElementById("crm-contact-pill"),
-    company: document.getElementById("crm-company"),
+    identity: document.getElementById("crm-identity"),
+    identityPill: document.getElementById("crm-identity-pill"),
+    wiza: document.getElementById("crm-wiza"),
+    wizaPill: document.getElementById("crm-wiza-pill"),
     deals: document.getElementById("crm-deals"),
     dealsPill: document.getElementById("crm-deals-pill"),
     activity: document.getElementById("crm-activity"),
+    activityPill: document.getElementById("crm-activity-pill"),
+    activityTabs: document.getElementById("crm-activity-tabs"),
   };
-  const crmBodies = [crmEls.contact, crmEls.company, crmEls.deals, crmEls.activity];
+  const crmBodies = [crmEls.identity, crmEls.wiza, crmEls.deals, crmEls.activity];
 
   // status: "idle" (nothing to show) | "loading" | "ready" | "error"
   const crm = {
@@ -336,6 +339,11 @@
     error: null, // { code, message, retryAfterMs }
     retrySecs: null, // counts down while rate limited
     lastKey: null, // email|contactId|companyId of the last fetch we started
+    // Which Activity tab is open. Lives for the life of the panel document, so a
+    // rep who works the Calls tab keeps it as they move between prospects; it
+    // falls back to "All" whenever the chosen type has no rows for the prospect
+    // in front of them (see EB.hubspotData.activity.resolveTab).
+    activeTab: "all",
   };
 
   // Monochrome glyphs (not emoji) so the row reads the same on every OS.
@@ -366,13 +374,28 @@
   }
 
   // Returns null for an empty value so callers can skip the row entirely
-  // rather than rendering a label with a dash under it.
-  function kv(label, value) {
+  // rather than rendering a label with a dash under it. This is the whole
+  // null-safety strategy for the Wiza section: build every possible row, let the
+  // empty ones evaporate.
+  function kv(label, value, hoverTitle) {
     if (value == null || value === "") return null;
     const row = el("div", "kv");
     row.appendChild(el("span", "kv-label", label));
     row.appendChild(el("span", "kv-value", value));
+    if (hoverTitle) row.title = hoverTitle;
     return row;
+  }
+
+  // An external link built from a CRM URL property. hubspot-data.js has already
+  // rejected anything that isn't http(s), so href can never be a javascript:
+  // URL — but the value is still only ever set through .href, never markup.
+  function extLink(text, href) {
+    if (!href) return null;
+    const a = el("a", "link", text);
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    return a;
   }
 
   function appendAll(parent, nodes) {
@@ -390,8 +413,12 @@
     body.appendChild(el("p", bad ? "crm-note bad" : "crm-note", text));
   }
 
-  function setPill(pillEl, text) {
+  // `variant` picks the colour (see the .pill rules in sidepanel.html); it is a
+  // class name we choose, never a value from HubSpot. Omit it for the default
+  // muted outline; pass "" for the plain (green) pill.
+  function setPill(pillEl, text, variant) {
     pillEl.style.display = text ? "" : "none";
+    pillEl.className = ("pill " + (variant === undefined ? "info" : variant)).trim();
     pillEl.textContent = text || "";
   }
 
@@ -446,61 +473,178 @@
   }
 
   // --- section renderers ---------------------------------------------------
-  function renderContactSection(bundle) {
-    const body = crmEls.contact;
+  // One block for both records, three lines deep:
+  //   1  Name · lifecycle stage
+  //   2  Title @ Company        (both linked to their HubSpot records)
+  //   3  Owner · phone · lead status
+  // The company's domain, industry and headcount ride along as the company
+  // link's hover text — kept, but not spending a row each.
+  function renderIdentitySection(bundle) {
+    const body = crmEls.identity;
     const c = bundle.contact;
-    if (!c) {
-      setPill(crmEls.contactPill, "Not in HubSpot");
+    const co = bundle.company;
+
+    if (!c && !co) {
+      setPill(crmEls.identityPill, "Not in HubSpot");
       setNote(body, `No HubSpot contact for ${bundle.email}`);
       return;
     }
-    setPill(crmEls.contactPill, null);
+    // A company matched by email domain with no contact record is a real state:
+    // say so rather than pretending the identity is complete.
+    setPill(crmEls.identityPill, c ? null : "No contact record");
     clearNode(body);
 
-    const head = el("div", "rec-head");
-    head.appendChild(recordLink(c.name, c.url, "rec-name"));
-    if (c.lifecycleStage) head.appendChild(el("span", "pill stage", c.lifecycleStage));
-    body.appendChild(head);
+    const block = el("div", "ident");
 
-    const grid = el("div", "kv-grid");
-    const rows = appendAll(grid, [
-      kv("Lead status", c.leadStatus),
-      kv("Title", c.title),
-      kv("Phone", c.phone),
-      kv("Owner", c.ownerName),
-      kv("Last activity", c.lastActivityAt ? fmt.relativeTime(c.lastActivityAt) : null),
-    ]);
-    if (rows) body.appendChild(grid);
-    if (!rows && !c.lifecycleStage) {
-      body.appendChild(el("p", "crm-note", "No other properties set on this record."));
+    const line1 = el("div", "ident-line");
+    line1.appendChild(recordLink(c ? c.name : bundle.email, c && c.url, "rec-name"));
+    if (c && c.lifecycleStage) {
+      line1.appendChild(el("span", "pill stage tiny", c.lifecycleStage));
     }
+    block.appendChild(line1);
+
+    const role = el("div", "ident-role");
+    if (c && c.title) role.appendChild(el("span", null, c.title));
+    if (co) {
+      if (c && c.title) role.appendChild(el("span", "at", " @ "));
+      const link = recordLink(co.name, co.url, "link");
+      const about = [co.domain, co.industry, co.employees != null ? `${fmt.number(co.employees)} employees` : null]
+        .filter(Boolean)
+        .join(" · ");
+      if (about) link.title = about;
+      role.appendChild(link);
+    }
+    if (role.childElementCount) block.appendChild(role);
+
+    const meta = el("div", "ident-meta");
+    const owner = (c && c.ownerName) || (co && co.ownerName) || null;
+    appendAll(meta, [
+      owner ? el("span", null, owner) : null,
+      c && c.phone ? el("span", null, c.phone) : null,
+      c && c.leadStatus ? el("span", null, c.leadStatus) : null,
+    ]);
+    if (meta.childElementCount) block.appendChild(meta);
+
+    body.appendChild(block);
   }
 
-  function renderCompanySection(bundle) {
-    const body = crmEls.company;
-    const co = bundle.company;
-    if (!co) {
-      setNote(body, "No company linked in HubSpot.");
+  // active → green (the default pill), closed → muted outline, anything else a
+  // portal admin adds later → the neutral "info" treatment.
+  function wizaStatusVariant(status) {
+    if (status === "active") return "";
+    if (status === "closed") return "closed";
+    return "info";
+  }
+
+  // Wiza product data. Absence is the normal case — most prospects have never
+  // signed up — so the empty path is a single muted line, and inside each
+  // subsection every row that has no value is simply not built.
+  function renderWizaSection(bundle) {
+    const body = crmEls.wiza;
+    const wiza = bundle.wiza || {};
+    const user = wiza.user || {};
+    const account = wiza.account || {};
+
+    if (!user.isUser && !account.hasData) {
+      setPill(crmEls.wizaPill, null);
+      setNote(body, "Not a Wiza user yet");
       return;
     }
+    // Status at section level so it's readable without opening anything.
+    const variant = wizaStatusVariant(user.status);
+    setPill(crmEls.wizaPill, user.statusLabel, variant);
     clearNode(body);
-    const head = el("div", "rec-head");
-    head.appendChild(recordLink(co.name, co.url, "rec-name"));
-    body.appendChild(head);
 
-    const grid = el("div", "kv-grid");
-    const rows = appendAll(grid, [
-      kv("Domain", co.domain),
-      kv("Industry", co.industry),
-      kv(
-        "Employees",
-        co.employees != null && Number.isFinite(co.employees)
-          ? co.employees.toLocaleString("en-US")
-          : null
-      ),
-      kv("Owner", co.ownerName),
-    ]);
-    if (rows) body.appendChild(grid);
+    if (user.isUser) {
+      const sub = el("div", "wiza-sub");
+      const head = el("div", "wiza-head");
+      head.appendChild(el("span", "wiza-label", "User"));
+      if (user.statusLabel) {
+        head.appendChild(el("span", ("pill tiny " + variant).trim(), user.statusLabel));
+      }
+      // Only worth saying when it's false — an unconfirmed email explains a lot
+      // of "signed up but never used it" records.
+      if (user.emailConfirmed === false) {
+        head.appendChild(el("span", "pill info tiny", "Email unconfirmed"));
+      }
+      sub.appendChild(head);
+
+      const plan = [
+        user.planStatus,
+        user.planCredits != null ? `${fmt.number(user.planCredits)} credits` : null,
+        user.planFrequency,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      const grid = el("div", "kv-grid");
+      appendAll(grid, [
+        kv("Signed up", user.signedUpAt ? fmt.date(user.signedUpAt) : null),
+        kv("Plan", plan),
+        kv("Credits (30d)", user.creditsUsed30d != null ? fmt.number(user.creditsUsed30d) : null),
+        kv(
+          "Last used",
+          user.lastUsageAt ? fmt.relativeTime(user.lastUsageAt) : null,
+          user.lastUsageAt ? fmt.dateTime(user.lastUsageAt) : null
+        ),
+        kv("Wiza ID", user.wizaId),
+      ]);
+      if (grid.childElementCount) sub.appendChild(grid);
+
+      // Both links come from URL properties and are only rendered when set.
+      const links = el("div", "wiza-links");
+      appendAll(links, [
+        extLink("Open in Wiza Admin", user.adminUrl),
+        extLink("Usage logs", user.usageLogsUrl),
+      ]);
+      if (links.childElementCount) sub.appendChild(links);
+
+      body.appendChild(sub);
+    } else if (account.hasData) {
+      // Account data but nobody signed up: the company is known to us, this
+      // person isn't.
+      body.appendChild(el("p", "crm-note", "Not a Wiza user yet"));
+    }
+
+    if (account.hasData) {
+      const sub = el("div", "wiza-sub");
+      const head = el("div", "wiza-head");
+      head.appendChild(el("span", "wiza-label", "Account"));
+      if (account.isTargetAccount) {
+        head.appendChild(el("span", "pill stage tiny", "Target account"));
+      }
+      sub.appendChild(head);
+
+      const accounts =
+        account.subscribedAccounts != null && account.associatedAccounts != null
+          ? `${fmt.number(account.subscribedAccounts)} of ${fmt.number(account.associatedAccounts)}`
+          : account.subscribedAccounts != null
+            ? fmt.number(account.subscribedAccounts)
+            : null;
+      const purchase = [
+        account.lastPurchaseAt ? fmt.date(account.lastPurchaseAt) : null,
+        account.timesPurchased != null ? `${fmt.number(account.timesPurchased)}×` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      const grid = el("div", "kv-grid");
+      appendAll(grid, [
+        kv("Account ID", account.accountId || account.primaryAccountId),
+        kv("Subscribed", accounts),
+        kv(
+          "API credits",
+          account.apiCreditBalance != null ? fmt.number(account.apiCreditBalance) : null
+        ),
+        kv("Credits (30d)", account.creditsUsed30d != null ? fmt.number(account.creditsUsed30d) : null),
+        kv("Last purchase", purchase),
+        kv("ICP", account.icp),
+        kv("Industry", account.industry),
+        kv("Use case", account.useCase),
+      ]);
+      if (grid.childElementCount) sub.appendChild(grid);
+      body.appendChild(sub);
+    }
   }
 
   function renderDealsSection(bundle) {
@@ -540,48 +684,157 @@
     }
   }
 
+  // One activity row. Everything type-specific (disposition · duration, meeting
+  // outcome, task status, note preview) arrives pre-composed in item.detail from
+  // hubspot-data.js; this is layout plus attribution.
+  function activityRow(item) {
+    const row = el("div", "act");
+    row.appendChild(el("span", "act-icon", ACT_ICON[item.type] || "·"));
+
+    const main = el("div", "act-main");
+    const top = el("div", "act-top");
+    top.appendChild(el("span", "act-type", item.label));
+    if (item.direction) {
+      const arrow = el("span", null, item.direction === "out" ? "↑" : "↓");
+      arrow.title = item.direction === "out" ? "Outbound" : "Inbound";
+      top.appendChild(arrow);
+    }
+    // Only ever a resolved name. An engagement whose owner (or creator) we
+    // couldn't resolve renders with no attribution rather than a raw ID.
+    if (item.ownerName) top.appendChild(el("span", "act-owner", `by ${item.ownerName}`));
+    const when = fmt.relativeTime(item.timestamp);
+    if (when) {
+      const stamp = el("span", "act-when", when);
+      const exact = fmt.dateTime(item.timestamp);
+      if (exact) stamp.title = exact; // relative in the row, absolute on hover
+      top.appendChild(stamp);
+    }
+    main.appendChild(top);
+
+    main.appendChild(el("div", "act-summary", item.summary || item.label));
+    if (item.detail) main.appendChild(el("div", "act-detail", item.detail));
+
+    row.appendChild(main);
+    return row;
+  }
+
+  // The tab bar. Rebuilt on every render because the counts are per prospect;
+  // the click/keyboard handlers are bound once to the container below.
+  function renderActivityTabs(items) {
+    const bar = crmEls.activityTabs;
+    clearNode(bar);
+    bar.style.display = "";
+    for (const tab of data.activity.tabs(items)) {
+      const btn = el("button", "tab");
+      btn.type = "button";
+      btn.id = `crm-tab-${tab.key}`;
+      btn.dataset.tab = tab.key;
+      btn.setAttribute("role", "tab");
+      btn.setAttribute("aria-controls", "crm-activity");
+      btn.setAttribute("aria-selected", tab.key === crm.activeTab ? "true" : "false");
+      // aria-disabled rather than the disabled attribute: an empty tab stays
+      // discoverable to a screen reader (it reports "Meetings 0, dimmed")
+      // instead of vanishing from the bar. Clicks and arrow keys skip it.
+      if (tab.disabled) btn.setAttribute("aria-disabled", "true");
+      // Roving tabindex: one stop for the whole bar, arrows move within it.
+      btn.tabIndex = tab.key === crm.activeTab ? 0 : -1;
+      btn.appendChild(el("span", null, tab.label));
+      // Leading space so the accessible name reads "Calls 12", not "Calls12";
+      // CSS collapses it and adds the visual gap.
+      btn.appendChild(el("span", "tab-count", ` ${tab.count}`));
+      bar.appendChild(btn);
+    }
+    crmEls.activity.setAttribute("aria-labelledby", `crm-tab-${crm.activeTab}`);
+  }
+
+  // No tabs → nothing for the list to be labelled by; leaving a stale
+  // aria-labelledby pointing at a removed button is worse than no label.
+  function hideActivityTabs() {
+    crmEls.activityTabs.style.display = "none";
+    crmEls.activity.removeAttribute("aria-labelledby");
+  }
+
   function renderActivitySection(bundle) {
     const body = crmEls.activity;
     const errors = bundle.errors || {};
+    hideActivityTabs();
     if (errors.activity) {
+      setPill(crmEls.activityPill, null);
       setNote(body, sectionErrorText(errors.activity, errors.activityRetryAfterMs), true);
       return;
     }
     const items = bundle.activity || [];
+    setPill(crmEls.activityPill, items.length ? String(items.length) : null);
     if (!items.length) {
-      setNote(body, "No recent activity");
+      setNote(body, "No activity logged yet");
       return;
     }
+    // Keep the rep's tab if it still has rows for this prospect, else "All".
+    crm.activeTab = data.activity.resolveTab(items, crm.activeTab);
+    renderActivityTabs(items);
+
     clearNode(body);
-    for (const item of items) {
-      const row = el("div", "act");
-      row.appendChild(el("span", "act-icon", ACT_ICON[item.type] || "·"));
-
-      const main = el("div", "act-main");
-      const top = el("div", "act-top");
-      top.appendChild(el("span", "act-type", item.label));
-      if (item.direction) {
-        const arrow = el("span", null, item.direction === "out" ? "↑" : "↓");
-        arrow.title = item.direction === "out" ? "Outbound" : "Inbound";
-        top.appendChild(arrow);
-      }
-      const when = fmt.relativeTime(item.timestamp);
-      if (when) top.appendChild(el("span", null, when));
-      main.appendChild(top);
-
-      main.appendChild(el("div", "act-summary", item.summary || item.label));
-      if (item.detail) main.appendChild(el("div", "act-detail", item.detail));
-
-      row.appendChild(main);
-      body.appendChild(row);
+    for (const item of data.activity.filter(items, crm.activeTab)) {
+      body.appendChild(activityRow(item));
     }
   }
+
+  // Tab interaction lives on the container so it survives the rebuild above.
+  function selectActivityTab(key, moveFocus) {
+    if (!key || key === crm.activeTab) return;
+    crm.activeTab = key;
+    if (crm.bundle) renderActivitySection(crm.bundle);
+    crmEls.activity.scrollTop = 0; // a different list, not a scrolled one
+    if (moveFocus) {
+      const next = crmEls.activityTabs.querySelector(`[data-tab="${key}"]`);
+      if (next) next.focus();
+    }
+  }
+
+  const isEnabledTab = (btn) => btn && btn.getAttribute("aria-disabled") !== "true";
+
+  crmEls.activityTabs.addEventListener("click", (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest('[role="tab"]') : null;
+    if (!isEnabledTab(btn)) return;
+    selectActivityTab(btn.dataset.tab, false);
+  });
+
+  // Arrow/Home/End move between tabs (skipping empty ones); Enter/Space activate
+  // the focused tab, for the case where focus and selection have drifted apart.
+  crmEls.activityTabs.addEventListener("keydown", (ev) => {
+    const keys = ["ArrowRight", "ArrowLeft", "Home", "End", "Enter", " "];
+    if (keys.indexOf(ev.key) === -1) return;
+    const tabs = Array.prototype.filter.call(
+      crmEls.activityTabs.querySelectorAll('[role="tab"]'),
+      isEnabledTab
+    );
+    if (!tabs.length) return;
+    if (ev.key === "Enter" || ev.key === " ") {
+      const focused = tabs.indexOf(document.activeElement);
+      if (focused === -1) return;
+      ev.preventDefault();
+      selectActivityTab(tabs[focused].dataset.tab, true);
+      return;
+    }
+    ev.preventDefault();
+    const at = Math.max(0, tabs.findIndex((t) => t.dataset.tab === crm.activeTab));
+    let next = at;
+    if (ev.key === "ArrowRight") next = (at + 1) % tabs.length;
+    else if (ev.key === "ArrowLeft") next = (at - 1 + tabs.length) % tabs.length;
+    else if (ev.key === "Home") next = 0;
+    else if (ev.key === "End") next = tabs.length - 1;
+    selectActivityTab(tabs[next].dataset.tab, true);
+  });
 
   function crmRender() {
     const email = crmEmail();
     crmEls.refresh.disabled = !(data && crm.connected && email && crm.status !== "loading");
-    setPill(crmEls.contactPill, null);
+    setPill(crmEls.identityPill, null);
+    setPill(crmEls.wizaPill, null);
     setPill(crmEls.dealsPill, null);
+    setPill(crmEls.activityPill, null);
+    // Nothing below this point shows tabs unless a bundle is actually rendered.
+    hideActivityTabs();
 
     if (!data) {
       for (const body of crmBodies) setNote(body, "hubspot-data.js failed to load.", true);
@@ -598,8 +851,8 @@
       return;
     }
     if (crm.status === "loading") {
-      skeleton(crmEls.contact, 3);
-      skeleton(crmEls.company, 3);
+      skeleton(crmEls.identity, 3);
+      skeleton(crmEls.wiza, 3);
       skeleton(crmEls.deals, 2);
       skeleton(crmEls.activity, 4);
       return;
@@ -613,8 +866,8 @@
       for (const body of crmBodies) setNote(body, "Nothing loaded yet.");
       return;
     }
-    renderContactSection(crm.bundle);
-    renderCompanySection(crm.bundle);
+    renderIdentitySection(crm.bundle);
+    renderWizaSection(crm.bundle);
     renderDealsSection(crm.bundle);
     renderActivitySection(crm.bundle);
   }
@@ -684,6 +937,8 @@
         bundle.contact ? bundle.contact.id : "none",
         "company:",
         bundle.company ? bundle.company.id : "none",
+        "wiza user:",
+        bundle.wiza && bundle.wiza.user && bundle.wiza.user.isUser ? "yes" : "no",
         "deals:",
         (bundle.deals || []).length,
         "activity:",

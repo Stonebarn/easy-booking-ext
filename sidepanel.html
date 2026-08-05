@@ -313,6 +313,64 @@
       .pill.stage { background: rgba(147, 113, 240, 0.14); color: var(--purple); }
       .pill.closed { background: transparent; color: var(--muted); border: 1px solid var(--line); }
       .pill.won { background: var(--green-bg); color: var(--green-fg); }
+      /* Smaller pill for the dense rows (identity line, Wiza subsections). */
+      .pill.tiny { font-size: 9px; padding: 1px 6px; }
+
+      /* ---- Identity block ---------------------------------------------- */
+      /* Three lines, tight leading: name · stage / title @ company /
+         owner · phone. Each line wraps rather than truncating — at 320px a
+         long company name is still worth reading. */
+      .ident { display: flex; flex-direction: column; gap: 3px; }
+      .ident-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 6px;
+      }
+      .ident-role {
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .ident-role .at { opacity: 0.55; }
+      .ident-role a.link { font-weight: 600; }
+      .ident-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px 10px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      /* ---- Wiza section ------------------------------------------------- */
+      .wiza-sub + .wiza-sub {
+        margin-top: 8px;
+        border-top: 1px solid var(--line);
+        padding-top: 8px;
+      }
+      .wiza-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 5px;
+      }
+      .wiza-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .wiza-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        margin-top: 6px;
+        font-size: 12px;
+        font-weight: 600;
+      }
 
       /* Deal rows */
       .deal + .deal { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
@@ -325,6 +383,52 @@
         color: var(--muted);
       }
       .deal-amount { font-weight: 700; color: var(--ink); }
+
+      /* ---- Activity tabs + scroller ------------------------------------- */
+      /* The bar scrolls sideways instead of wrapping: at 320px six tabs don't
+         fit, and a wrapping bar changes height as counts change. */
+      .tabs {
+        display: flex;
+        gap: 3px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab {
+        margin: 0;
+        width: auto;
+        flex: 0 0 auto;
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .tab:hover:not([aria-disabled="true"]) { background: var(--line); color: var(--ink); }
+      .tab[aria-selected="true"] {
+        background: rgba(147, 113, 240, 0.14);
+        color: var(--purple);
+      }
+      .tab[aria-disabled="true"] { color: var(--disabled-fg); cursor: default; }
+      .tab-count { font-weight: 700; margin-left: 4px; opacity: 0.8; }
+      .tab:focus-visible, .act-list:focus-visible {
+        outline: 2px solid var(--purple);
+        outline-offset: 1px;
+      }
+
+      /* Holds up to 25 rows per type without the section taking over the panel:
+         a ceiling at ~40% of the viewport (never below 200px) and its own
+         scrollbar. */
+      .act-list {
+        display: flex;
+        flex-direction: column;
+        max-height: max(200px, 40vh);
+        overflow-y: auto;
+      }
 
       /* Activity rows: fixed-width type gutter, everything else fluid. */
       .act { display: flex; gap: 8px; }
@@ -346,6 +450,9 @@
         color: var(--muted);
       }
       .act-type { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+      .act-owner { font-weight: 600; }
+      /* The relative time carries a title= with the absolute stamp. */
+      .act-when { cursor: help; }
       .act-summary {
         font-size: 13px;
         font-weight: 500;
@@ -443,19 +550,24 @@
 
       <!-- Live CRM context. Each body is filled from JS with textContent only —
            HubSpot property values are untrusted, so no innerHTML anywhere. -->
-      <section id="crm-contact-section">
+
+      <!-- One dense identity block in place of the old Contact + Company cards:
+           name · stage / title @ company / owner · phone. Its job is context at
+           a glance; the vertical space it gives back goes to Wiza and Activity. -->
+      <section id="crm-identity-section">
         <div class="section-head">
-          <span class="section-title">Contact</span>
-          <span class="pill info" id="crm-contact-pill" style="display: none"></span>
+          <span class="section-title">Contact &amp; company</span>
+          <span class="pill info" id="crm-identity-pill" style="display: none"></span>
         </div>
-        <div class="card crm-body" id="crm-contact"></div>
+        <div class="card crm-body" id="crm-identity"></div>
       </section>
 
-      <section id="crm-company-section">
+      <section id="crm-wiza-section">
         <div class="section-head">
-          <span class="section-title">Company</span>
+          <span class="section-title">Wiza</span>
+          <span class="pill info" id="crm-wiza-pill" style="display: none"></span>
         </div>
-        <div class="card crm-body" id="crm-company"></div>
+        <div class="card crm-body" id="crm-wiza"></div>
       </section>
 
       <section id="crm-deals-section">
@@ -466,11 +578,25 @@
         <div class="card crm-body" id="crm-deals"></div>
       </section>
 
+      <!-- Activity: a tab per engagement type with its count, and a list that
+           scrolls inside a fixed ceiling so 25 rows/type never push the rest of
+           the panel off screen. Tabs are built in JS (counts change per
+           prospect); the list is the single tabpanel they all point at. -->
       <section id="crm-activity-section">
         <div class="section-head">
-          <span class="section-title">Recent activity</span>
+          <span class="section-title">Activity</span>
+          <span class="pill info" id="crm-activity-pill" style="display: none"></span>
         </div>
-        <div class="card crm-body" id="crm-activity"></div>
+        <div class="card crm-body">
+          <div
+            class="tabs"
+            id="crm-activity-tabs"
+            role="tablist"
+            aria-label="Activity type"
+            style="display: none"
+          ></div>
+          <div class="act-list" id="crm-activity" role="tabpanel" tabindex="0"></div>
+        </div>
       </section>
 
       <section>
