@@ -185,6 +185,48 @@ record name links out to HubSpot (opens in a new tab).
 - Not connected → *"Connect HubSpot to see CRM data"*. No prospect loaded → a
   muted empty state.
 
+<!-- BEGIN notes-sync (Phase 4) -->
+
+### Syncing call notes to HubSpot
+
+Dialer Helper Pro can push the notes you take during a call straight onto the
+matched HubSpot **contact and company** timelines, attributed to you.
+
+1. Take your notes in the dialer as usual — either in the **Add note** dialog
+   (the panel picks up your draft **as you type**, so you don't have to save it
+   first) or by saving notes on the Prospect / Account tabs.
+2. Open the side panel. The **Notes** section shows the draft in an editable box
+   with a character count; already-saved notes appear read-only underneath, under
+   "Saved notes in the dialer".
+3. Trim or add anything you want — editing here never changes the note in the
+   dialer, and your edits are kept even if the dialer draft changes underneath
+   you (the panel tells you when that happens).
+4. Click **Sync to HubSpot**.
+
+The button only lights up when all three of these are true; when it doesn't, the
+line underneath says exactly what's missing:
+
+- you're **connected to HubSpot**,
+- there's **note text**, and
+- the prospect is **matched** to a HubSpot contact and/or company record.
+
+Result states:
+
+- **"Note added to contact + company ✓"** with an **Open in HubSpot** link (new
+  tab). If only one record matched, the note goes on that one and the message
+  says so.
+- **"Already synced ✓"** — the exact same text was already synced for this
+  prospect. The button becomes **Sync again** and needs a second, confirming
+  click before it will add a duplicate.
+- Errors are spelled out in place: rate limited (with how long to wait), sign-in
+  expired, missing HubSpot permissions (naming the scope), or a temporary
+  failure. Your note text is never lost on a failure — just click again.
+
+Notes are tied to the prospect they were taken for: loading a different prospect
+in the dialer clears the section rather than re-attributing your notes.
+
+<!-- END notes-sync (Phase 4) -->
+
 ---
 
 ## Configuration
@@ -265,6 +307,40 @@ email does not disturb the booking tab.
 > secret store, and only the hosted token function reads it — which is why
 > `TOKEN_URL` and `INTROSPECT_URL` are absent above: the extension never calls
 > HubSpot's token endpoints.
+
+<!-- BEGIN notes-sync config (Phase 4) -->
+
+**`content-nooks.js` → `NOTES_CONFIG`** (notes capture → `chrome.storage.local`
+key `eb:notes`):
+
+| Key | Purpose | Default |
+|---|---|---|
+| `CARD_TESTID` | `data-testid` of the dialer's notes card (primary anchor) | `"notes-prospect-view-card"` |
+| `DIALOG_SELECTOR` | How the "Add note" dialog is found (it has no testid) | `'[role="dialog"]'` |
+| `TEXTAREA_PLACEHOLDER` | Exact placeholder of the note editor | `"Enter your note here..."` |
+| `TEXTAREA_PLACEHOLDER_PREFIX` | Case-insensitive prefix used if the wording drifts | `"enter your note"` |
+| `TEXTAREA_ANY_FALLBACK` | Accept the dialog's only `<textarea>` even if the placeholder changed entirely | `true` |
+| `TAB_LABELS` | The note scopes, in tab order (map 1:1 to HubSpot contact/company notes) | `["Prospect", "Account"]` |
+| `DEFAULT_TAB` | Assumed scope when the active tab can't be determined | `"prospect"` |
+| `EXCLUDE_TEXTS` | Card chrome to ignore when reading saved notes (exact leaf matches) | `Notes`, `Add note`, `No notes`, tab labels |
+| `DEBOUNCE_MS` | Debounce for note rescans — longer than the prospect scan's `300`, because this also runs while the rep types | `600` |
+| `MAX_CHARS` | Cap on note text carried in storage | `20000` |
+| `CLEAR_DRAFT_ON_CLOSE` | Drop the draft when the dialog closes. Off by default: after Save the dialog unmounts and the rep still needs that text to sync it. A prospect change clears it either way | `false` |
+
+**`hubspot-notes.js` → `CONFIG`** (note creation):
+
+| Key | Purpose | Default |
+|---|---|---|
+| `PORTAL_ID` | Wiza's HubSpot portal, used only to build record links | `"40063500"` |
+| `ASSOC_TYPE_ID_CONTACT` | `HUBSPOT_DEFINED` association type for note → contact | `202` |
+| `ASSOC_TYPE_ID_COMPANY` | `HUBSPOT_DEFINED` association type for note → company | `190` |
+| `MAX_BODY_CHARS` | HubSpot's ceiling for `hs_note_body`, enforced on the rendered HTML | `65536` |
+
+Note text is scraped, untrusted input: it is HTML-escaped before newlines become
+`<br>`, and it only ever reaches the panel's DOM through `.value`/`.textContent`
+— never `innerHTML`.
+
+<!-- END notes-sync config (Phase 4) -->
 
 ---
 
@@ -399,3 +475,15 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for conventions and the PR checklist.
   closes). **Disconnect** deletes both.
 - The captured email is overwritten as prospects change and is only ever read
   back into the booking form.
+
+<!-- BEGIN notes-sync privacy (Phase 4) -->
+- **Notes sync sends data off-device.** This supersedes the "nothing is sent to
+  any external server" line above (written before any HubSpot integration
+  existed): when you click **Sync to HubSpot**, the note text you see in the
+  panel is sent to `api.hubapi.com` and written to the matched contact and
+  company records, attributed to your HubSpot user. Nothing is sent until you
+  click. Notes captured from the dialer are otherwise held in
+  `chrome.storage.local` (key `eb:notes`) and are cleared/replaced when the
+  prospect changes.
+<!-- END notes-sync privacy (Phase 4) -->
+

@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+<!-- BEGIN notes-sync (Phase 4) -->
+
+### Added — notes sync
+
+- **Notes capture** (`content-nooks.js`, new `NOTES_CONFIG` + `eb:notes` key):
+  reads both the **live draft** in the dialer's "Add note" dialog — via `input`
+  events on the `<textarea>`, because typing changes `.value` and never produces
+  a DOM mutation an observer could see — and the **saved notes** rendered in the
+  notes card, per Prospect/Account tab (which map 1:1 onto HubSpot
+  contact-/company-level notes). Anchored on the card's `data-testid` with
+  label-text fallbacks; the saved-note reader is deliberately structure-agnostic
+  because the populated list DOM is still unverified, and returns `null` rather
+  than guessing. Stored under its **own** key (`eb:notes`) — never inside
+  `eb:currentProspect`, which would reset the booking tab's fill state on every
+  keystroke — with the prospect email from the same scan, so a prospect change
+  clears the notes instead of re-attributing them.
+- **`hubspot-notes.js`** (new, `EB.hubspotNotes`): creates note engagements via
+  `POST /crm/v3/objects/notes` through `EB.hubspotAuth.apiFetch`, with
+  `hs_timestamp`, `hubspot_owner_id` (the SDR) and `HUBSPOT_DEFINED`
+  associations to the contact (`202`) and company (`190`) — each included only
+  when its record ID is known. Note text is HTML-escaped before newlines become
+  `<br>`, and the 65,536-char `hs_note_body` ceiling is enforced on the rendered
+  HTML before the request is made. Failures arrive as typed errors
+  (`MISSING_SCOPES` — surfacing HubSpot's own scope names, `RATE_LIMITED` with
+  `Retry-After`, `AUTH`, `TRANSIENT`, `API`).
+- **Side panel Notes section** (replaces the Notes placeholder): editable
+  textarea pre-filled from the captured draft, character count, read-only view of
+  saved notes, and a **Sync to HubSpot** button that is enabled only when signed
+  in, with note text, and with a matched contact or company — otherwise it names
+  exactly what's missing. Live via `storage.onChanged` on `eb:notes` and
+  `eb:prospectContext`; degrades to "prospect not matched yet" when the context
+  key is absent. A rep's edits are never clobbered by an incoming capture.
+- **Idempotent syncing**: a hash of (note text + prospect email) is stored under
+  `eb:notes:lastSynced`; re-syncing identical text shows "Already synced ✓" and
+  requires an explicit confirming second click. Success shows which records were
+  written plus an "Open in HubSpot" link.
+
+<!-- END notes-sync (Phase 4) -->
+
 ### Added
 - **Wiza product data in the side panel** — a new **Wiza** section answers "do
   they already use us?" without leaving the dialer. **User** (from the contact):

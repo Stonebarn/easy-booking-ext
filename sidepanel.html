@@ -480,6 +480,60 @@
       @media (prefers-reduced-motion: reduce) {
         .skel { animation: none; }
       }
+      /* ===== Notes → HubSpot sync (Phase 4) ===== */
+      #notes-hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+      #notes-text {
+        width: 100%;
+        min-height: 92px;
+        resize: vertical;
+        padding: 8px 9px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      #notes-text:disabled { background: var(--surface); color: var(--muted); }
+      .notes-meta {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .notes-meta .over { color: var(--danger-fg); font-weight: 700; }
+      #notes-saved { margin-top: 8px; font-size: 12px; }
+      #notes-saved summary { color: var(--muted); cursor: pointer; }
+      #notes-saved-body {
+        margin-top: 6px;
+        padding: 8px 9px;
+        border-radius: 7px;
+        background: var(--surface);
+        color: var(--muted);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 160px;
+        overflow-y: auto;
+      }
+      #notes-saved-body .saved-label {
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+      }
+      #notes-saved-body .saved-block + .saved-block { margin-top: 8px; }
+      #notes-blockers { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+      #notes-result { font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }
+      #notes-result.ok { color: var(--green-fg); font-weight: 600; }
+      #notes-result.err { color: var(--danger-fg); font-weight: 600; }
+      #notes-result a { color: inherit; }
+      .pill.synced { background: var(--green-bg); color: var(--green-fg); }
     </style>
   </head>
   <body>
@@ -599,14 +653,33 @@
         </div>
       </section>
 
-      <section>
+      <!-- ===== Notes → HubSpot sync (Phase 4) =====
+           Outside #hs-placeholders on purpose: that wrapper is dimmed, and this
+           section is live. -->
+      <hr class="divider" />
+
+      <section id="notes-section">
         <div class="section-head">
           <span class="section-title">Notes</span>
-          <span class="pill soon">Coming soon</span>
+          <span class="pill synced" id="notes-pill" hidden></span>
         </div>
-        <div class="placeholder">
-          <p class="hint">Call notes from the dialer, ready to sync to HubSpot.</p>
+        <p id="notes-hint">Call notes from the dialer, ready to sync to HubSpot.</p>
+        <textarea
+          id="notes-text"
+          placeholder="Notes you write in the dialer appear here — edit before syncing."
+          spellcheck="true"
+        ></textarea>
+        <div class="notes-meta">
+          <span id="notes-count"></span>
+          <span id="notes-source"></span>
         </div>
+        <details id="notes-saved" hidden>
+          <summary id="notes-saved-summary">Saved notes in the dialer</summary>
+          <div id="notes-saved-body"></div>
+        </details>
+        <button id="notes-sync" disabled>Sync to HubSpot</button>
+        <p id="notes-blockers"></p>
+        <p id="notes-result" hidden></p>
       </section>
     </main>
 
@@ -616,6 +689,7 @@
     <script src="hubspot-config.js"></script>
     <script src="hubspot-auth.js"></script>
     <script src="hubspot-data.js"></script>
+    <script src="hubspot-notes.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>
