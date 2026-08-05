@@ -25,18 +25,29 @@ adheres to [Semantic Versioning](https://semver.org/).
   attributed to them (`hubspot_owner_id`) rather than to a shared account. The
   panel shows *Not connected → Connecting… → Connected as {email}* with a
   Disconnect link, and surfaces failures inline.
-  - No backend: token exchange and refresh go straight to HubSpot's
-    `oauth/v3/token`, with the client secret embedded in `hubspot-config.js`
-    (deliberate — see the decision block in that file; it holds only while this
-    repo stays private).
+  - **No client secret in the extension** (SOC 2 secrets management): the two
+    OAuth operations that need it — authorization-code exchange and refresh —
+    run in a hosted Lovable Cloud edge function
+    (`lovable/hubspot-token-function.ts`), which reads the secret from Lovable's
+    secret store and is locked to this extension's origin. The function also
+    performs the identity introspection, so the extension never sees the secret
+    or HubSpot's token endpoints. All other CRM traffic still goes extension →
+    `api.hubapi.com` directly. No host permission is needed for the function's
+    domain — its CORS headers name this extension's origin.
   - Refresh token in `chrome.storage.local` (survives restarts), access token in
     `chrome.storage.session`, refreshed on demand 5 min before expiry behind a
     single-flight guard, plus one refresh-and-retry on a 401.
-  - Identity resolution is best-effort *after* the refresh token is persisted —
-    a failed introspect or owner lookup can no longer strand a rep who is
-    connected in HubSpot but signed out here.
-  - `CLIENT_ID`/`CLIENT_SECRET` ship as `FILL_ME_…` placeholders; until they are
-    filled the section reads **Setup needed** and Connect stays disabled.
+  - Failure handling distinguishes a **dead refresh token** (4xx that HubSpot
+    itself produced → clear auth, show "Connect" again) from a **transient
+    problem** (network, 5xx, or the function refusing the request → keep
+    credentials, so a blip never forces an SDR to re-consent).
+  - The owner-ID lookup runs *after* the refresh token is persisted, so a
+    failure there can no longer strand a rep who is connected in HubSpot but
+    signed out here.
+  - `hubspot-config.js` ships with the real client ID (a public identifier) and
+    the deployed token-service URL, so there is nothing for a rep to configure —
+    load unpacked and click Connect. If either value is ever blanked the panel
+    degrades to a **Setup needed** state rather than failing mid-OAuth.
 - `manifest.json`: `sidePanel` permission, `side_panel.default_path`,
   `minimum_chrome_version: "114"` (the side panel API's floor), the `identity`
   permission, and `https://api.hubapi.com/*` host permission.
@@ -53,10 +64,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   git-tracked `*.js`/`*.mjs` instead of a hard-coded file list, so new scripts
   can't slip through unchecked.
 - README **Privacy & permissions**: the claim that "nothing is sent to any
-  external server" was true until this phase and is not any more. It now states
-  exactly what goes to `api.hubapi.com`, that no Wiza server is involved, that
-  the captured prospect email is still never transmitted, and where the tokens
-  are stored.
+  external server" was true until this phase and is not any more. It now names
+  both destinations (the token function and `api.hubapi.com`), what each
+  receives, that the captured prospect email is still never transmitted, and
+  where the tokens are stored.
 
 ### Removed
 - **`popup.html` / `popup.js`** and `action.default_popup` — replaced by the

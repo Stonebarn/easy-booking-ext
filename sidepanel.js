@@ -191,7 +191,7 @@
 
     hsHintEl.style.display = connected ? "none" : "";
     hsHintEl.textContent = setupNeeded
-      ? "Add CLIENT_ID and CLIENT_SECRET to hubspot-config.js, then reload the extension."
+      ? "Add CLIENT_ID and TOKEN_PROXY_URL to hubspot-config.js, then reload the extension."
       : "Connect your HubSpot account to see CRM context here.";
 
     hsAccountEl.style.display = connected ? "" : "none";
@@ -223,7 +223,15 @@
     if (code === "CANCELLED") return "Connection cancelled.";
     if (code === "NOT_CONNECTED") return "HubSpot connection expired — connect again.";
     if (code === "STATE_MISMATCH") return "Connection failed a security check. Try again.";
-    if (code === "CONFIG_MISSING") return "HubSpot client ID/secret missing in hubspot-config.js.";
+    if (code === "CONFIG_MISSING") {
+      return "CLIENT_ID / TOKEN_PROXY_URL missing in hubspot-config.js.";
+    }
+    // The token service refused us rather than HubSpot — a deployment problem,
+    // so say so instead of implying the SDR did something wrong.
+    if (code === "PROXY_ERROR") {
+      return `HubSpot token service error (${(e && e.proxyError) || "unknown"}). Check TOKEN_PROXY_URL and that the function is deployed.`;
+    }
+    if (code === "REFRESH_FAILED") return "Couldn't reach the HubSpot token service. Try again.";
     return (e && e.message) || "Something went wrong connecting to HubSpot.";
   }
 

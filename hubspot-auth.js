@@ -1,18 +1,33 @@
 // hubspot-auth.js — per-SDR HubSpot OAuth for the side panel.
 //
-// There is no backend. The extension talks to HubSpot directly, using the
-// client secret embedded in hubspot-config.js (see the decision block there).
-// Every request in this file runs from the *side panel document*, never from
-// the service worker: the panel is long-lived while open, whereas the MV3
-// worker can be killed mid-flight, and `https://api.hubapi.com/*` in
-// host_permissions means the panel's fetches skip CORS entirely.
+// The extension holds no client secret. The two OAuth operations that require
+// it run in a hosted Lovable Cloud edge function
+// (lovable/hubspot-token-function.ts):
 //
-// Token lifetimes shape the design: access tokens last 30 min, refresh tokens
+//   POST { action: "exchange", code }          -> { access_token, refresh_token,
+//                                                  expires_in, hub_id,
+//                                                  user_email, user_id }
+//   POST { action: "refresh", refresh_token }  -> { access_token, expires_in }
+//
+// Identity now comes back from the exchange (the function does the introspect
+// server-side, since that call also needs the secret). Everything else — the
+// authorize redirect and every CRM call — stays client-side.
+//
+// No host_permissions entry is needed for the function's domain: it answers the
+// preflight with Access-Control-Allow-Origin set to this extension's origin, so
+// ordinary CORS lets the panel through. host_permissions exists to *bypass*
+// CORS, which is why api.hubapi.com is listed and this host is not.
+//
+// Token lifetimes shape the rest: access tokens last 30 min, refresh tokens
 // never expire and are not rotated. So the refresh token is the durable
 // credential (chrome.storage.local, survives restarts) and the access token is
 // disposable (chrome.storage.session, cleared when the browser closes).
 // Refreshing happens on demand, right before a call needs a token — no alarms,
-// nothing to re-arm, and nothing breaks when the worker dies.
+// nothing to re-arm, and nothing breaks when the service worker dies.
+//
+// Every request here runs from the *side panel document*, never the service
+// worker: the panel is long-lived while open, whereas the MV3 worker can be
+// killed mid-flight.
 //
 // Plain IIFE + globals, not an ES module: CI runs `node --check` on .js files,
 // which parses them as CommonJS. Load hubspot-config.js before this file.
@@ -25,7 +40,7 @@
 
   // Separate keys, never nested inside "eb:currentProspect" — the scheduler
   // content script resets its fill state on *any* write to that key.
-  const AUTH_KEY = "eb:hs:auth"; // local:   { refreshToken, userEmail, hubId, ownerId, connectedAt }
+  const AUTH_KEY = "eb:hs:auth"; // local:   { refreshToken, userEmail, hubId, userId, ownerId, connectedAt }
   const TOKEN_KEY = "eb:hs:accessToken"; // session: { accessToken, expiresAt }
 
   // Refresh this far before actual expiry so a call never races the boundary.
@@ -34,14 +49,18 @@
   const log = (...args) => console.debug("[EasyBooking]", ...args);
 
   // --- Errors --------------------------------------------------------------
-  // Typed so the UI can distinguish "you were never connected" from "HubSpot
-  // rejected us" and show the right affordance.
-  //   CONFIG_MISSING  — client id/secret placeholders never filled in
+  // Typed so the UI can distinguish "you were never connected" from "the token
+  // service is misconfigured" from "HubSpot is having a moment".
+  //   CONFIG_MISSING  — client id / proxy URL placeholders never filled in
   //   NOT_CONNECTED   — no refresh token (signed out), or the refresh token died
   //   CANCELLED       — SDR closed the consent window
   //   DENIED          — HubSpot returned an error on the redirect
   //   STATE_MISMATCH  — CSRF check failed
-  //   EXCHANGE_FAILED / REFRESH_FAILED / API_ERROR
+  //   EXCHANGE_FAILED — HubSpot rejected the authorization code
+  //   REFRESH_FAILED  — transient: network, or the endpoint/HubSpot 5xx'd
+  //   PROXY_ERROR     — the token service itself refused the request (origin
+  //                     lock, bad shape) — never evidence the SDR's token is bad
+  //   API_ERROR       — a CRM call failed
   class HubSpotAuthError extends Error {
     constructor(code, message, cause) {
       super(message);
@@ -55,7 +74,7 @@
     if (!CFG || !CFG.isConfigured()) {
       throw new HubSpotAuthError(
         "CONFIG_MISSING",
-        "HubSpot client ID/secret not set — fill them in hubspot-config.js."
+        "HubSpot CLIENT_ID / TOKEN_PROXY_URL not set — fill them in hubspot-config.js."
       );
     }
   }
@@ -78,8 +97,9 @@
     }
   }
 
+  // Both proxy actions return { access_token, expires_in } (exchange returns
+  // more, which its caller handles), so one writer covers both.
   async function writeToken(tok) {
-    // HubSpot returns expires_in in seconds (1800).
     const record = {
       accessToken: tok.access_token,
       expiresAt: Date.now() + Number(tok.expires_in || 0) * 1000,
@@ -116,53 +136,68 @@
     return record;
   }
 
-  // Merge into the stored record so best-effort enrichment (email, owner id)
+  // Merge into the stored record so best-effort enrichment (the owner lookup)
   // can land after the connection itself is already safely persisted.
   async function patchAuth(patch) {
     const current = (await readAuth()) || {};
     return writeAuth({ ...current, ...patch });
   }
 
-  // --- HTTP ----------------------------------------------------------------
-  function formBody(fields) {
-    const body = new URLSearchParams();
-    for (const [k, v] of Object.entries(fields)) {
-      if (v !== undefined && v !== null) body.append(k, String(v));
-    }
-    return body.toString();
+  // --- The token service ---------------------------------------------------
+  function describeDetail(detail) {
+    if (!detail) return "";
+    if (typeof detail === "string") return detail;
+    // HubSpot error bodies carry { message, category, correlationId, … }.
+    return detail.message || detail.error_description || detail.error || JSON.stringify(detail);
   }
 
-  // HubSpot error bodies are JSON-ish but not guaranteed; never let a parse
-  // failure mask the real status.
-  async function readError(res) {
-    let detail = "";
-    try {
-      const text = await res.text();
-      try {
-        const j = JSON.parse(text);
-        detail = j.message || j.error_description || j.error || text;
-      } catch (_) {
-        detail = text;
-      }
-    } catch (_) {
-      /* body already consumed or unreadable */
-    }
-    return `HTTP ${res.status}${detail ? ` — ${String(detail).slice(0, 300)}` : ""}`;
-  }
-
-  async function postForm(url, fields, errCode) {
+  // POSTs one of the two actions and returns the parsed body. Throws a typed
+  // HubSpotAuthError carrying the HTTP status on `.status` and the endpoint's
+  // `error` slug on `.proxyError` — which is what the refresh path needs to tell
+  // a dead token from a broken deployment.
+  async function callProxy(action, payload, failCode) {
     let res;
     try {
-      res = await fetch(url, {
+      res = await fetch(CFG.TOKEN_PROXY_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
-        body: formBody(fields),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...payload }),
       });
     } catch (e) {
-      throw new HubSpotAuthError(errCode, `Could not reach HubSpot: ${e && e.message}`, e);
+      // Offline, DNS, TLS, or a CORS rejection — all transient as far as our
+      // stored credentials are concerned.
+      throw new HubSpotAuthError(
+        failCode,
+        `Could not reach the HubSpot token service: ${e && e.message}`,
+        e
+      );
     }
-    if (!res.ok) throw new HubSpotAuthError(errCode, await readError(res), res.status);
-    return res.json();
+
+    let body = null;
+    try {
+      body = await res.json();
+    } catch (_) {
+      /* non-JSON (service down, HTML error page) — handled below */
+    }
+
+    if (res.ok) return body || {};
+
+    const slug = (body && body.error) || "";
+    const detail = describeDetail(body && body.detail);
+    const message = detail
+      ? `${slug || "HTTP " + res.status}: ${String(detail).slice(0, 300)}`
+      : slug || `HTTP ${res.status}`;
+
+    // "exchange_failed"/"refresh_failed" mean HubSpot itself rejected us and the
+    // function passed HubSpot's status through. Any other slug is the function
+    // refusing the request (forbidden_origin, missing_refresh_token,
+    // unknown_action, invalid_json, method_not_allowed) — our bug or a
+    // deployment problem, never evidence that the SDR's token is bad.
+    const fromHubSpot = slug === "exchange_failed" || slug === "refresh_failed";
+    const err = new HubSpotAuthError(fromHubSpot ? failCode : "PROXY_ERROR", message, res.status);
+    err.proxyError = slug;
+    err.status = res.status;
+    throw err;
   }
 
   // --- Authorize round trip ------------------------------------------------
@@ -185,9 +220,9 @@
   }
 
   // The registered redirect URL is hard-coded in config (it has to match what
-  // HubSpot has on file) but it is derived from the extension ID, which is only
-  // stable because of manifest.json's "key". Catch a drift here rather than in
-  // an opaque HubSpot error page.
+  // HubSpot *and* the edge function both have on file) but it derives from the
+  // extension ID, which is only stable because of manifest.json's "key". Catch
+  // a drift here rather than in an opaque HubSpot error page.
   function warnOnRedirectDrift() {
     try {
       const expected = chrome.identity.getRedirectURL("hubspot");
@@ -205,24 +240,14 @@
     }
   }
 
-  async function introspect(accessToken) {
-    return postForm(
-      CFG.INTROSPECT_URL,
-      {
-        client_id: CFG.CLIENT_ID,
-        client_secret: CFG.CLIENT_SECRET,
-        token_type_hint: "access_token",
-        access_token: accessToken,
-      },
-      "API_ERROR"
-    );
-  }
-
-  // Owner ID ≠ user ID, and note attribution needs the owner ID.
+  // Owner ID ≠ user ID, and note attribution needs the owner ID. Still done
+  // client-side: it is an ordinary CRM read, no secret involved.
   async function lookupOwnerId(email) {
     const url = `${CFG.API_BASE}/crm/v3/owners/?email=${encodeURIComponent(email)}`;
     const res = await apiFetch(url);
-    if (!res.ok) throw new HubSpotAuthError("API_ERROR", await readError(res), res.status);
+    if (!res.ok) {
+      throw new HubSpotAuthError("API_ERROR", `HTTP ${res.status}`, res.status);
+    }
     const body = await res.json();
     const owner = body && Array.isArray(body.results) ? body.results[0] : null;
     return owner ? String(owner.id) : null;
@@ -253,10 +278,7 @@
     const params = new URL(redirect).searchParams;
     const oauthError = params.get("error");
     if (oauthError) {
-      throw new HubSpotAuthError(
-        "DENIED",
-        params.get("error_description") || oauthError
-      );
+      throw new HubSpotAuthError("DENIED", params.get("error_description") || oauthError);
     }
     if (params.get("state") !== state) {
       throw new HubSpotAuthError("STATE_MISMATCH", "HubSpot returned an unexpected state value.");
@@ -266,52 +288,39 @@
       throw new HubSpotAuthError("DENIED", "HubSpot did not return an authorization code.");
     }
 
-    const tok = await postForm(
-      CFG.TOKEN_URL,
-      {
-        grant_type: "authorization_code",
-        client_id: CFG.CLIENT_ID,
-        client_secret: CFG.CLIENT_SECRET,
-        redirect_uri: CFG.REDIRECT_URL,
-        code,
-      },
-      "EXCHANGE_FAILED"
-    );
+    // The only place the authorization code goes is the token service, which
+    // holds the secret and returns tokens plus the SDR's identity.
+    const tok = await callProxy("exchange", { code }, "EXCHANGE_FAILED");
     if (!tok.refresh_token) {
-      throw new HubSpotAuthError("EXCHANGE_FAILED", "HubSpot did not return a refresh token.");
+      throw new HubSpotAuthError(
+        "EXCHANGE_FAILED",
+        "No refresh token returned by the token service."
+      );
     }
 
-    // Persist the durable credential FIRST. Everything below is enrichment; if
-    // introspection or the owner lookup fails we must not throw away a refresh
-    // token we already hold, or the SDR ends up connected in HubSpot but signed
-    // out here with no way back except revoking the install.
+    // Persist the durable credential FIRST. The owner lookup below is
+    // enrichment; if it fails we must not throw away a refresh token we already
+    // hold, or the SDR ends up connected in HubSpot but signed out here with no
+    // way back except revoking the install.
     await writeToken(tok);
     await writeAuth({
       refreshToken: tok.refresh_token,
-      userEmail: null,
+      userEmail: tok.user_email || null,
       hubId: tok.hub_id != null ? String(tok.hub_id) : null,
+      userId: tok.user_id != null ? String(tok.user_id) : null,
       ownerId: null,
       connectedAt: Date.now(),
     });
-    log("HubSpot connected; resolving identity");
+    log("HubSpot connected as", tok.user_email || "(email unknown)");
 
-    try {
-      const info = await introspect(tok.access_token);
-      await patchAuth({
-        userEmail: info.user || null,
-        hubId: info.hub_id != null ? String(info.hub_id) : null,
-      });
-      if (info.user) {
-        try {
-          const ownerId = await lookupOwnerId(info.user);
-          await patchAuth({ ownerId });
-          log("HubSpot owner id for", info.user, "->", ownerId);
-        } catch (e) {
-          log("owner lookup failed (note attribution will need it later):", e && e.message);
-        }
+    if (tok.user_email) {
+      try {
+        const ownerId = await lookupOwnerId(tok.user_email);
+        await patchAuth({ ownerId });
+        log("HubSpot owner id for", tok.user_email, "->", ownerId);
+      } catch (e) {
+        log("owner lookup failed (note attribution will need it later):", e && e.message);
       }
-    } catch (e) {
-      log("token introspection failed; connected without identity details:", e && e.message);
     }
 
     return getAuthState();
@@ -319,8 +328,8 @@
 
   // --- Access token / refresh ---------------------------------------------
   // Single-flight: the panel can fire several HubSpot calls at once on a
-  // prospect change, and each refresh burns a request against a portal-wide
-  // rate limit. Concurrent callers share one in-flight refresh.
+  // prospect change, and each refresh is a round trip through the token service.
+  // Concurrent callers share one in-flight refresh.
   let inFlightRefresh = null;
 
   async function refreshAccessToken() {
@@ -331,30 +340,31 @@
     }
     let tok;
     try {
-      tok = await postForm(
-        CFG.TOKEN_URL,
-        {
-          grant_type: "refresh_token",
-          client_id: CFG.CLIENT_ID,
-          client_secret: CFG.CLIENT_SECRET,
-          refresh_token: auth.refreshToken,
-        },
-        "REFRESH_FAILED"
-      );
+      tok = await callProxy("refresh", { refresh_token: auth.refreshToken }, "REFRESH_FAILED");
     } catch (e) {
-      // A rejected refresh token is dead for good (revoked install, rotated
-      // secret). Drop it so the UI falls back to a clean "Connect" state
-      // instead of retrying a credential that can never work.
-      if (e instanceof HubSpotAuthError && e.cause === 400) {
-        log("refresh token rejected; clearing stored HubSpot auth");
+      // Only a 4xx that HubSpot itself produced means the refresh token is dead
+      // for good (revoked install, rotated secret) — drop it so the UI falls
+      // back to a clean "Connect" state. A 5xx, a network failure, or the
+      // service refusing the request (PROXY_ERROR) is transient or our own bug:
+      // keep the credentials, because signing an SDR out over a blip would make
+      // them re-consent for nothing.
+      const status = e && e.status;
+      const deadToken =
+        e instanceof HubSpotAuthError &&
+        e.code === "REFRESH_FAILED" &&
+        typeof status === "number" &&
+        status >= 400 &&
+        status < 500;
+      if (deadToken) {
+        log("refresh token rejected by HubSpot; clearing stored auth");
         await logout();
         throw new HubSpotAuthError("NOT_CONNECTED", "HubSpot connection expired — reconnect.", e);
       }
+      log("refresh failed but credentials kept (transient):", e && e.message);
       throw e;
     }
-    // Refresh tokens are not rotated, but honor one if HubSpot ever sends it.
-    if (tok.refresh_token && tok.refresh_token !== auth.refreshToken) {
-      await patchAuth({ refreshToken: tok.refresh_token });
+    if (!tok.access_token) {
+      throw new HubSpotAuthError("REFRESH_FAILED", "No access token returned by the token service.");
     }
     const record = await writeToken(tok);
     log("HubSpot access token refreshed");
@@ -376,9 +386,9 @@
     }
   }
 
-  // Bearer-authenticated fetch with one refresh-and-retry on 401 — covers the
-  // case where a token is revoked or invalidated before its stated expiry.
-  // Returns the raw Response so callers own status handling.
+  // Bearer-authenticated CRM fetch (extension → api.hubapi.com directly) with
+  // one refresh-and-retry on 401 — covers a token revoked before its stated
+  // expiry. Returns the raw Response so callers own status handling.
   async function apiFetch(url, options = {}) {
     const send = async (token) =>
       fetch(url, {

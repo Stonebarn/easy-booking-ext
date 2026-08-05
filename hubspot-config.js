@@ -1,27 +1,15 @@
 // hubspot-config.js — OAuth configuration for the "Easy Booking CRM" HubSpot
 // app (portal 40063500).
 //
-// ─────────────────────────────────────────────────────────────────────────────
-// THE CLIENT SECRET IS EMBEDDED IN THE EXTENSION BY EXPLICIT DECISION
-// (2026-08-05). HubSpot does not support PKCE, so the token exchange needs the
-// secret somewhere; for an internal tool used by ~8 SDRs on an unpacked install
-// with a private-distribution app, a whole token-exchange backend was judged
-// not worth its keep. There is no server: the extension talks to HubSpot
-// directly.
+// There is NO client secret in this file, or anywhere else in the extension.
+// Per SOC 2 secrets management, the secret lives only in Lovable Cloud's secret
+// store, and the two OAuth operations that need it (authorization-code exchange
+// and refresh) happen inside the hosted edge function at TOKEN_PROXY_URL — see
+// lovable/hubspot-token-function.ts. Everything else (all CRM reads and writes)
+// still goes from the extension straight to api.hubapi.com.
 //
-// This is only acceptable while ALL of the following hold:
-//   • this repository stays PRIVATE;
-//   • the HubSpot app stays private-distribution (not Web-Store published,
-//     not marketplace-listed);
-//   • the extension is distributed internally.
-//
-// ROTATE THE SECRET IMMEDIATELY if any of that changes — the repo goes public
-// or is forked outside Wiza, the extension ships to the Chrome Web Store, or a
-// leak is suspected. Rotate in HubSpot: developer account → Easy Booking CRM →
-// Auth → client secret → rotate, then update CLIENT_SECRET below. At that point
-// also revisit the decision: the fallback is a ~100-line Cloudflare Worker
-// exposing /token + /refresh, origin-locked to this extension's ID.
-// ─────────────────────────────────────────────────────────────────────────────
+// The client ID stays here because it is not a secret: it is a public
+// identifier, and the browser-side authorize URL cannot be built without it.
 //
 // Plain IIFE + a global namespace, not an ES module: the repo has no build step
 // and CI runs `node --check` on every .js file, which parses them as CommonJS
@@ -36,18 +24,23 @@
   const EB = (self.EB = self.EB || {});
 
   EB.hubspotConfig = {
-    // ---- Paste these two from the HubSpot app's Auth tab -------------------
-    // developers.hubspot.com → your developer account → Apps → "Easy Booking
-    // CRM" → Auth. Copy "Client ID" and "Client secret" verbatim.
-    CLIENT_ID: "FILL_ME_CLIENT_ID",
-    CLIENT_SECRET: "FILL_ME_CLIENT_SECRET",
-    // -----------------------------------------------------------------------
+    // Public identifier for the "Easy Booking CRM" app (developer account →
+    // Apps → Easy Booking CRM → Auth → "Client ID"). Not a secret. The client
+    // *secret* from that same tab is never stored here — it lives only in
+    // Lovable Cloud's secret store as HUBSPOT_CLIENT_SECRET.
+    CLIENT_ID: "8d295d37-31c3-4075-8b97-1565ed99025f",
 
-    // Must match a redirect URL registered on that same Auth tab, exactly.
-    // chrome.identity.launchWebAuthFlow only intercepts this host, and the
-    // extension ID is pinned by the "key" field in manifest.json — if that key
-    // is ever removed the ID changes and this URL stops matching (hubspot-auth
-    // logs loudly when that happens).
+    // The deployed token-exchange function. It holds the client secret and is
+    // origin-locked to this extension; see lovable/hubspot-token-function.ts.
+    TOKEN_PROXY_URL: "https://wiza-hs-connect.lovable.app/api/public/hubspot-token",
+
+    // Must match a redirect URL registered on the app's Auth tab exactly, and
+    // also the REDIRECT_URL constant inside the edge function — the function
+    // sends its own redirect_uri to HubSpot, and the two must agree or the
+    // exchange fails. chrome.identity.launchWebAuthFlow only intercepts this
+    // host, and the extension ID is pinned by the "key" field in manifest.json;
+    // if that key is ever removed the ID changes and this URL stops matching
+    // (hubspot-auth logs loudly when that happens).
     REDIRECT_URL: "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot",
 
     // Every scope checked as *required* in the app's Auth settings must appear
@@ -67,29 +60,28 @@
       "crm.objects.owners.read",
     ],
 
+    // Browser-side authorize step — no secret involved.
     AUTHORIZE_URL: "https://app.hubspot.com/oauth/authorize",
-    // v3 (v1 is deprecated). Both token endpoints take form-URL-encoded bodies
-    // so the client secret never lands in a query string or a server log.
-    TOKEN_URL: "https://api.hubapi.com/oauth/v3/token",
-    INTROSPECT_URL: "https://api.hubapi.com/oauth/v3/token/introspect",
-    // Base for CRM calls. api.hubapi.com (not api.hubspot.com) because that is
-    // what manifest.json grants host permission for.
+    // Base for CRM calls made directly from the panel. api.hubapi.com (not
+    // api.hubspot.com) because that is what manifest.json grants host
+    // permission for. HubSpot's token endpoints are deliberately absent here:
+    // the extension never calls them.
     API_BASE: "https://api.hubapi.com",
 
     // The portal these SDRs work in — used for record deep links in Phase 3.
     PORTAL_ID: "40063500",
   };
 
-  // Guard against shipping/booting with the placeholders still in place; the
-  // panel turns this into a visible "setup needed" state rather than a failed
-  // OAuth round trip.
+  // Both values are populated, so this passes today. It stays as a guard: if
+  // either is ever blanked or reverted to a FILL_ME placeholder, the panel shows
+  // a visible "Setup needed" state instead of failing mid-OAuth.
   EB.hubspotConfig.isConfigured = function isConfigured() {
     const c = EB.hubspotConfig;
     return !!(
       c.CLIENT_ID &&
-      c.CLIENT_SECRET &&
+      c.TOKEN_PROXY_URL &&
       !c.CLIENT_ID.startsWith("FILL_ME") &&
-      !c.CLIENT_SECRET.startsWith("FILL_ME")
+      !c.TOKEN_PROXY_URL.startsWith("FILL_ME")
     );
   };
 })();
