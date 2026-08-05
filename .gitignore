@@ -34,3 +34,4 @@ hubspot.config.yml
 
 # Playwright MCP session artifacts
 .playwright-mcp/
+.claude/
