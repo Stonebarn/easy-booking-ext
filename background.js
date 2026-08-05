@@ -20,12 +20,12 @@ async function refreshBadge() {
   if (isFresh(p)) {
     chrome.action.setBadgeText({ text: "✓" });
     chrome.action.setBadgeBackgroundColor({ color: GREEN });
-    chrome.action.setTitle({ title: `Easy Booking — ${p.email} captured` });
+    chrome.action.setTitle({ title: `Dialer Helper Pro — ${p.email} captured` });
     // Re-evaluate (and clear) the moment this capture goes stale.
     chrome.alarms.create(STALE_ALARM, { when: p.capturedAt + MAX_AGE_MS + 1000 });
   } else {
     chrome.action.setBadgeText({ text: "" });
-    chrome.action.setTitle({ title: "Easy Booking" });
+    chrome.action.setTitle({ title: "Dialer Helper Pro" });
   }
 }
 

@@ -3,7 +3,7 @@
   "type": "app",
   "config": {
     "description": "Internal Wiza SDR tool: HubSpot connection for the Easy Booking Chrome extension. Per-SDR OAuth for reading contact/company/deal context in the extension side panel and syncing Nooks dialer notes to contacts and companies.",
-    "name": "Easy Booking CRM",
+    "name": "Dialer Helper Pro",
     "distribution": "private",
     "auth": {
       "type": "oauth",

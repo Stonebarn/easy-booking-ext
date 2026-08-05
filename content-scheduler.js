@@ -406,7 +406,7 @@
   `;
   const PANEL_HTML = `
     <div class="bar" role="status" aria-live="polite">
-      <span class="brand"><span class="dot"></span>Easy Booking<span class="src">· from Nooks</span></span>
+      <span class="brand"><span class="dot"></span>Dialer Helper Pro<span class="src">· from dialer</span></span>
       <span class="rows">
         <span class="row"><span class="ico">✉</span><span id="eb-email" class="val"></span><span id="eb-email-pill" class="pill">Ready to fill</span></span>
         <span class="row" id="eb-tz-row"><span class="ico">🕑</span><span id="eb-tz" class="val"></span><span id="eb-tz-pill" class="pill">Ready to fill</span></span>
