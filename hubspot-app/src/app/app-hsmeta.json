@@ -8,8 +8,7 @@
     "auth": {
       "type": "oauth",
       "redirectUrls": [
-        "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot",
-        "http://localhost:3000"
+        "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot"
       ],
       "requiredScopes": [
         "oauth",
