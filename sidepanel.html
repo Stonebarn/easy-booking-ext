@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Easy Booking</title>
+    <style>
+      :root {
+        /* Carried over from the popup so the panel, the on-page banner and the
+           badge all read as one product. */
+        --ink: #0d0d12;
+        --muted: #6b7280;
+        --line: #ececf1;
+        --purple: #9371f0;
+        --green-bg: #e7f8ee;
+        --green-fg: #16a34a;
+        --amber-fg: #b45309;
+        --bg: #fff;
+        --surface: #fafafc;
+        --header-bg: var(--ink);
+        --header-fg: #fff;
+        --disabled-bg: #d1d5db;
+        --disabled-fg: #6b7280;
+        --danger-fg: #b91c1c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #e9e9f0;
+          --muted: #9ca3af;
+          --line: #2c2c36;
+          --purple: #a48bf3;
+          --green-bg: #14351f;
+          --green-fg: #4ade80;
+          --amber-fg: #fbbf24;
+          --bg: #17171d;
+          --surface: #1e1e26;
+          --header-bg: #0d0d12;
+          --header-fg: #f4f4f8;
+          --disabled-bg: #34343f;
+          --disabled-fg: #7b7b88;
+          --danger-fg: #f87171;
+        }
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+        /* The panel is user-resizable with a ~320px floor; never fix a width. */
+        width: 100%;
+        min-width: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        color: var(--ink);
+        background: var(--bg);
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 14px;
+        background: var(--header-bg);
+        color: var(--header-fg);
+        flex: 0 0 auto;
+      }
+      header .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #9ca3af;
+        flex: 0 0 auto;
+      }
+      header.live .dot {
+        background: #22c55e;
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+      }
+      header h1 {
+        font-size: 12px;
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      header .src { font-size: 11px; opacity: 0.55; font-weight: 500; }
+
+      /* The panel is full-height; only this region scrolls. */
+      main {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 14px;
+      }
+
+      section { margin-bottom: 14px; }
+      section:last-child { margin-bottom: 0; }
+
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .section-title {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .field { margin-bottom: 12px; }
+      .field:last-of-type { margin-bottom: 0; }
+      .field-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 3px;
+      }
+      .field-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .pill {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--green-bg);
+        color: var(--green-fg);
+        flex: 0 0 auto;
+      }
+      .pill.soon {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .value {
+        font-size: 14px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .value.sub {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+
+      .empty { text-align: center; padding: 8px 4px 4px; }
+      .empty .big { font-size: 13px; font-weight: 600; color: var(--danger-fg); }
+      .empty .small { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+      .meta {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      .meta.stale { color: var(--amber-fg); font-weight: 600; }
+
+      button {
+        margin-top: 12px;
+        width: 100%;
+        padding: 9px;
+        border: 0;
+        border-radius: 7px;
+        background: var(--purple);
+        color: #fff;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: var(--disabled-bg);
+        color: var(--disabled-fg);
+        cursor: default;
+      }
+
+      /* Placeholder sections for the phases still to land (HubSpot context,
+         notes sync). Structure only — intentionally muted. */
+      .placeholder {
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        padding: 10px 12px;
+      }
+      .placeholder .hint {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 0;
+      }
+      .placeholder button { margin-top: 10px; }
+      #hs-placeholders { opacity: 0.75; }
+      .divider {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 16px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header id="header">
+      <span class="dot"></span>
+      <h1>Easy Booking</h1>
+      <span class="src">· from Nooks</span>
+    </header>
+
+    <main>
+      <section id="prospect">
+        <div id="captured">
+          <div class="field">
+            <div class="field-head">
+              <span class="field-label">Email</span>
+              <span class="pill">Captured</span>
+            </div>
+            <div id="email" class="value"></div>
+          </div>
+          <div class="field" id="tz-field">
+            <div class="field-head">
+              <span class="field-label">Timezone</span>
+              <span class="pill">Captured</span>
+            </div>
+            <div id="tz" class="value"></div>
+            <div id="tz-sub" class="value sub"></div>
+          </div>
+          <div id="meta" class="meta"></div>
+          <button id="fill">Fill booking form now</button>
+        </div>
+        <div id="empty" class="empty" style="display: none">
+          <div class="big">No prospect captured yet</div>
+          <div class="small">Open the Nooks dialer with a prospect loaded.</div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <div id="hs-placeholders">
+        <section>
+          <div class="section-head">
+            <span class="section-title">HubSpot</span>
+            <span class="pill soon">Coming soon</span>
+          </div>
+          <div class="placeholder">
+            <p class="hint">Connect your HubSpot account to see CRM context here.</p>
+            <button id="hs-connect" disabled>Connect HubSpot</button>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <span class="section-title">Contact</span>
+            <span class="pill soon">Coming soon</span>
+          </div>
+          <div class="placeholder">
+            <p class="hint">Lifecycle stage, owner, last activity.</p>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <span class="section-title">Company</span>
+            <span class="pill soon">Coming soon</span>
+          </div>
+          <div class="placeholder">
+            <p class="hint">Name, domain, industry, size, owner.</p>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <span class="section-title">Deals</span>
+            <span class="pill soon">Coming soon</span>
+          </div>
+          <div class="placeholder">
+            <p class="hint">Open deals with stage, amount and close date.</p>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <span class="section-title">Recent activity</span>
+            <span class="pill soon">Coming soon</span>
+          </div>
+          <div class="placeholder">
+            <p class="hint">Latest calls, emails, meetings, notes and tasks.</p>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <span class="section-title">Notes</span>
+            <span class="pill soon">Coming soon</span>
+          </div>
+          <div class="placeholder">
+            <p class="hint">Call notes from Nooks, ready to sync to HubSpot.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
