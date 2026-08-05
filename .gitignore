@@ -29,3 +29,8 @@ Thumbs.db
 # Env / secrets
 .env
 .env.*
+hubspot.config.yml
+.hsaccount
+
+# Playwright MCP session artifacts
+.playwright-mcp/
