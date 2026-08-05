@@ -1,7 +1,0 @@
-- generic [active] [ref=e1]:
-  - link "Manage cookie preferences" [ref=e2] [cursor=pointer]:
-    - /url: "#"
-    - text: Cookies
-  - generic [ref=e7]:
-    - img "Nooks Logo" [ref=e9]
-    - progressbar [ref=e11]

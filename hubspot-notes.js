@@ -68,10 +68,17 @@
   }
 
   // --- Payload -------------------------------------------------------------
+  // Record IDs are scraped out of the dialer's DOM, which means they are
+  // attacker-influenced in the limited sense that whatever renders that page
+  // decides what we read. HubSpot object IDs are always digit strings, so
+  // anything else is rejected outright rather than sent as an association
+  // target — a note landing on the wrong customer's record is not recoverable
+  // by the rep.
   function idString(value) {
     if (value == null) return null;
     const s = String(value).trim();
-    return s ? s : null;
+    if (!s) return null;
+    return /^\d+$/.test(s) ? s : null;
   }
 
   function associationsFor(contactId, companyId) {

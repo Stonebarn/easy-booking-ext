@@ -532,15 +532,29 @@
 
   // If the prospect changes while the booking tab is already open, re-apply and
   // bring the panel back (a new prospect overrides an earlier dismissal).
+  //
+  // Only a *different* prospect resets fill state. The same key is also written
+  // for same-prospect nudges (the panel's "Fill now" re-stamps capturedAt), and
+  // a blanket reset there re-drove the timezone dropdown: unlike the email
+  // field, trySelectTimezone has no "rep already typed here" guard, so a rep who
+  // hand-corrected an ambiguously-abbreviated zone (CST/IST/AST resolve to
+  // several regions) would silently lose that correction — and a dismissed
+  // banner would reappear. Re-applying for the same prospect is still useful for
+  // a late-rendering form, so we re-run apply() either way and only clear state
+  // when the email actually changed.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes[STORAGE_KEY]) return;
     const next = changes[STORAGE_KEY].newValue;
-    if (next && next.email) {
+    if (!next || !next.email) return;
+    const lower = (s) => String(s || "").trim().toLowerCase();
+    const prevEmail = (changes[STORAGE_KEY].oldValue || {}).email || null;
+    const isNewProspect = lower(next.email) !== lower(prevEmail);
+    if (isNewProspect) {
       emailFilled = false;
       tzSelected = false;
       tzLabel = null;
       panelDismissed = false;
-      apply();
     }
+    apply();
   });
 })();

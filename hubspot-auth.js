@@ -389,7 +389,28 @@
   // Bearer-authenticated CRM fetch (extension → api.hubapi.com directly) with
   // one refresh-and-retry on 401 — covers a token revoked before its stated
   // expiry. Returns the raw Response so callers own status handling.
-  async function apiFetch(url, options = {}) {
+  //
+  // A bare path is resolved against API_BASE. Callers used to have to prefix it
+  // themselves, and one didn't: a relative URL from the panel document resolves
+  // against chrome-extension://, so the request never reached HubSpot. Doing it
+  // here means no caller can get it wrong. The origin assertion then guarantees
+  // the bearer token can only ever be attached to a HubSpot request, whatever a
+  // future caller passes in.
+  async function apiFetch(path, options = {}) {
+    const url = /^https?:/i.test(path) ? path : `${CFG.API_BASE}${path}`;
+    let origin;
+    try {
+      origin = new URL(url).origin;
+    } catch (e) {
+      throw new HubSpotAuthError("CONFIG_MISSING", `Invalid request URL: ${path}`);
+    }
+    if (origin !== new URL(CFG.API_BASE).origin) {
+      throw new HubSpotAuthError(
+        "CONFIG_MISSING",
+        `Refusing to send credentials to ${origin}`
+      );
+    }
+
     const send = async (token) =>
       fetch(url, {
         ...options,
