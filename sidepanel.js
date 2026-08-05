@@ -1,10 +1,14 @@
 // sidepanel.js — the side panel replaces the old toolbar popup.
 //
-// Three independent concerns live here, each with its own state object and
-// render function: the captured-prospect card (ported from popup.js), the
+// Four concerns live here, each with its own state object and render function:
+// the captured-prospect card (ported from popup.js), the settings popover, the
 // HubSpot connection (Phase 2), and the live CRM context — contact, company,
 // deals, activity (Phase 3). They share the document and one signal: whether
 // HubSpot is connected.
+//
+// The settings popover owns both chrome-level actions: Refresh, and the whole
+// HubSpot connection UI. Nothing about the connection lives in the panel body
+// any more — the header's second dot is the only always-visible signal.
 //
 // Differences from popup.js that matter: the panel document stays open while the
 // rep moves between the Nooks and scheduler tabs, so it cannot read storage once
@@ -160,15 +164,118 @@
   });
 
   // ==========================================================================
+  // Settings popover
+  //
+  // Holds the two things that aren't per-prospect context: Refresh, and the
+  // HubSpot connection controls. One open/closed boolean, expressed as the
+  // dialog's `hidden` attribute so there is no second source of truth.
+  //
+  // Dismissal: Escape from anywhere in the document, or a pointer-down outside
+  // the dialog. Focus is kept inside while it's open (Tab wraps) and handed back
+  // to the gear on close, so a keyboard rep is never dropped somewhere random.
+  // ==========================================================================
+  const settingsBtn = document.getElementById("settings-btn");
+  const settingsPop = document.getElementById("settings-pop");
+  const settingsCloseBtn = document.getElementById("settings-close");
+
+  const FOCUSABLE_SEL =
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+  // Deliberately not offsetParent/getBoundingClientRect: this has to give the
+  // same answer under a test harness with no layout engine as it does in Chrome,
+  // and everything in the popover is hidden by `hidden` or `display: none`.
+  function isReachable(node) {
+    for (let n = node; n && n.nodeType === 1; n = n.parentElement) {
+      if (n.hidden) return false;
+      if (n.style && n.style.display === "none") return false;
+    }
+    return true;
+  }
+
+  function settingsFocusables() {
+    return Array.prototype.filter.call(
+      settingsPop.querySelectorAll(FOCUSABLE_SEL),
+      (n) => !n.disabled && isReachable(n)
+    );
+  }
+
+  const settingsIsOpen = () => !settingsPop.hidden;
+
+  function openSettings() {
+    if (settingsIsOpen()) return;
+    settingsPop.hidden = false;
+    settingsBtn.setAttribute("aria-expanded", "true");
+    const first = settingsFocusables()[0];
+    if (first) first.focus();
+  }
+
+  // restoreFocus is skipped for outside clicks: the rep is already reaching for
+  // something else, and yanking focus back to the gear would fight them.
+  function closeSettings(restoreFocus) {
+    if (!settingsIsOpen()) return;
+    settingsPop.hidden = true;
+    settingsBtn.setAttribute("aria-expanded", "false");
+    if (restoreFocus !== false) settingsBtn.focus();
+  }
+
+  function toggleSettings() {
+    if (settingsIsOpen()) closeSettings();
+    else openSettings();
+  }
+
+  settingsBtn.addEventListener("click", toggleSettings);
+  settingsCloseBtn.addEventListener("click", () => closeSettings());
+
+  document.addEventListener("keydown", (ev) => {
+    if (!settingsIsOpen()) return;
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeSettings();
+      return;
+    }
+    if (ev.key !== "Tab") return;
+    // Focus trap. The stops change as the connection state does (Connect vs
+    // Disconnect, Refresh enabled or not), so the list is rebuilt per keypress
+    // rather than cached at open time.
+    const items = settingsFocusables();
+    if (!items.length) return;
+    ev.preventDefault();
+    const at = items.indexOf(document.activeElement);
+    let next;
+    if (ev.shiftKey) next = at <= 0 ? items.length - 1 : at - 1;
+    else next = at === -1 || at === items.length - 1 ? 0 : at + 1;
+    items[next].focus();
+  });
+
+  // mousedown rather than click: a press outside should dismiss even if the
+  // button is released elsewhere (a drag, a text selection). The gear is excluded
+  // so its own click still toggles instead of closing-then-reopening.
+  document.addEventListener("mousedown", (ev) => {
+    if (!settingsIsOpen()) return;
+    const target = ev.target;
+    if (settingsPop.contains(target) || settingsBtn.contains(target)) return;
+    closeSettings(false);
+  });
+
+  // ==========================================================================
   // HubSpot connection (Phase 2)
   //
-  // States: "setup-needed" (client id/secret placeholders still in
-  // hubspot-config.js) → "signed-out" → "connecting" → "connected". `error` is
-  // an overlay on whichever state we're in, not a state of its own, so a failed
-  // attempt leaves the SDR looking at a usable "Connect" button.
+  // States: "setup-needed" (client id / token service URL never filled in) →
+  // "signed-out" → "connecting" → "connected". `error` is an overlay on
+  // whichever state we're in, not a state of its own, so a failed attempt leaves
+  // the SDR looking at a usable "Connect" button.
+  //
+  // All four render inside the settings popover. The header dot is their
+  // summary: green connected, amber anything else, with the detail in its
+  // tooltip.
+  //
+  // Copy rule for every message below: say what happened and what to do about
+  // it, in the rep's words. Error codes, HTTP statuses, file names and HubSpot's
+  // own error bodies go to console.debug, never to the panel.
   // ==========================================================================
   const auth = self.EB && self.EB.hubspotAuth;
 
+  const hsDotEl = document.getElementById("hs-dot");
   const hsPillEl = document.getElementById("hs-pill");
   const hsHintEl = document.getElementById("hs-hint");
   const hsAccountEl = document.getElementById("hs-account");
@@ -186,10 +293,26 @@
     connected: "Connected",
   };
 
+  // What the header dot says on hover — the only connection detail visible
+  // without opening the popover.
+  function hsDotTitle() {
+    if (hs.status === "connected") {
+      return hs.email ? `HubSpot connected as ${hs.email}` : "HubSpot connected";
+    }
+    if (hs.status === "connecting") return "Connecting to HubSpot…";
+    if (hs.status === "setup-needed") return "HubSpot isn't set up in this build";
+    return "HubSpot not connected — open Settings to connect";
+  }
+
   function renderHubSpot() {
     const connected = hs.status === "connected";
     const connecting = hs.status === "connecting";
     const setupNeeded = hs.status === "setup-needed";
+
+    hsDotEl.className = "hs-dot " + (connected ? "on" : "off");
+    const dotTitle = hsDotTitle();
+    hsDotEl.title = dotTitle;
+    hsDotEl.setAttribute("aria-label", dotTitle);
 
     hsPillEl.textContent = HS_PILL_TEXT[hs.status] || HS_PILL_TEXT["signed-out"];
     // Green (the default .pill) only when actually connected.
@@ -197,7 +320,7 @@
 
     hsHintEl.style.display = connected ? "none" : "";
     hsHintEl.textContent = setupNeeded
-      ? "Add CLIENT_ID and TOKEN_PROXY_URL to hubspot-config.js, then reload the extension."
+      ? "HubSpot isn't set up in this build yet. Reload the extension, and tell the team if it stays like this."
       : "Connect your HubSpot account to see CRM context here.";
 
     hsAccountEl.style.display = connected ? "" : "none";
@@ -228,26 +351,50 @@
     return authState.connected ? "connected" : "signed-out";
   }
 
+  // Rep-facing text for a typed HubSpotAuthError. The raw code, HTTP status and
+  // the token service's own error slug are logged by the caller — none of them
+  // belong on screen, where they only ever read as "something broke, unclear
+  // whose fault".
   function hsErrorText(e) {
     const code = e && e.code;
     if (code === "CANCELLED") return "Connection cancelled.";
     if (code === "NOT_CONNECTED") return "HubSpot connection expired — connect again.";
     if (code === "STATE_MISMATCH") return "Connection failed a security check. Try again.";
     if (code === "CONFIG_MISSING") {
-      return "CLIENT_ID / TOKEN_PROXY_URL missing in hubspot-config.js.";
+      return "HubSpot isn't set up in this build. Reload the extension, and tell the team if it stays like this.";
     }
-    // The token service refused us rather than HubSpot — a deployment problem,
-    // so say so instead of implying the SDR did something wrong.
+    // The token service refused us rather than HubSpot — nothing the rep did, and
+    // nothing they can fix, so point them at the team instead of at a setting.
     if (code === "PROXY_ERROR") {
-      return `HubSpot token service error (${(e && e.proxyError) || "unknown"}). Check TOKEN_PROXY_URL and that the function is deployed.`;
+      return "Couldn't sign in to HubSpot — the connection service turned us away. Try again in a moment, and tell the team if it keeps happening.";
     }
-    if (code === "REFRESH_FAILED") return "Couldn't reach the HubSpot token service. Try again.";
-    return (e && e.message) || "Something went wrong connecting to HubSpot.";
+    if (code === "REFRESH_FAILED" || code === "EXCHANGE_FAILED") {
+      return "Couldn't reach HubSpot to finish signing in. Try again in a moment.";
+    }
+    if (code === "DENIED") return "HubSpot didn't approve the connection. Try again.";
+    return "Couldn't connect to HubSpot. Try again in a moment.";
+  }
+
+  // One place that turns an auth failure into console detail + panel copy, so the
+  // two can't drift apart.
+  function logHsError(where, e) {
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[EasyBooking] HubSpot " + where + " failed:",
+      (e && e.code) || "?",
+      (e && e.proxyError) || "",
+      (e && e.message) || e
+    );
   }
 
   async function refreshHubSpotState() {
     if (!auth) {
-      setHubSpot({ status: "setup-needed", error: "hubspot-auth.js failed to load." });
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] hubspot-auth.js did not load — HubSpot is unavailable.");
+      setHubSpot({
+        status: "setup-needed",
+        error: "HubSpot isn't available in this build. Reload the extension, and tell the team if it stays like this.",
+      });
       return;
     }
     try {
@@ -258,6 +405,7 @@
         error: null,
       });
     } catch (e) {
+      logHsError("state check", e);
       setHubSpot({ error: hsErrorText(e) });
     }
   }
@@ -275,8 +423,7 @@
         // eslint-disable-next-line no-console
         console.debug("[EasyBooking] HubSpot connected as", authState.userEmail || "(email unknown)");
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.debug("[EasyBooking] HubSpot connect failed:", (e && e.code) || "", e && e.message);
+        logHsError("connect", e);
         // Re-read rather than assuming signed-out: login() persists the refresh
         // token before the identity lookups, so a late failure can still leave
         // us genuinely connected.
@@ -289,8 +436,9 @@
       try {
         await auth.logout();
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.debug("[EasyBooking] HubSpot disconnect failed:", e && e.message);
+        // Local token removal is best-effort; the panel signs out regardless, so
+        // there is nothing for the rep to act on here.
+        logHsError("disconnect", e);
       }
       setHubSpot({ status: "signed-out", email: null, error: null });
     });
@@ -315,8 +463,15 @@
   const data = self.EB && self.EB.hubspotData;
   const fmt = data && data.format;
 
+  if (!data) {
+    // Logged once here rather than from crmRender, which runs on every change.
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] hubspot-data.js did not load — CRM sections are unavailable.");
+  }
+
   const crmEls = {
     refresh: document.getElementById("crm-refresh"),
+    refreshNote: document.getElementById("crm-refresh-note"),
     identity: document.getElementById("crm-identity"),
     identityPill: document.getElementById("crm-identity-pill"),
     wiza: document.getElementById("crm-wiza"),
@@ -413,6 +568,19 @@
     body.appendChild(el("p", bad ? "crm-note bad" : "crm-note", text));
   }
 
+  // The signed-out empty state. Now that the connection UI lives behind a gear,
+  // the sections that are empty *because* of it carry the way in — otherwise
+  // "Connect HubSpot to see CRM data" names an action with nothing to click.
+  function setConnectNote(body) {
+    clearNode(body);
+    const note = el("p", "crm-note", "Connect HubSpot to see CRM data · ");
+    const link = el("button", "linkish inline", "Connect");
+    link.type = "button";
+    link.addEventListener("click", () => openSettings());
+    note.appendChild(link);
+    body.appendChild(note);
+  }
+
   // `variant` picks the colour (see the .pill rules in sidepanel.html); it is a
   // class name we choose, never a value from HubSpot. Omit it for the default
   // muted outline; pass "" for the plain (green) pill.
@@ -451,15 +619,18 @@
     return `${ctx.email}|${ctx.hsContactId || ""}|${ctx.hsCompanyId || ""}`;
   }
 
+  // Same copy rule as the connection block: no codes, no HTTP statuses, and the
+  // next action named. "Settings" is where both Connect and Refresh now live, so
+  // that's where every recovery points.
   function crmErrorText(err) {
     const code = err && err.code;
     if (code === "RATE_LIMITED") {
       const secs = crm.retrySecs == null ? "a few" : crm.retrySecs;
       return `HubSpot rate limit — retrying in ${secs}s`;
     }
-    if (code === "AUTH") return "HubSpot sign-in expired — connect again above.";
+    if (code === "AUTH") return "HubSpot sign-in expired — connect again in Settings.";
     if (code === "NOT_FOUND") return "Nothing to look up for this prospect.";
-    return "Couldn't reach HubSpot. Click Refresh to try again.";
+    return "Couldn't reach HubSpot. Use Refresh in Settings to try again.";
   }
 
   // Deals and activity can fail on their own without sinking the bundle.
@@ -468,8 +639,8 @@
       const secs = Math.max(1, Math.round((Number(retryAfterMs) || 10000) / 1000));
       return `HubSpot rate limit — retrying in ${secs}s`;
     }
-    if (code === "AUTH") return "HubSpot sign-in expired — connect again above.";
-    return "Couldn't load this section. Click Refresh to try again.";
+    if (code === "AUTH") return "HubSpot sign-in expired — connect again in Settings.";
+    return "Couldn't load this section. Use Refresh in Settings to try again.";
   }
 
   // --- section renderers ---------------------------------------------------
@@ -826,9 +997,20 @@
     selectActivityTab(tabs[next].dataset.tab, true);
   });
 
+  // Why the Refresh button is disabled, in the popover's own words. Same rule as
+  // everywhere else: never a dead control with no explanation.
+  function refreshNoteText() {
+    if (!data) return "CRM data isn't available in this build. Reload the extension.";
+    if (!crm.connected) return "Connect HubSpot below to load CRM data.";
+    if (!crmEmail()) return "No prospect captured yet — open one in the dialer.";
+    if (crm.status === "loading") return "Loading this prospect from HubSpot…";
+    return "Reloads this prospect from HubSpot. Otherwise their data is cached for 5 minutes.";
+  }
+
   function crmRender() {
     const email = crmEmail();
     crmEls.refresh.disabled = !(data && crm.connected && email && crm.status !== "loading");
+    if (crmEls.refreshNote) crmEls.refreshNote.textContent = refreshNoteText();
     setPill(crmEls.identityPill, null);
     setPill(crmEls.wizaPill, null);
     setPill(crmEls.dealsPill, null);
@@ -837,11 +1019,13 @@
     hideActivityTabs();
 
     if (!data) {
-      for (const body of crmBodies) setNote(body, "hubspot-data.js failed to load.", true);
+      for (const body of crmBodies) {
+        setNote(body, "CRM data isn't available in this build. Reload the extension.", true);
+      }
       return;
     }
     if (!crm.connected) {
-      for (const body of crmBodies) setNote(body, "Connect HubSpot to see CRM data");
+      for (const body of crmBodies) setConnectNote(body);
       return;
     }
     if (!email) {
@@ -995,12 +1179,15 @@
     scheduleCrmFetch({ force: !!opts.force || idsAppeared });
   }
 
+  // Refresh lives in the settings popover; close it on click so the sections it
+  // just reloaded are what the rep is looking at.
   crmEls.refresh.addEventListener("click", () => {
     const email = crmEmail();
     if (!data || !email) return;
     data.clearCache(email);
     // eslint-disable-next-line no-console
     console.debug("[EasyBooking] CRM refresh requested for", email);
+    closeSettings();
     crmFetch({ force: true });
   });
 
@@ -1186,7 +1373,7 @@
       const over = bodyLen > api.MAX_BODY_CHARS;
       countEl.classList.toggle("over", over);
       countEl.textContent = over
-        ? `${bodyLen.toLocaleString()} / ${api.MAX_BODY_CHARS.toLocaleString()} characters as HubSpot HTML — too long`
+        ? `${bodyLen.toLocaleString()} / ${api.MAX_BODY_CHARS.toLocaleString()} characters once formatted — too long`
         : `${trimmed.length.toLocaleString()} characters`;
     } else {
       countEl.classList.remove("over");
@@ -1380,17 +1567,26 @@
     }
   }
 
-  // Typed errors carry their own rep-readable message; this only adds the bits
-  // that depend on panel state.
+  // Typed errors from hubspot-notes.js carry their own rep-readable message; this
+  // only adds the bits that depend on panel state. Anything *untyped* reaching
+  // here is a bug, and its raw message (a TypeError, a stack) is no use to a rep —
+  // so it gets the generic line and the detail goes to the console.
   function errorMessage(e) {
-    const base = (e && e.message) || "Sync failed. Try again.";
-    switch (e && e.code) {
+    const api = notesApi();
+    const codes = (api && api.ERROR_CODES) || [];
+    const typed = !!(e && e.code && codes.indexOf(e.code) !== -1 && e.message);
+    if (!typed) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] notes sync failed with an untyped error:", e);
+      return "Sync failed. Try again — your note text is still here.";
+    }
+    switch (e.code) {
       case "MISSING_SCOPES":
-        return `${base} (Nothing was written to HubSpot.)`;
+        return `${e.message} (Nothing was written to HubSpot.)`;
       case "TRANSIENT":
-        return `${base} Your note text is still here.`;
+        return `${e.message} Your note text is still here.`;
       default:
-        return base;
+        return e.message;
     }
   }
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Validates manifest.json: well-formed JSON, required fields, and that every
-// file it references actually exists. Run locally or in CI (no deps).
+// file it references actually exists — plus the side panel's own <script src>
+// list, because a renamed panel script breaks the panel silently (the manifest
+// never mentions it, so nothing else would notice). Run locally or in CI (no
+// deps).
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
@@ -45,16 +48,39 @@ need(manifest.action && typeof manifest.action === "object",
   `"action" is required (the toolbar button that opens the side panel)`);
 need(!!manifest.action?.default_icon, "action.default_icon is required");
 
+// permissions. The panel *is* the UI and per-SDR OAuth is how it gets data, so
+// both of these are load-bearing rather than optional extras.
+const permissions = manifest.permissions ?? [];
+for (const perm of ["sidePanel", "identity"]) {
+  need(permissions.includes(perm), `"${perm}" permission is required`);
+}
+// chrome.sidePanel landed in Chrome 114.
+need(typeof manifest.minimum_chrome_version === "string" && manifest.minimum_chrome_version,
+  "minimum_chrome_version is required (side panel needs Chrome 114+)");
+
 // side panel
-if (manifest.side_panel) {
-  const path = manifest.side_panel.default_path;
-  need(typeof path === "string" && path, "side_panel.default_path is required");
-  if (path) need(fileExists(path), `side_panel.default_path missing: ${path}`);
-  need((manifest.permissions ?? []).includes("sidePanel"),
-    `"sidePanel" permission is required when a "side_panel" key is present`);
-  // chrome.sidePanel landed in Chrome 114.
-  need(typeof manifest.minimum_chrome_version === "string" && manifest.minimum_chrome_version,
-    "minimum_chrome_version is required (side panel needs Chrome 114+)");
+need(manifest.side_panel && typeof manifest.side_panel === "object",
+  `"side_panel" is required (the panel is the extension's UI)`);
+const panelPath = manifest.side_panel?.default_path;
+need(typeof panelPath === "string" && panelPath, "side_panel.default_path is required");
+if (panelPath) need(fileExists(panelPath), `side_panel.default_path missing: ${panelPath}`);
+
+// Scripts the side panel document loads. These are invisible to the manifest, so
+// a rename here fails at runtime with nothing but a console error — validate them
+// the same way as manifest-referenced files.
+if (panelPath && panelPath.endsWith(".html") && fileExists(panelPath)) {
+  const html = readFileSync(join(root, panelPath), "utf8");
+  const srcs = [...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]);
+  need(srcs.length > 0, `${panelPath} loads no scripts — the panel would render inert`);
+  for (const src of srcs) {
+    // MV3's CSP forbids remote code; a CDN <script> would be silently blocked.
+    if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src)) {
+      errors.push(`${panelPath} loads a remote script (blocked by MV3 CSP): ${src}`);
+      continue;
+    }
+    const rel = src.replace(/^\.?\//, "").split(/[?#]/)[0];
+    need(fileExists(rel), `${panelPath} references a missing script: ${src}`);
+  }
 }
 
 // icons (action + top-level). Each may be a single path string or a

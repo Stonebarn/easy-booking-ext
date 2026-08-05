@@ -121,7 +121,7 @@
     if (body.length > CONFIG.MAX_BODY_CHARS) {
       throw noteError(
         "TOO_LONG",
-        `Note is too long for HubSpot: ${body.length.toLocaleString()} characters of note HTML (from ${text.length.toLocaleString()} characters of text), limit is ${CONFIG.MAX_BODY_CHARS.toLocaleString()}. Trim it and try again.`,
+        `Note is too long for HubSpot — ${body.length.toLocaleString()} characters once formatted, and the limit is ${CONFIG.MAX_BODY_CHARS.toLocaleString()}. Trim it and try again.`,
         { bodyLength: body.length, textLength: text.length, limit: CONFIG.MAX_BODY_CHARS }
       );
     }
@@ -176,7 +176,7 @@
       }
       return { ok: true, status: 200, body: res, retryAfter: null };
     }
-    throw noteError("TRANSIENT", "HubSpot returned an unrecognized response. Try again.");
+    throw noteError("TRANSIENT", "HubSpot sent back something unexpected. Try again.");
   }
 
   // HubSpot surfaces missing scopes inconsistently (top-level context, per-error
@@ -211,6 +211,11 @@
     return Number.isFinite(n) && n > 0 ? Math.ceil(n) : null;
   }
 
+  // Rep-facing message per failure shape. HubSpot's own error body (status,
+  // category, correlation IDs) rides along on the error object for the console —
+  // it never becomes panel copy, where an HTTP number tells a rep nothing they
+  // can act on. The one exception is missing scope *names*, which are exactly
+  // what whoever fixes the app needs to hear.
   function errorFromResponse(parsed) {
     const body = parsed.body || {};
     const category = String(body.category || "").toUpperCase();
@@ -222,8 +227,8 @@
       return noteError(
         "RATE_LIMITED",
         seconds
-          ? `HubSpot is rate limiting us — try again in ${seconds}s.`
-          : "HubSpot is rate limiting us — wait a moment and try again.",
+          ? `HubSpot rate limit — try again in ${seconds}s.`
+          : "HubSpot rate limit — wait a moment and try again.",
         { retryAfterSec: seconds, status, hubspotMessage: message }
       );
     }
@@ -233,8 +238,8 @@
       return noteError(
         "MISSING_SCOPES",
         scopes.length
-          ? `HubSpot rejected the note: the connected app is missing the scope(s) ${scopes.join(", ")}. Add them to the app and reconnect.`
-          : `HubSpot rejected the note for missing permissions${message ? `: ${message}` : "."} Check the app's scopes and reconnect.`,
+          ? `HubSpot is missing the permission${scopes.length > 1 ? "s" : ""} ${scopes.join(", ")} for notes. Ask the team to add ${scopes.length > 1 ? "them" : "it"} to the app, then reconnect.`
+          : "HubSpot refused the note for missing permissions. Ask the team to check the app's permissions, then reconnect.",
         { scopes, status, hubspotMessage: message }
       );
     }
@@ -242,22 +247,21 @@
     if (status === 401 || status === 403 || category === "EXPIRED_AUTHENTICATION" || category === "INVALID_AUTHENTICATION") {
       return noteError(
         "AUTH",
-        `HubSpot rejected the sign-in${message ? `: ${message}` : "."} Reconnect HubSpot and try again.`,
+        "HubSpot sign-in expired — connect again in Settings, then sync.",
         { status, hubspotMessage: message }
       );
     }
 
     if (status === 408 || status >= 500) {
-      return noteError(
-        "TRANSIENT",
-        `HubSpot had a problem creating the note (HTTP ${status}). Try again in a moment.`,
-        { status, hubspotMessage: message }
-      );
+      return noteError("TRANSIENT", "HubSpot had a problem saving the note. Try again in a moment.", {
+        status,
+        hubspotMessage: message,
+      });
     }
 
     return noteError(
       "API",
-      `HubSpot wouldn't create the note (HTTP ${status})${message ? `: ${message}` : "."}`,
+      "HubSpot wouldn't save the note. Try again, and add it in HubSpot directly if it keeps failing.",
       { status, hubspotMessage: message, category: category || null }
     );
   }
@@ -268,7 +272,7 @@
     const opts = input || {};
     const auth = ebGlobal.hubspotAuth;
     if (!auth || typeof auth.apiFetch !== "function") {
-      throw noteError("AUTH", "HubSpot isn't connected yet — connect it, then sync.");
+      throw noteError("AUTH", "HubSpot isn't connected yet — connect it in Settings, then sync.");
     }
 
     const payload = buildCreatePayload(opts);
@@ -284,9 +288,11 @@
       });
     } catch (e) {
       if (e && e.code && ERROR_CODES.indexOf(e.code) !== -1) throw e;
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] note request failed before a response:", (e && e.message) || e);
       throw noteError(
         "TRANSIENT",
-        `Couldn't reach HubSpot${e && e.message ? ` (${e.message})` : ""}. Check your connection and try again.`,
+        "Couldn't reach HubSpot. Check your connection and try again.",
         { cause: e || null }
       );
     }
@@ -334,7 +340,7 @@
     const s = input || {};
     const text = String(s.text == null ? "" : s.text).trim();
     const reasons = [];
-    if (!s.signedIn) reasons.push("Connect HubSpot above to sync notes.");
+    if (!s.signedIn) reasons.push("Connect HubSpot in Settings to sync notes.");
     if (!text) reasons.push("No note text yet — write a note in the dialer (or type one here).");
     if (!idString(s.contactId) && !idString(s.companyId)) {
       reasons.push("Prospect not matched to HubSpot yet — no contact or company record ID was captured.");
@@ -342,7 +348,7 @@
     const tooLong = text ? buildNoteBody(text).length > CONFIG.MAX_BODY_CHARS : false;
     if (tooLong) {
       reasons.push(
-        `Note is too long — HubSpot allows ${CONFIG.MAX_BODY_CHARS.toLocaleString()} characters of note HTML.`
+        `Note is too long — HubSpot allows ${CONFIG.MAX_BODY_CHARS.toLocaleString()} characters once formatted.`
       );
     }
     return { enabled: reasons.length === 0 && !s.syncing, reasons, tooLong };

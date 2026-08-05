@@ -6,7 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<!-- BEGIN notes-sync (Phase 4) -->
+## [0.3.0] - 2026-08-05
+
+The side-panel release: the popup is gone, the panel is the product, and it now
+talks to HubSpot with each rep's own login. **Network egress and OAuth tokens are
+new in this version** — see [Privacy &
+permissions](./README.md#privacy--permissions).
+
+### Added — settings popover
+
+- **A gear in the panel header** opens a small anchored popover (`role="dialog"`)
+  holding the two controls that aren't per-prospect context: **Refresh CRM data**
+  and the whole **HubSpot connection** UI (Connect / *Connected as {email}* /
+  Disconnect, plus the connection's error line). It closes on Escape or a click
+  outside, keeps focus inside while open (Tab wraps, disabled and hidden controls
+  are skipped), hands focus back to the gear on close, and fits the panel's 320px
+  floor in both themes.
+- **Connection state is now a header dot** — green connected, amber not, with the
+  detail (including *"connected as …"*) in its tooltip.
+- Signed-out CRM sections keep their *"Connect HubSpot to see CRM data"* empty
+  state and gain an inline **Connect** link that opens the popover, so the action
+  the copy names is one click away.
 
 ### Added — notes sync
 
@@ -42,8 +62,6 @@ adheres to [Semantic Versioning](https://semver.org/).
   `eb:notes:lastSynced`; re-syncing identical text shows "Already synced ✓" and
   requires an explicit confirming second click. Success shows which records were
   written plus an "Open in HubSpot" link.
-
-<!-- END notes-sync (Phase 4) -->
 
 ### Added
 - **Wiza product data in the side panel** — a new **Wiza** section answers "do
@@ -172,11 +190,27 @@ adheres to [Semantic Versioning](https://semver.org/).
   `minimum_chrome_version: "114"` (the side panel API's floor), the `identity`
   permission, and `https://api.hubapi.com/*` host permission.
 - `scripts/validate.mjs`: validates `side_panel.default_path` exists, that the
-  `sidePanel` permission accompanies a `side_panel` key, that
-  `minimum_chrome_version` is set, and that the toolbar `action` still has an
-  icon.
+  `sidePanel` and `identity` permissions are present, that
+  `minimum_chrome_version` is set, that the toolbar `action` still has an icon,
+  and — new in this release — that **every `<script src>` in `sidepanel.html`
+  resolves to a file that exists** and that none of them is remote. The manifest
+  never mentions the panel's scripts, so before this a renamed
+  `hubspot-data.js` broke the panel with nothing but a console error to show for
+  it.
+- **Rollout section in the README**: load-unpacked steps for reps, the
+  first-connect walkthrough, and the offboarding note (removing a rep from the
+  HubSpot portal, or revoking their Connected App entry, kills their tokens — the
+  extension holds no shared credential).
 
 ### Changed
+- **Error copy across the panel is now consistent and rep-facing**: every failure
+  path says what happened and what to do next, and no error code, HTTP status,
+  source filename, config key or HubSpot error body reaches the UI any more —
+  those go to `console.debug` under the `[EasyBooking]` prefix. Recovery
+  instructions point at **Settings**, where Connect and Refresh now live (they
+  used to say "above" and "click Refresh", both of which stopped being true when
+  the connection UI moved into the popover). Missing-scope *names* are the one
+  detail still surfaced, because they're what a fix needs.
 - **The Contact and Company sections are now one compact identity block**: name
   (linked) with a lifecycle-stage pill, then title *@* company (linked), then
   owner · phone · lead status — with the company's domain, industry and headcount
@@ -192,16 +226,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 - CI (`.github/workflows/validate.yml`): the JS syntax check now globs
   git-tracked `*.js`/`*.mjs` instead of a hard-coded file list, so new scripts
   can't slip through unchecked.
-- README **Privacy & permissions**: the claim that "nothing is sent to any
-  external server" was true until this phase and is not any more. It now names
-  both destinations (the token function and `api.hubapi.com`), what each
-  receives, that the captured prospect email is still never transmitted, and
-  where the tokens are stored.
+- **README rewritten around the network egress this release adds.** *Privacy &
+  permissions* is now the whole story rather than a patched version of the old
+  one: the two destinations (`api.hubapi.com` with the rep's own OAuth token, and
+  the Lovable Cloud token endpoint, which sees only auth codes and refresh
+  tokens), what each receives, where the tokens live
+  (`chrome.storage.local`/`session`), that the client secret exists only in
+  Lovable's secret store, the offboarding path, and every permission with a
+  one-line justification. The architecture diagram now shows the panel, HubSpot
+  and the notes flow, and stale claims ("nothing is sent to any external server",
+  the captured email being "only ever read back into the booking form", the notes
+  sync being "still to land") are gone rather than superseded by a later note.
 
 ### Removed
 - **`popup.html` / `popup.js`** and `action.default_popup` — replaced by the
   side panel. (A manifest popup would suppress `openPanelOnActionClick`.) The
   `action` entry itself remains, with its title and icon.
+- **The HubSpot section in the panel body**, and the standalone **Refresh** button
+  in the header — both now live in the settings popover. Nothing was dropped; the
+  panel body is CRM context and notes only.
 
 ## [0.2.0] - 2026-06-25
 
@@ -249,6 +292,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `background.js`: minimal MV3 service worker.
 - `scripts/validate.mjs`: manifest + referenced-file validator (used by CI).
 
-[Unreleased]: https://github.com/jackfoley-wiza/easy-booking-ext/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jackfoley-wiza/easy-booking-ext/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jackfoley-wiza/easy-booking-ext/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jackfoley-wiza/easy-booking-ext/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jackfoley-wiza/easy-booking-ext/releases/tag/v0.1.0

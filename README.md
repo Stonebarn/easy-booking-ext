@@ -1,12 +1,21 @@
-# Easy Booking — Nooks → Scheduler Autofill
+# Dialer Helper Pro — dialer → scheduler autofill + HubSpot sidebar
 
-A Chrome extension (Manifest V3) for the sales team. It captures the **current
-prospect's email and timezone** from the [Nooks](https://nooks.in) dialer and
-**auto-fills** them into the booking form on `scheduler.default.com` — filling
-the email field and selecting the timezone in the scheduling dropdown — so reps
-never have to retype an address or hunt for a timezone mid-call. It works on
-both public booking links and the internal queue/member pages
-(e.g. `/21470/queue/10664`).
+A Chrome extension (Manifest V3) for the sales team. It does two things:
+
+- **Autofill.** It captures the **current prospect's email and timezone** from
+  the dialer and fills them into the booking form on `scheduler.default.com` —
+  filling the email field and selecting the timezone in the scheduling dropdown —
+  so reps never have to retype an address or hunt for a timezone mid-call. Works
+  on both public booking links and the internal queue/member pages
+  (e.g. `/21470/queue/10664`).
+- **A HubSpot sidebar.** A Chrome side panel that, once a rep connects **their
+  own** HubSpot login, shows the prospect's HubSpot context (identity, Wiza
+  product data, deals, every logged call/email/meeting/note/task) and syncs the
+  call notes they take in the dialer onto the matched contact and company.
+
+> **Network egress.** Once a rep connects HubSpot, the extension talks to
+> `api.hubapi.com` and to a hosted token endpoint. Read
+> [Privacy & permissions](#privacy--permissions) before rolling it out.
 
 > **Internal tool.** Built for the Wiza sales team. See [LICENSE](./LICENSE).
 
@@ -22,54 +31,64 @@ both public booking links and the internal queue/member pages
 - [How the selectors were derived](#how-the-selectors-were-derived)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Rollout](#rollout)
 - [Privacy & permissions](#privacy--permissions)
 
 ---
 
 ## How it works
 
-Two content scripts share data through `chrome.storage.local` (the dialer and
-booking site live in separate tabs); the service worker drives the toolbar badge:
+Nothing messages anything directly. Two content scripts write to
+`chrome.storage.local`; the side panel, the service worker and the booking tab all
+read from it and react to `storage.onChanged`. Only the side panel talks to the
+network, and only after a rep connects HubSpot:
 
 ```
-┌──────────────────────────────┐        ┌───────────────────────────────┐
-│  Nooks dialer (app.nooks.in)  │        │  scheduler.default.com         │
-│                               │        │  (booking form)                │
-│  content-nooks.js             │        │  content-scheduler.js          │
-│   • reads the prospect's      │        │   • fills the email input      │
-│     Email + Time Zone         │        │   • selects the timezone       │
-│   • reads identity + HubSpot  │        │   • shows the on-page panel    │
-│     record IDs                │        │                                │
-│   • writes to storage ────────┼───┐    └───▲────────────────────────────┘
-└───────────────────────────────┘   │        │
-                                     │        │
-                              chrome.storage.local
-                    keys: "eb:currentProspect"   (email + timezone)
-                          "eb:prospectContext"   (identity + HubSpot IDs)
-                                     │
-                       ┌─────────────┴──────────────┐
-                background.js                 sidepanel.js
-                       │                            │
-              toolbar badge (green ✓)      side panel (live, storage.onChanged)
-                                                    │
-                                            hubspot-data.js
-                                                    │
-                                      api.hubapi.com (identity, Wiza,
-                                       deals, activity — cached 5 min)
+┌──────────────────────────────────┐      ┌──────────────────────────────────┐
+│ dialer (*.nooks.in)              │      │ scheduler.default.com            │
+│ content-nooks.js                 │      │ content-scheduler.js             │
+│  • email + timezone              │      │  • fills the email input         │
+│  • identity + HubSpot record IDs │      │  • selects the timezone          │
+│  • call notes (draft + saved)    │      │  • on-page preview panel         │
+└───────────────┬──────────────────┘      └──────────────▲───────────────────┘
+                │                                        │
+                │           chrome.storage.local         │
+                └──►  eb:currentProspect  ───────────────┘
+                      eb:prospectContext      eb:notes
+                      eb:hs:auth              eb:notes:lastSynced
+                                   │
+        ┌──────────────────────────┴───────────────────────┐
+   background.js                                sidepanel.html / .js
+   toolbar badge (green ✓)                      side panel, live via
+                                                storage.onChanged
+                                                          │
+          ┌───────────────────────────────┬───────────────┴────────────┐
+   hubspot-auth.js                 hubspot-data.js              hubspot-notes.js
+   per-SDR OAuth,                  CRM reads,                   "Sync to HubSpot":
+   token refresh                   5-minute cache               one note on the
+          │                                │                    contact + company
+          │                                └──────────┬─────────────────┘
+   wiza-hs-connect.lovable.app                        │
+   (auth code / refresh token  →  access token;   api.hubapi.com
+    the client secret lives only here)           (reads, and the note POST)
 ```
 
-The two storage keys are deliberately separate: `content-scheduler.js` resets its
-fill state and re-shows its on-page banner on **any** write to
-`eb:currentProspect`, so the CRM-facing data (which updates again a moment later,
-when the dialer's HubSpot panes finish loading) lives under its own key.
+The storage keys are deliberately separate. `content-scheduler.js` resets its fill
+state and re-shows its on-page banner on **any** write to `eb:currentProspect`, so
+the CRM-facing data (which updates again a moment later, once the dialer's HubSpot
+panes finish loading) and the notes (which update as the rep types) live under
+their own keys.
 
 1. **`content-nooks.js`** (runs on `*.nooks.in`) watches the dialer's React DOM
    for the prospect contact card. It locates the email by anchoring on the
-   literal **"Email" field label** — not on CSS classes, which Nooks generates
-   per-build and are unstable. It also reads the **"Time Zone"** field (rendered
-   as an abbreviation + the prospect's local time, e.g. `EDT (12:04 PM)`,
-   `IST (9:34 PM)`), storing the **abbreviation** and the prospect's current
-   **UTC offset** (derived from that clock). Both are stored with a timestamp.
+   literal **"Email" field label** — not on CSS classes, which the dialer
+   generates per-build and are unstable. It also reads the **"Time Zone"** field
+   (rendered as an abbreviation + the prospect's local time, e.g.
+   `EDT (12:04 PM)`, `IST (9:34 PM)`), storing the **abbreviation** and the
+   prospect's current **UTC offset** (derived from that clock). Both are stored
+   with a timestamp. The same script also captures the prospect's identity, the
+   **HubSpot record IDs** the dialer's own CRM panes render, and the **call
+   notes** — each under its own storage key.
 2. **`content-scheduler.js`** (runs on `scheduler.default.com`) waits for the
    booking form to render, then:
    - **fills the email input.** The input is found by placeholder/label (it
@@ -94,8 +113,15 @@ when the dialer's HubSpot panes finish loading) lives under its own key.
    time), how long ago the capture happened, and a manual "Fill now" button as a
    fallback. Unlike the old popup it stays open while you move between tabs and
    **updates live** as prospects change in the dialer. It also renders the live
-   CRM context — see [CRM sidebar](#crm-sidebar).
-5. **`hubspot-data.js`** does the CRM reads for the panel: it resolves the
+   CRM context — see [CRM sidebar](#crm-sidebar) — and the
+   [notes sync](#syncing-call-notes-to-hubspot). The **gear** in its header opens
+   the [Settings popover](#settings-refresh-and-your-hubspot-connection): Refresh,
+   and your HubSpot connection.
+5. **`hubspot-auth.js`** owns the per-rep HubSpot connection: the consent round
+   trip, the stored tokens, and refreshing the access token on demand. The two
+   OAuth steps that need the app's client secret happen in a hosted endpoint, not
+   here — see [Privacy & permissions](#privacy--permissions).
+6. **`hubspot-data.js`** does the CRM reads for the panel: it resolves the
    prospect to a HubSpot contact and company (including the Wiza product
    properties on both), then loads deals and up to 25 engagements per type, each
    attributed to the rep who logged it. Resolution prefers the **record IDs scraped from the dialer's
@@ -104,6 +130,10 @@ when the dialer's HubSpot panes finish loading) lives under its own key.
    every rep — when there is no ID to use. Results are cached per email for 5
    minutes, concurrent lookups for the same prospect share one request, and a
    `429` is surfaced as a countdown rather than a retry storm.
+7. **`hubspot-notes.js`** creates the note when a rep clicks **Sync to HubSpot**:
+   one `POST /crm/v3/objects/notes` associated to the matched contact and company,
+   stamped with the rep's own `hubspot_owner_id`. It is the only write this
+   extension makes, and only on that click.
 
 ---
 
@@ -112,9 +142,11 @@ when the dialer's HubSpot panes finish loading) lives under its own key.
 1. Open `chrome://extensions`
 2. Toggle **Developer mode** (top-right)
 3. Click **Load unpacked** and select this folder
-4. Open the Nooks dialer (with a prospect loaded) in one tab, and a
+4. Open the dialer (with a prospect loaded) in one tab, and a
    `scheduler.default.com` booking link in another tab
 5. **Reload both tabs** so the content scripts inject
+
+For rolling this out to the team, see [Rollout](#rollout).
 
 ---
 
@@ -132,25 +164,43 @@ when the dialer's HubSpot panes finish loading) lives under its own key.
   resize. Requires **Chrome 114+**.
 - The extension **never overwrites** a value a rep has already typed.
 
-### HubSpot connection
+### Settings: Refresh and your HubSpot connection
 
-The side panel's **HubSpot** section connects your own HubSpot login, so notes
-and activity are attributed to you rather than to a shared service account.
+Everything that isn't per-prospect context lives behind the **gear** in the panel
+header:
 
-1. Open the side panel → **HubSpot** → **Connect HubSpot**.
-2. A HubSpot window opens; approve the requested permissions for the Wiza
-   portal. (Your HubSpot user needs permission for those scopes, or the install
-   fails at the consent screen.)
-3. The section flips to **Connected** and shows your HubSpot email. Use
-   **Disconnect** to remove the stored tokens.
+- **Refresh CRM data** — discards this prospect's cached HubSpot data and
+  refetches. (Otherwise it's cached for 5 minutes.) Clicking it closes the
+  popover so you're looking at the sections it just reloaded.
+- **HubSpot** — **Connect HubSpot**, or, once connected, your HubSpot email and a
+  **Disconnect** link. Connection problems are reported here.
+
+The popover closes on **Escape** or a click anywhere outside it, and while it's
+open **Tab** cycles inside it.
+
+Next to the gear is a small **connection dot**: **green** when HubSpot is
+connected, **amber** when it isn't. Hover it for the detail ("HubSpot connected as
+you@wiza.com"). Signed-out CRM sections also carry a **Connect** link straight to
+the popover.
+
+#### Connecting HubSpot
+
+You connect **your own** HubSpot login, so notes and activity are attributed to
+you rather than to a shared service account.
+
+1. Open the side panel → **gear** → **Connect HubSpot**.
+2. A HubSpot window opens; approve the requested permissions for the Wiza portal.
+   (Your HubSpot user needs permission for those scopes, or the install fails at
+   the consent screen.)
+3. The popover flips to **Connected** and shows your HubSpot email; the header dot
+   turns green. Use **Disconnect** to remove the stored tokens.
 
 Each rep connects once. The connection survives browser restarts — the access
-token is refreshed automatically in the background as it expires. Once connected,
-the panel starts filling in the CRM sections below; the Notes sync is the one
-piece still to land.
+token is refreshed automatically as it expires. Once connected, the CRM sections
+and the notes sync start working.
 
 **There is nothing to configure.** `hubspot-config.js` already carries the app's
-client ID and the deployed token-service URL, so loading the extension unpacked
+client ID and the deployed token-endpoint URL, so loading the extension unpacked
 and clicking **Connect HubSpot** is the whole setup.
 
 **No client secret goes anywhere near this repo.** The HubSpot client secret is
@@ -176,16 +226,18 @@ record name links out to HubSpot (opens in a new tab).
 - Sections show **loading placeholders** while a lookup is in flight, and each
   one reports its own failure — a rate-limited Deals fetch doesn't blank the
   Contact card that already loaded.
-- **Refresh** (top-right of the panel header) discards the cached data for the
+- **Refresh CRM data** (in the **gear** popover) discards the cached data for the
   current prospect and refetches. Otherwise a prospect's data is cached for 5
   minutes, so switching back and forth is instant and costs no API calls.
 - If HubSpot's rate limit is hit, the section shows *"HubSpot rate limit —
   retrying in Xs"* and retries itself once the wait is over. The limit is shared
   by the whole team, so the panel waits it out rather than retrying immediately.
-- Not connected → *"Connect HubSpot to see CRM data"*. No prospect loaded → a
-  muted empty state.
-
-<!-- BEGIN notes-sync (Phase 4) -->
+- Not connected → *"Connect HubSpot to see CRM data"* with a **Connect** link into
+  the gear popover. No prospect loaded → a muted empty state.
+- Failures are always phrased as what to do next ("connect again in Settings",
+  "use Refresh in Settings"). Error codes and HTTP statuses go to the console, not
+  to the panel — if you're debugging, open DevTools and filter for
+  `[EasyBooking]`.
 
 ### Syncing call notes to HubSpot
 
@@ -224,8 +276,6 @@ Result states:
 
 Notes are tied to the prospect they were taken for: loading a different prospect
 in the dialer clears the section rather than re-attributing your notes.
-
-<!-- END notes-sync (Phase 4) -->
 
 ---
 
@@ -308,8 +358,6 @@ email does not disturb the booking tab.
 > `TOKEN_URL` and `INTROSPECT_URL` are absent above: the extension never calls
 > HubSpot's token endpoints.
 
-<!-- BEGIN notes-sync config (Phase 4) -->
-
 **`content-nooks.js` → `NOTES_CONFIG`** (notes capture → `chrome.storage.local`
 key `eb:notes`):
 
@@ -340,8 +388,6 @@ Note text is scraped, untrusted input: it is HTML-escaped before newlines become
 `<br>`, and it only ever reaches the panel's DOM through `.value`/`.textContent`
 — never `innerHTML`.
 
-<!-- END notes-sync config (Phase 4) -->
-
 ---
 
 ## Project structure
@@ -350,13 +396,14 @@ Note text is scraped, untrusted input: it is HTML-escaped before newlines become
 easy-booking-ext/
 ├── manifest.json          # MV3 config: hosts, content scripts, action, side panel, icons
 ├── background.js          # service worker: toolbar badge + side-panel-on-click
-├── content-nooks.js       # captures prospect email + timezone, identity + HubSpot record IDs
+├── content-nooks.js       # captures prospect email + timezone, identity + HubSpot record IDs, call notes
 ├── content-scheduler.js   # fills email, selects timezone, shows on-page panel
-├── sidepanel.html         # side panel UI (captured prospect, HubSpot, CRM sections)
-├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", CRM rendering
+├── sidepanel.html         # side panel UI (prospect, settings popover, CRM sections, notes)
+├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", settings popover, CRM rendering, notes sync
 ├── hubspot-config.js      # HubSpot OAuth app config (client id, scopes — no secret)
 ├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
 ├── hubspot-data.js        # CRM reads: contact/company resolution, Wiza data, deals, activity, caching
+├── hubspot-notes.js       # note creation: POST /crm/v3/objects/notes + contact/company associations
 ├── lovable/
 │   └── hubspot-token-function.ts  # hosted token exchange (holds the secret; deployed to Lovable Cloud)
 ├── docs/
@@ -364,9 +411,15 @@ easy-booking-ext/
 │   └── nooks-dom-recon.md         # live-DOM anchors the scrapers are built on
 ├── icons/                 # ext_icon.png (toolbar + store icon)
 ├── scripts/
-│   └── validate.mjs       # validates manifest + referenced files (used by CI)
+│   └── validate.mjs       # validates the manifest, its referenced files, and the panel's <script src> list (used by CI)
 └── README.md
 ```
+
+The panel's scripts load in dependency order — config, auth, data, notes, then the
+panel itself — as plain `<script src>` tags with **no `import`/`export`**: CI
+syntax-checks `.js` with `node --check`, which parses them as CommonJS. Shared ES
+modules, if any are ever added, go in `.mjs` files. `scripts/validate.mjs` checks
+that every script `sidepanel.html` references still exists.
 
 ---
 
@@ -375,7 +428,7 @@ easy-booking-ext/
 Both pages are client-rendered, so selectors were verified against the **live
 DOM**, not the static HTML snapshots:
 
-- **Nooks email** lives in a MUI contact card as label→value rows
+- **The dialer's email field** lives in a MUI contact card as label→value rows
   (`Email` → `prospect@company.com`). The MUI/emotion class names
   (`css-14w7q5o`, …) change per build, so the script anchors on the `Email`
   label text and climbs to the row container.
@@ -410,9 +463,12 @@ DOM**, not the static HTML snapshots:
 | Panel or badge not showing | Reload the tab after updating the extension; both appear only for a fresh (<30 min) capture. |
 | Stale email | Captures older than 30 min are skipped; re-open the prospect in the dialer. |
 | Extension doesn't run on booking page | Confirm the URL matches `https://scheduler.default.com/*` in `manifest.json`. |
-| CRM sections say "Connect HubSpot to see CRM data" | You're signed out — use **Connect HubSpot** in the panel's HubSpot section. |
+| CRM sections say "Connect HubSpot to see CRM data" | You're signed out — click **Connect** in that empty state, or the **gear** → **Connect HubSpot**. |
+| The header dot is amber | HubSpot isn't connected (hover it for the detail). Open the **gear** and connect. |
+| "HubSpot isn't set up in this build" | `hubspot-config.js` is missing its client ID or token-endpoint URL — the checked-in file has both, so this means a modified/partial copy. Reload the extension from a clean checkout. |
 | "No HubSpot contact for …" for a prospect you know exists | The address in the dialer isn't the one on the HubSpot record (and isn't in `hs_additional_emails` either). Check the contact in HubSpot, or look for a duplicate record. |
-| CRM data looks out of date | Click **Refresh** in the panel header — data is cached for 5 minutes per prospect. |
+| CRM data looks out of date | **Gear** → **Refresh CRM data** — data is cached for 5 minutes per prospect. |
+| A panel section is blank and the console shows a script 404 | A panel script was renamed without updating `sidepanel.html`. Run `node scripts/validate.mjs`, which checks every `<script src>` the panel loads. |
 | "HubSpot rate limit — retrying in Xs" | Expected under heavy parallel dialing: HubSpot's search limit is 5 req/s for the whole portal. It retries itself. If it's constant, the dialer's HubSpot panes probably aren't rendering the Record ID rows, so every lookup is falling back to search — check `TESTID_ANCHORS` / `CONTEXT_LABELS.RECORD_ID`. |
 | Deal stages show as raw IDs like `appointmentscheduled` | The one-off `GET /crm/v3/pipelines/deals` call failed (usually a missing `crm.objects.deals.read` scope). Reconnect HubSpot; the console logs the failure. |
 | Identity block shows a name but no company | No company association on the contact, and the email domain didn't match a company's `domain` property (free-mail domains are deliberately not searched). |
@@ -420,7 +476,10 @@ DOM**, not the static HTML snapshots:
 | An activity row has no "by …" attribution | The engagement has no owner, or its owner/creator no longer exists in the portal (a deactivated user). The panel would rather show nothing than a raw ID. |
 | An Activity tab is dimmed | That type has nothing logged for this prospect. |
 
-Open the page's DevTools console and look for `[EasyBooking]` debug logs.
+Open the page's DevTools console and look for `[EasyBooking]` debug logs. The panel
+deliberately shows plain-English errors with the next step to take; the code,
+status and HubSpot's own error text are in those logs. For the side panel, open
+DevTools on the panel itself (right-click inside it → **Inspect**).
 
 ---
 
@@ -429,61 +488,138 @@ Open the page's DevTools console and look for `[EasyBooking]` debug logs.
 There is no build step — it's plain JS/HTML loaded unpacked.
 
 ```bash
-# Validate the manifest and that all referenced files exist
+# Validate the manifest, everything it references, and the panel's script tags
 node scripts/validate.mjs
+
+# Same syntax check CI runs (node --check parses .js as CommonJS: no import/export)
+for f in $(git ls-files '*.js' '*.mjs'); do node --check "$f"; done
 ```
 
 After editing a content script, click the **reload** icon for the extension on
-`chrome://extensions`, then reload the affected tab.
+`chrome://extensions`, then reload the affected tab. After editing the panel,
+close and re-open the panel.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for conventions and the PR checklist.
 
 ---
 
+## Rollout
+
+**Installing it (each rep, once):**
+
+1. Get the extension folder (clone the repo, or unzip the folder that was shared
+   with you) and put it somewhere permanent — Chrome loads it from that path every
+   time it starts, so don't leave it in Downloads.
+2. Open `chrome://extensions`, turn on **Developer mode** (top right), click
+   **Load unpacked**, and select the folder.
+3. Pin **Dialer Helper Pro** to the toolbar so the panel is one click away.
+4. Reload any dialer or `scheduler.default.com` tabs you already had open.
+
+**First connect (each rep, once):**
+
+1. Click the toolbar icon — the side panel opens on the right.
+2. Click the **gear** (top right of the panel) → **Connect HubSpot**.
+3. Approve the permissions in the HubSpot window for the **Wiza** portal. You need
+   a HubSpot seat with access to contacts, companies and deals; if consent fails,
+   that's what to check first.
+4. The popover shows **Connected** with your HubSpot email and the header dot turns
+   green. Load a prospect in the dialer and the CRM sections fill in.
+
+The connection is per rep and survives browser restarts. Notes you sync are
+attributed to *you* (your `hubspot_owner_id`), which is the whole reason the
+connection is per rep rather than a shared service account.
+
+**Updating:** replace the folder's contents, then hit **reload** on the extension
+in `chrome://extensions`. The stored HubSpot connection survives an update.
+
+**Offboarding.** Removing someone from the HubSpot portal — or deleting the
+extension's entry under *HubSpot → Settings → Integrations → Connected Apps* for
+their user — revokes their tokens immediately, and every CRM call the extension can
+make dies with them. There is no shared credential to rotate and no server-side
+session to expire: the extension holds only that rep's own refresh token, on their
+own machine. Uninstalling the extension (or clicking **Disconnect**) deletes it
+locally as well. Nothing else needs to happen for access to end.
+
+---
+
 ## Privacy & permissions
 
-- **`storage`** — caches the most recently seen prospect email locally so the
-  booking tab can read it, plus your HubSpot tokens (see below).
-- **`alarms`** — used only to clear the toolbar badge when a capture goes stale.
-- **`sidePanel`** — renders the extension's own UI in Chrome's side panel
-  (clicking the toolbar icon opens it). No page content is read through it.
-- **`identity`** — opens the HubSpot consent window when you click **Connect
-  HubSpot**, and nothing else.
-- **Host permissions** are limited to `*.nooks.in`, `scheduler.default.com` and
-  `api.hubapi.com`.
-- **What leaves your browser, and where it goes.** Two destinations, both only
-  once you connect:
-  - the **Lovable Cloud token function** (`TOKEN_PROXY_URL`) receives your
-    OAuth authorization code, and later your refresh token, and returns access
-    tokens plus your HubSpot email/ID. It exists so the client secret never
-    ships in the extension (SOC 2 secrets management); it is locked to this
-    extension's origin and stores nothing.
-  - **`api.hubapi.com`** receives your access token on CRM reads. Those reads
-    are **read-only** and send the prospect's email address (or, when the dialer
-    supplies it, their HubSpot record ID) so HubSpot can return the matching
-    contact, company, Wiza properties, deals and activity. Nothing is written, and nothing
-    about a prospect is sent anywhere other than HubSpot — the portal that
-    already holds their record.
+### What leaves the machine
 
-  The captured prospect email is not transmitted anywhere else: for the booking
-  flow it only moves from the dialer tab to the booking tab through local
-  storage.
-- **CRM data is cached in the panel's memory only** (5 minutes, or until you
-  click Refresh or close the panel). It is never written to disk.
-- Your HubSpot **refresh token** lives in `chrome.storage.local` and the
-  short-lived access token in `chrome.storage.session` (discarded when Chrome
-  closes). **Disconnect** deletes both.
-- The captured email is overwritten as prospects change and is only ever read
-  back into the booking form.
+There are exactly **two** network destinations, and both are silent until a rep
+clicks **Connect HubSpot**. Before that, the extension makes no network requests at
+all.
 
-<!-- BEGIN notes-sync privacy (Phase 4) -->
-- **Notes sync sends data off-device.** This supersedes the "nothing is sent to
-  any external server" line above (written before any HubSpot integration
-  existed): when you click **Sync to HubSpot**, the note text you see in the
-  panel is sent to `api.hubapi.com` and written to the matched contact and
-  company records, attributed to your HubSpot user. Nothing is sent until you
-  click. Notes captured from the dialer are otherwise held in
-  `chrome.storage.local` (key `eb:notes`) and are cleared/replaced when the
-  prospect changes.
-<!-- END notes-sync privacy (Phase 4) -->
+| Destination | What it receives | What it returns |
+|---|---|---|
+| **`api.hubapi.com`** (HubSpot's CRM API) | The rep's **own** OAuth access token, and what's needed to identify the record: the prospect's email address, or their HubSpot record ID when the dialer supplied one. On a notes sync, the note text the rep sees in the panel. | The matching contact, company (incl. the Wiza product properties), deals and engagements — and, for a sync, the created note's ID. |
+| **`wiza-hs-connect.lovable.app`** (the token endpoint, source in [`lovable/hubspot-token-function.ts`](./lovable/hubspot-token-function.ts)) | **Only OAuth material**: the one-time authorization code at connect time, and the rep's refresh token when an access token needs renewing (about every 30 minutes of use). It never sees a prospect, a note, or anything scraped from a page. | A fresh access token, plus the rep's HubSpot email/user ID/portal ID at connect time. |
+
+**Nothing else leaves the machine.** No analytics, no telemetry, no error
+reporting, no third-party scripts (Manifest V3's CSP forbids remote code, and
+`scripts/validate.mjs` fails the build if a remote `<script src>` ever appears in
+the panel). The captured prospect email travels from the dialer tab to the booking
+tab through `chrome.storage.local` and nowhere else. Everything that reaches HubSpot
+goes to the portal that already holds that prospect's record.
+
+Reads are read-only. **The only write this extension ever makes** is the note
+created when a rep clicks **Sync to HubSpot** — one note on the matched contact and
+company, attributed to that rep.
+
+### Where credentials live
+
+- The rep's **refresh token** is stored in `chrome.storage.local` (so the
+  connection survives a browser restart) under `eb:hs:auth`, together with their
+  HubSpot email, portal ID and owner ID.
+- The **access token** is stored in `chrome.storage.session` — Chrome discards it
+  when the browser closes — and is refreshed on demand, ~5 minutes before it
+  expires.
+- Both are per rep, on that rep's machine, and never sent anywhere except the two
+  destinations above. **Disconnect** (gear → Disconnect) deletes both immediately.
+- **The HubSpot client secret is not in this repo and not in the extension.** It
+  exists only in Lovable Cloud's secret store as `HUBSPOT_CLIENT_SECRET`, read by
+  the hosted token function — which is why token exchange and refresh are hosted at
+  all (SOC 2 secrets management). The client ID that *is* checked in is a public
+  identifier, not a credential.
+- CRM data is cached **in the panel's memory only** (5 minutes, or until Refresh,
+  or until the panel closes). It is never written to disk. Captured prospect data
+  and notes do live in `chrome.storage.local` (`eb:currentProspect`,
+  `eb:prospectContext`, `eb:notes`, `eb:notes:lastSynced`) and are overwritten or
+  cleared as the prospect changes.
+
+### Revoking access (offboarding)
+
+Removing a user from the Wiza HubSpot portal, or deleting this app's entry under
+*HubSpot → Settings → Integrations → Connected Apps* for their user, **revokes
+their tokens** — their refresh token stops working, and every CRM call the
+extension makes on their behalf fails from that point. Their already-issued access
+token can keep working for up to its 30-minute lifetime; nothing beyond that.
+
+There is no shared credential to rotate, no server-side session to expire, and no
+copy of anyone's data held outside HubSpot and their own browser profile. Removing
+them from HubSpot is sufficient; uninstalling the extension also deletes the local
+tokens.
+
+### Permissions, and why each one is needed
+
+| Permission | Why it's requested |
+|---|---|
+| `storage` | The only channel between the dialer tab, the booking tab, the badge and the panel — plus where the rep's HubSpot tokens are kept. |
+| `alarms` | One periodic alarm, used only to clear the toolbar badge once a capture goes stale (30 min). |
+| `sidePanel` | Renders the extension's own UI in Chrome's side panel; clicking the toolbar icon opens it. No page content is read through it. |
+| `identity` | Opens the HubSpot consent window (`chrome.identity.launchWebAuthFlow`) when a rep clicks **Connect HubSpot**, and returns the redirect. Nothing else uses it. |
+| `https://*.nooks.in/*` | Where `content-nooks.js` reads the prospect's email, timezone, identity, HubSpot record IDs and call notes. Read-only; nothing is injected into the page. |
+| `https://scheduler.default.com/*` | Where `content-scheduler.js` fills the booking form and shows its preview banner. |
+| `https://api.hubapi.com/*` | Lets the panel call HubSpot's CRM API directly (a host permission is how an extension bypasses CORS). The token endpoint needs **no** host permission — it answers with CORS headers naming this extension's origin. |
+
+`minimum_chrome_version: "114"` is the side panel API's floor, not a permission.
+
+### Untrusted input
+
+Everything the panel displays is untrusted: prospect data is scraped from a page,
+and HubSpot property values (including note bodies, which HubSpot stores as HTML)
+are written by people. All of it reaches the DOM only through `textContent` /
+`.value` — **never `innerHTML`** — and URL properties become links only after a
+scheme check, so a property containing `javascript:` can't become a clickable link.
+Note text sent to HubSpot is HTML-escaped before newlines become `<br>`.
 

@@ -63,6 +63,10 @@
         background: var(--header-bg);
         color: var(--header-fg);
         flex: 0 0 auto;
+        /* Anchor for the settings popover, which hangs off the header's bottom
+           edge and has to paint over the scrolling body below it. */
+        position: relative;
+        z-index: 20;
       }
       header .dot {
         width: 8px;
@@ -83,7 +87,7 @@
         text-transform: uppercase;
       }
       header .src { font-size: 11px; opacity: 0.55; font-weight: 500; }
-      /* Pushes the refresh control to the right edge at any panel width. */
+      /* Pushes the settings control to the right edge at any panel width. */
       header .spacer { flex: 1 1 auto; }
       header .hdr-btn {
         margin: 0;
@@ -100,6 +104,88 @@
         background: rgba(255, 255, 255, 0.06);
         color: rgba(255, 255, 255, 0.35);
         cursor: default;
+      }
+      /* The gear: square-ish, glyph-only, same pill treatment as any header
+         button so it doesn't read as a different class of control. */
+      header .hdr-btn.icon {
+        padding: 3px 7px;
+        font-size: 13px;
+        line-height: 16px;
+        border-radius: 8px;
+      }
+      header .hdr-btn[aria-expanded="true"] { background: rgba(255, 255, 255, 0.28); }
+      header .hdr-btn:focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 1px;
+      }
+
+      /* Connection state as a second, smaller dot: green connected, amber not.
+         The full connection UI lives in the settings popover, so this is the
+         only always-visible signal — hence the title/aria-label. */
+      header .hs-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+        background: #9ca3af;
+      }
+      header .hs-dot.on { background: #22c55e; }
+      header .hs-dot.off { background: #f59e0b; }
+
+      /* ---- Settings popover -------------------------------------------- */
+      /* Anchored under the header's right edge, capped so it always fits the
+         320px floor with room to spare. */
+      .popover {
+        position: absolute;
+        top: calc(100% - 2px);
+        right: 10px;
+        z-index: 30;
+        width: min(272px, calc(100vw - 20px));
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--bg);
+        color: var(--ink);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+        text-align: left;
+      }
+      .pop-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .pop-title {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .pop-sec {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      .pop-sec-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .pop-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .pop-note { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+      .popover .hint { font-size: 12px; color: var(--muted); margin: 0; }
+      .popover button:focus-visible, .popover a:focus-visible {
+        outline: 2px solid var(--purple);
+        outline-offset: 1px;
       }
 
       /* The panel is full-height; only this region scrolls. */
@@ -224,8 +310,8 @@
         margin: 16px 0;
       }
 
-      /* HubSpot connection — live, so a solid border rather than the dashed
-         "coming soon" treatment of the sections below it. */
+      /* Live content — a solid border, unlike the dashed "coming soon"
+         placeholder treatment above. */
       .card {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -261,6 +347,13 @@
         flex: 0 0 auto;
       }
       .linkish:disabled { background: none; color: var(--disabled-fg); cursor: default; }
+      /* The "Connect" affordance inside a signed-out CRM empty state: reads as a
+         link in the sentence, opens the settings popover. */
+      .linkish.inline {
+        color: var(--purple);
+        font-size: 12px;
+        font-weight: 600;
+      }
       .error {
         font-size: 12px;
         color: var(--danger-fg);
@@ -542,17 +635,66 @@
       <h1>Dialer Helper Pro</h1>
       <span class="src">· from dialer</span>
       <span class="spacer"></span>
-      <!-- One refresh for the whole CRM view: it busts the cached bundle for
-           the current prospect and refetches. -->
+      <!-- Connection state, always visible. The controls behind it live in the
+           popover below; this is the at-a-glance signal. -->
+      <span class="hs-dot off" id="hs-dot" role="img" aria-label="HubSpot not connected"></span>
       <button
         type="button"
-        class="hdr-btn"
-        id="crm-refresh"
-        title="Refresh HubSpot data for this prospect"
-        disabled
+        class="hdr-btn icon"
+        id="settings-btn"
+        aria-label="Settings"
+        title="Settings"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="settings-pop"
       >
-        Refresh
+        ⚙
       </button>
+
+      <!-- Settings: refresh + the whole HubSpot connection UI. Anchored to the
+           header, dismissed by Escape or a click outside, focus kept inside
+           while open (see sidepanel.js). -->
+      <div class="popover" id="settings-pop" role="dialog" aria-label="Settings" hidden>
+        <div class="pop-head">
+          <span class="pop-title">Settings</span>
+          <button type="button" class="linkish" id="settings-close">Close</button>
+        </div>
+
+        <!-- One refresh for the whole CRM view: it busts the cached bundle for
+             the current prospect and refetches. -->
+        <div class="pop-sec">
+          <button
+            type="button"
+            id="crm-refresh"
+            title="Refresh HubSpot data for this prospect"
+            disabled
+          >
+            Refresh CRM data
+          </button>
+          <!-- Text is state-dependent: when Refresh is disabled this line says
+               why, so a greyed-out button is never unexplained. -->
+          <p class="pop-note" id="crm-refresh-note">
+            Reloads this prospect from HubSpot. Otherwise their data is cached for
+            5 minutes.
+          </p>
+        </div>
+
+        <div class="pop-sec">
+          <div class="pop-sec-head">
+            <span class="pop-label">HubSpot</span>
+            <span class="pill off" id="hs-pill">Not connected</span>
+          </div>
+          <p class="hint" id="hs-hint">
+            Connect your HubSpot account to see CRM context here.
+          </p>
+          <div class="account" id="hs-account" style="display: none">
+            <span class="who" id="hs-email"></span>
+            <button type="button" class="linkish" id="hs-disconnect">Disconnect</button>
+          </div>
+          <button type="button" id="hs-connect">Connect HubSpot</button>
+          <p class="error" id="hs-error" style="display: none"></p>
+        </div>
+      </div>
     </header>
 
     <main>
@@ -583,24 +725,6 @@
       </section>
 
       <hr class="divider" />
-
-      <section id="hs-section">
-        <div class="section-head">
-          <span class="section-title">HubSpot</span>
-          <span class="pill off" id="hs-pill">Not connected</span>
-        </div>
-        <div class="card">
-          <p class="hint" id="hs-hint">
-            Connect your HubSpot account to see CRM context here.
-          </p>
-          <div class="account" id="hs-account" style="display: none">
-            <span class="who" id="hs-email"></span>
-            <button type="button" class="linkish" id="hs-disconnect">Disconnect</button>
-          </div>
-          <button type="button" id="hs-connect">Connect HubSpot</button>
-          <p class="error" id="hs-error" style="display: none"></p>
-        </div>
-      </section>
 
       <!-- Live CRM context. Each body is filled from JS with textContent only —
            HubSpot property values are untrusted, so no innerHTML anywhere. -->
@@ -653,9 +777,7 @@
         </div>
       </section>
 
-      <!-- ===== Notes → HubSpot sync (Phase 4) =====
-           Outside #hs-placeholders on purpose: that wrapper is dimmed, and this
-           section is live. -->
+      <!-- ===== Notes → HubSpot sync (Phase 4) ===== -->
       <hr class="divider" />
 
       <section id="notes-section">
