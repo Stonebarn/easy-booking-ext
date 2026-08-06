@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy — Dialer Helper Pro</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #ffffff; color: #26114a;
+         font: 16px/1.6 Inter, -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 4px; }
+  .meta { color: #615e6e; margin: 0 0 32px; }
+  h2 { font-size: 20px; margin: 36px 0 8px; }
+  p, li { color: #26114a; }
+  li { margin: 6px 0; }
+  .quiet { color: #615e6e; }
+  a { color: #7e43ff; }
+  strong { font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy — Dialer Helper Pro</h1>
+  <p class="meta">Effective 6 August 2026 · Wiza Inc. · Contact: <a href="mailto:jack.foley@wiza.com">jack.foley@wiza.com</a></p>
+
+  <p><strong>Dialer Helper Pro is an internal tool for Wiza's own sales team.</strong>
+  It is a Chrome side-panel extension that shows a sales representative their
+  prospect's CRM context during dialer calls, fills a meeting-booking form, and
+  syncs the representative's call notes to Wiza's HubSpot CRM. It is not
+  offered to, or useful for, anyone outside Wiza: every feature requires a
+  Wiza HubSpot account.</p>
+
+  <h2>What the extension processes</h2>
+  <ul>
+    <li><strong>Prospect details from the dialer page</strong> the representative
+    is viewing (name, company, email address, phone number, timezone, job
+    title, LinkedIn profile link and photo, and CRM record IDs). These are read
+    from the page, held locally in the representative's browser, and used to
+    look up and display the matching records from Wiza's HubSpot CRM.</li>
+    <li><strong>Call notes</strong> the representative saves in the dialer,
+    which the extension writes to the matching contact and company records in
+    Wiza's HubSpot CRM, attributed to the signed-in representative.</li>
+    <li><strong>The representative's HubSpot sign-in</strong>: OAuth tokens for
+    their own HubSpot account, stored only in the browser's local extension
+    storage on their device.</li>
+    <li><strong>Extension settings</strong> (for example, whether notes
+    auto-sync), stored locally.</li>
+  </ul>
+
+  <h2>Where data goes</h2>
+  <ul>
+    <li><strong>HubSpot</strong> (api.hubapi.com): CRM records are read from,
+    and call notes are written to, Wiza's own HubSpot account — the same CRM
+    the data already lives in. HubSpot's handling of that data is governed by
+    <a href="https://legal.hubspot.com/privacy-policy">HubSpot's privacy policy</a>
+    and Wiza's agreement with HubSpot.</li>
+    <li><strong>Wiza's sign-in service</strong> (wiza-hs-connect.lovable.app):
+    used solely to complete the HubSpot OAuth token exchange, so no
+    authentication secret ever ships inside the extension. Tokens transit this
+    service only for the exchange itself.</li>
+    <li><strong>Google's favicon service</strong> (google.com/s2/favicons):
+    the extension requests a company's public favicon by domain name to display
+    a logo. The company domain is the only data sent.</li>
+    <li><strong>LinkedIn's image CDN</strong>: when the dialer page shows a
+    prospect's LinkedIn photo, the browser fetches that image to display it in
+    the panel.</li>
+  </ul>
+  <p>That is the complete list. The extension contains <strong>no analytics,
+  no tracking, no advertising, and no data collection by Wiza</strong> beyond
+  what is described above.</p>
+
+  <h2>What we do not do</h2>
+  <ul>
+    <li>We do not sell or transfer any data to third parties.</li>
+    <li>We do not use data for any purpose unrelated to the extension's single
+    purpose (showing CRM context and syncing call notes).</li>
+    <li>We do not use data to determine creditworthiness or for lending.</li>
+    <li>We do not collect browsing history, keystrokes outside the dialer's
+    notes, or anything from pages other than the dialer, the booking form, and
+    HubSpot's API.</li>
+  </ul>
+
+  <h2>Storage and retention</h2>
+  <p>Everything the extension stores lives in Chrome's local extension storage
+  on the representative's own device. Disconnecting HubSpot in the extension's
+  settings deletes the stored tokens; uninstalling the extension deletes all
+  locally stored data. Notes written to HubSpot become CRM records governed by
+  Wiza's internal data-retention practices.</p>
+
+  <h2>Changes and contact</h2>
+  <p>If the extension's data practices change, this page will be updated and
+  the effective date revised. Questions:
+  <a href="mailto:jack.foley@wiza.com">jack.foley@wiza.com</a>.</p>
+
+  <p class="quiet">Dialer Helper Pro is developed and used exclusively by
+  Wiza Inc. for its internal sales operations.</p>
+</main>
+</body>
+</html>
