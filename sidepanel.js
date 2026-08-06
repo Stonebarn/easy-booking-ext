@@ -3644,7 +3644,8 @@
     resultEl.className = "";
     resultEl.hidden = !display;
     if (!display) return;
-    resultEl.className = display.kind === "ok" ? "ok" : "err";
+    resultEl.className =
+      display.kind === "ok" ? "ok" : display.kind === "skip" ? "skip" : "err";
     resultEl.appendChild(document.createTextNode(display.message));
     // Only ever link to a URL this extension built from HubSpot record IDs.
     if (display.url && String(display.url).indexOf(HUBSPOT_URL_PREFIX) === 0) {
@@ -4003,9 +4004,15 @@
   // being open, and silently posting an hours-old note is worse than not.
   const AUTO_MAX_AGE_MS = 30 * 60 * 1000;
 
+  // A skipped auto-sync must be VISIBLE (state-honesty: the panel never goes
+  // silent about a note that didn't reach the CRM). Quiet muted line, not an
+  // error tone — a skip is information, and the manual button remains the way
+  // to override most reasons.
   function autoSkip(reason) {
     // eslint-disable-next-line no-console
     console.debug("[EasyBooking] notes: not auto-syncing —", reason);
+    state.result = { kind: "skip", message: `Not auto-synced — ${reason}` };
+    render();
   }
 
   function maybeAutoSync(notes) {
