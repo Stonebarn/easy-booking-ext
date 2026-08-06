@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-06T16:05:00Z",
+  "title": "Design System: Dialer Helper Pro",
+  "extensions": {
+    "colorMeta": {
+      "wiza-violet": { "role": "primary", "displayName": "Wiza Violet", "canonical": "#7e43ff", "tonalRamp": ["#2a1655", "#3d1f80", "#4c24a3", "#6534d1", "#7e43ff", "#9371f0", "#b5aeff", "#e4d8fd"] },
+      "violet-ink": { "role": "primary", "displayName": "Violet Ink", "canonical": "#4c24a3", "tonalRamp": ["#1e0e42", "#2a1655", "#3d1f80", "#4c24a3", "#6534d1", "#8a5ce8", "#b5aeff", "#e4d8fd"] },
+      "deep-plum-ink": { "role": "neutral", "displayName": "Deep Plum Ink", "canonical": "#26114a", "tonalRamp": ["#170b2e", "#26114a", "#3a2565", "#524080", "#6f5f99", "#9080b3", "#b5aacd", "#ddd7e8"] },
+      "dusk-grey": { "role": "neutral", "displayName": "Dusk Grey", "canonical": "#615e6e", "tonalRamp": ["#26242c", "#3a3844", "#4e4b5a", "#615e6e", "#7d7a8a", "#9997a5", "#b8b6c1", "#dcdbe1"] },
+      "card-mist": { "role": "neutral", "displayName": "Card Mist", "canonical": "#f6f8fa", "tonalRamp": ["#9aa4ad", "#b0b8c0", "#c5ccd2", "#d8dde2", "#e5e9ed", "#eef1f4", "#f6f8fa", "#fbfcfd"] },
+      "meadow-green": { "role": "tertiary", "displayName": "Meadow Green", "canonical": "#1e7f5c", "tonalRamp": ["#0c3325", "#124d38", "#18664a", "#1e7f5c", "#3b9a76", "#6cb897", "#a3d5bf", "#e3f4ec"] },
+      "signal-red": { "role": "tertiary", "displayName": "Signal Red", "canonical": "#ea384c", "tonalRamp": ["#5d1620", "#8c212f", "#c22e3f", "#ea384c", "#ee5f70", "#f38b97", "#f8b8bf", "#fce6ea"] },
+      "ochre-amber": { "role": "tertiary", "displayName": "Ochre Amber", "canonical": "#9b6d27", "tonalRamp": ["#3e2c10", "#5d4217", "#7c581f", "#9b6d27", "#b98a3f", "#d3ab6b", "#e8cc9d", "#fdeab9"] },
+      "slate-blue": { "role": "tertiary", "displayName": "Slate Blue", "canonical": "#3671a8", "tonalRamp": ["#162d43", "#204365", "#2b5a86", "#3671a8", "#5b8dbc", "#86aad0", "#b3c9e3", "#ebf2fc"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Empty-state headlines only — the one surface with room to breathe." },
+      "headline": { "displayName": "Record Name", "purpose": "The contact/company name: the panel's single biggest fact and only 14px." },
+      "body": { "displayName": "Body / Value", "purpose": "Every value, control, prose line, and input." },
+      "label": { "displayName": "Caption", "purpose": "ALL-CAPS structural labels (700, tracked) and muted metadata (400-600 sentence case) — one size, split by case and weight." }
+    },
+    "shadows": [
+      { "name": "popover", "value": "0 8px 24px rgba(38, 17, 74, 0.16)", "purpose": "The settings popover — the panel's only floating surface. Cards are flat." },
+      { "name": "live-halo", "value": "0 0 0 3px rgba(30, 127, 92, 0.18)", "purpose": "Status glow on the header capture dot when a prospect is live — state, not depth." }
+    ],
+    "motion": [
+      { "name": "none-by-default", "value": "state changes swap content; no entrance animation", "purpose": "An operate surface mid-call never moves for decoration." }
+    ],
+    "breakpoints": [
+      { "name": "panel-floor", "value": "320px" },
+      { "name": "two-column", "value": "500px" },
+      { "name": "panel-wide", "value": "580px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The accent-filled action (Fill form, Sync to HubSpot) — the only saturated fill on screen.",
+      "html": "<button class=\"ds-btn-primary\">Fill form</button>",
+      "css": ".ds-btn-primary { background: #7e43ff; color: #ffffff; font: 600 12px Inter, system-ui, sans-serif; border: none; border-radius: 8px; padding: 7px 14px; cursor: pointer; transition: background 0.15s; } .ds-btn-primary:hover { background: #6534d1; } .ds-btn-primary:focus-visible { outline: 2px solid #7e43ff; outline-offset: 2px; } .ds-btn-primary:disabled { background: #eceff3; color: #615e6e; cursor: default; }"
+    },
+    {
+      "name": "Armed Confirm Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Two-step CRM writes arm to amber before committing — reassurance exactly where stakes are.",
+      "html": "<button class=\"ds-btn-armed\">Confirm update</button>",
+      "css": ".ds-btn-armed { background: #fdeab9; color: #8c6223; font: 600 12px Inter, system-ui, sans-serif; border: 1px solid #9b6d27; border-radius: 8px; padding: 6px 13px; cursor: pointer; }"
+    },
+    {
+      "name": "Out-link Pill",
+      "kind": "button",
+      "refersTo": "button-outlink",
+      "description": "Bordered white pill for external jumps (Company LinkedIn, Open in Wiza Admin).",
+      "html": "<a class=\"ds-outlink\" href=\"#\">Company LinkedIn</a>",
+      "css": ".ds-outlink { display: inline-block; background: #ffffff; color: #7e43ff; font: 600 12px Inter, system-ui, sans-serif; border: 1px solid #dfe1e6; border-radius: 999px; padding: 4px 12px; text-decoration: none; } .ds-outlink:hover { background: #f5f0ff; } .ds-outlink:focus-visible { outline: 2px solid #7e43ff; outline-offset: 2px; }"
+    },
+    {
+      "name": "Stat Chip",
+      "kind": "chip",
+      "refersTo": "chip-stat",
+      "description": "The label-over-value datapoint — the panel's core idiom. A chip with no value renders no chip.",
+      "html": "<span class=\"ds-chip\"><span class=\"ds-chip-label\">SALES TEAM</span><span class=\"ds-chip-value\">8</span></span>",
+      "css": ".ds-chip { display: inline-flex; flex-direction: column; background: #ffffff; border: 1px solid #dfe1e6; border-radius: 7px; padding: 1px 6px; } .ds-chip-label { font: 500 10px Inter, system-ui, sans-serif; letter-spacing: 0.04em; color: #615e6e; white-space: nowrap; } .ds-chip-value { font: 600 12px Inter, system-ui, sans-serif; color: #26114a; }"
+    },
+    {
+      "name": "Tone Pill",
+      "kind": "chip",
+      "description": "A rounded status pill; the tint means something (positive shown). Tones never decorate.",
+      "html": "<span class=\"ds-pill\">In sequence</span>",
+      "css": ".ds-pill { display: inline-block; background: #e3f4ec; color: #1d7b59; font: 600 10px Inter, system-ui, sans-serif; border-radius: 999px; padding: 2px 8px; }"
+    },
+    {
+      "name": "Section Card",
+      "kind": "card",
+      "refersTo": "card-section",
+      "description": "The mist card every section lives in; the ALL-CAPS title sits outside with a 2px-stroke glyph.",
+      "html": "<div class=\"ds-sec\"><div class=\"ds-sec-head\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"8\" r=\"4\"/><path d=\"M4 21c0-4 3.6-6 8-6s8 2 8 6\"/></svg><span>CONTACT &amp; COMPANY</span></div><div class=\"ds-sec-card\">Card content</div></div>",
+      "css": ".ds-sec-head { display: flex; align-items: center; gap: 8px; font: 700 10px Inter, system-ui, sans-serif; letter-spacing: 0.05em; color: #615e6e; margin-bottom: 6px; } .ds-sec-card { background: #f6f8fa; border: 1px solid #dfe1e6; border-radius: 10px; padding: 10px 12px; font: 400 12px Inter, system-ui, sans-serif; color: #26114a; }"
+    },
+    {
+      "name": "Initials Tile",
+      "kind": "custom",
+      "description": "Deterministic purple-scale initials for every person without a photo; initials render first, a photo only replaces them after decoding.",
+      "html": "<span class=\"ds-tile\">RB</span>",
+      "css": ".ds-tile { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; background: #7e43ff; color: #ffffff; font: 700 10px Inter, system-ui, sans-serif; }"
+    },
+    {
+      "name": "Sparkline Row",
+      "kind": "custom",
+      "description": "The usage-trend signature: label over value + smooth inline violet sparkline with lilac area fill + trend arrow (up green, down grey — never red). A zero value renders muted.",
+      "html": "<div class=\"ds-spark\"><span class=\"ds-spark-label\">CREDITS 30D</span><span class=\"ds-spark-line\"><span class=\"ds-spark-value\">2,395</span><svg width=\"72\" height=\"16\" viewBox=\"0 0 72 16\" fill=\"none\"><path d=\"M1 13 Q8 11 14 11.5 T28 8 T43 8.5 T57 4 T71 3\" stroke=\"#7e43ff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M1 13 Q8 11 14 11.5 T28 8 T43 8.5 T57 4 T71 3 L71 15 L1 15 Z\" fill=\"#e4d8fd\" opacity=\"0.5\"/></svg><span class=\"ds-spark-up\">▲</span></span></div>",
+      "css": ".ds-spark { display: inline-flex; flex-direction: column; gap: 1px; } .ds-spark-label { font: 500 10px Inter, system-ui, sans-serif; letter-spacing: 0.04em; color: #615e6e; } .ds-spark-line { display: inline-flex; align-items: center; gap: 6px; } .ds-spark-value { font: 600 12px Inter, system-ui, sans-serif; color: #26114a; } .ds-spark-up { color: #1d7b59; font-size: 8px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Caddie's Card",
+    "overview": "A caddie's yardage book: dense, glanceable, everything the player needs before the swing and nothing else. The SDR is mid-call with divided attention; every surface is built for the two-second read — label over value, one fact per line, and the record name as the only large type on screen. Density is a feature; the panel earns trust by never lying, never going silent, and never raising its voice unless something truly demands it. It feels calm, fast, trustworthy, friendly: a white page with mist cards and hairlines, brand carried by one violet and its lavender family, warmth from initials tiles rather than decoration.",
+    "keyCharacteristics": [
+      "Label-over-value everywhere; muted 10px caps label above a 12px ink value",
+      "One decorated surface per screen (the live-capture booking cluster's wash)",
+      "Tones fire for meaning only; the panel is violet-and-neutral at rest",
+      "Denser than the official Wiza extension, but its rounding and restraint"
+    ],
+    "rules": [
+      { "name": "The Meaning-Only Rule", "body": "Semantic tones are reserved for facts with valence. Decoration, emphasis, and data-viz come from the purple scale; a tone on screen must be translatable to a sentence about the prospect.", "section": "colors" },
+      { "name": "The Painted-Pixel Rule", "body": "Contrast is verified on rendered pixels, not spec sheets: fills keep the spec hex, text uses the darkened -text variant where the tint fails AA at pill sizes.", "section": "colors" },
+      { "name": "The Three-Sizes Rule", "body": "The content scale is 10/12/14 plus the 20px empty-state moment. New work never introduces a fifth size; reach for weight, case, or tone first.", "section": "typography" },
+      { "name": "The Flat-Field Rule", "body": "Cards never cast shadows; if a surface needs separation, it gets a fill step or a hairline, not elevation.", "section": "elevation" },
+      { "name": "The Nested-Radius Rule", "body": "A surface inset inside a rounded parent takes the parent's radius minus the inset, so the curves stay concentric.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do keep every color a token used once — new hex values are a design decision, not an implementation detail.",
+      "Do put the label over the value (10px caps over 12px ink) for every labeled datapoint.",
+      "Do make disabled and empty states explain themselves in one plain sentence naming the fix.",
+      "Do verify contrast on painted pixels — 4.5:1 for text, 3:1 for large/bold and control edges."
+    ],
+    "donts": [
+      "Don't use dark mode, ever — light-only is a confirmed brand commitment.",
+      "Don't use the interpunct \"·\" as a separator anywhere a rep can see.",
+      "Don't spend semantic color on decoration or routine states — red is for errors, lost deals, and do-not-call facts only.",
+      "Don't add a fifth font size or a second family; reach for weight, case, and tone.",
+      "Don't let company imagery stand in for a person — a person's fallback is always their own initials."
+    ]
+  }
+}
