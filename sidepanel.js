@@ -3546,9 +3546,6 @@
     syncing: false,
     confirmArmed: false, // re-sync confirmation is one click in
     result: null, // { kind: "ok"|"err", message, url }
-    // The id of the last save signal this panel acted on (or deliberately
-    // skipped). Set before any await, so one save can never start two syncs.
-    autoHandledId: null,
     // The CRM module's most recent live-match snapshot for whatever prospect
     // it last rendered — { email, status, contactId, companyId } — or null
     // before the first one arrives. See confirmedMatch() below.
@@ -3599,10 +3596,25 @@
     return api ? api.syncHash(state.text, prospectEmail()) : null;
   }
 
-  function alreadySynced() {
-    const hash = currentHash();
+  // Every hash this panel has synced, newest last. Before the ledger existed
+  // the record held ONE hash — so with several notes in a session, only the
+  // most recent counted as "already synced" and any earlier note's text could
+  // be posted again. `hash` is still written for the standing line (and reps
+  // with a pre-ledger record); `hashes` is the memory.
+  function syncedHashes() {
     const last = state.lastSynced;
-    return !!(hash && last && last.hash && last.hash === hash);
+    if (!last) return [];
+    const list = Array.isArray(last.hashes) ? last.hashes.slice() : [];
+    if (last.hash && list.indexOf(last.hash) === -1) list.push(last.hash);
+    return list;
+  }
+
+  function isHashSynced(hash) {
+    return !!hash && syncedHashes().indexOf(hash) !== -1;
+  }
+
+  function alreadySynced() {
+    return isHashSynced(currentHash());
   }
 
   function ago(ts) {
@@ -3855,6 +3867,9 @@
       state.confirmArmed = false;
     }
     render();
+    // A record ID arriving is what un-blocks a queued save that was waiting on
+    // "no matched HubSpot record yet".
+    processAutoQueue();
   }
 
   async function refreshAuth() {
@@ -3888,6 +3903,8 @@
       state.auth = { signedIn: false, ownerId: null, userId: null, available: true };
     }
     render();
+    // Signing in un-blocks queued saves waiting on "HubSpot isn't connected".
+    processAutoQueue();
   }
 
   // Both halves of "this note is from me", resolved together right before the
@@ -3969,8 +3986,12 @@
       // "No user"/"No owner" in HubSpot's UI. `createdByDowngraded` counts too:
       // HubSpot refused hs_created_by, so "Activity created by" is not the rep.
       const attributed = !!(who.ownerId && who.userId && !res.createdByDowngraded);
+      const hash = api.syncHash(text, prospectEmail());
       const record = {
-        hash: api.syncHash(text, prospectEmail()),
+        hash,
+        // The ledger: every hash synced this session (bounded), so a second or
+        // third note in the same call can't make the first look unsynced.
+        hashes: syncedHashes().filter((h) => h !== hash).concat(hash).slice(-20),
         noteId: res.noteId,
         url: res.url,
         prospectEmail: prospectEmail(),
@@ -4024,11 +4045,14 @@
         (e && e.code) || "?",
         (e && e.message) || e
       );
+      if (auto) autoBackoffUntil = Date.now() + 15000;
       return false;
     } finally {
       state.syncing = false;
       state.confirmArmed = false;
       render();
+      // Saves that arrived while this sync was in flight are waiting their turn.
+      processAutoQueue();
     }
   }
 
@@ -4080,57 +4104,132 @@
     render();
   }
 
+  // Save signals queue rather than being one-shot. The old design marked a
+  // signal handled BEFORE checking conditions, so a save that arrived while a
+  // sync was in flight, before the record match, or before sign-in was burned
+  // forever — with several notes in one session, everything after the first
+  // was silently left behind. Now: permanent reasons resolve a signal (visibly),
+  // transient ones leave it queued, and every event that could unblock it
+  // (auth change, context arriving, the CRM match, a sync finishing) drains
+  // the queue again. Order is preserved — notes land in the CRM in the order
+  // they were saved.
+  const autoHandled = []; // ids fully resolved (synced or deliberately skipped)
+  const autoQueue = []; // { id, saved, notesEmail } awaiting their turn
+  let autoBackoffUntil = 0; // set after a failed auto-sync; see processAutoQueue
+
+  function autoResolve(id) {
+    autoHandled.push(id);
+    if (autoHandled.length > 200) autoHandled.shift();
+  }
+
   function maybeAutoSync(notes) {
-    const api = notesApi();
     const saved = notes && notes.lastSaved;
     const text = saved && typeof saved.text === "string" ? saved.text.trim() : "";
     if (!saved || !text) return;
-
     const id = saved.id || `${saved.savedAt || 0}-${text.length}`;
-    // One signal, one attempt — set before anything can await, so a burst of
-    // captures carrying the same save can't start a second sync.
-    if (state.autoHandledId === id) return;
-    state.autoHandledId = id;
+    // One signal, one queue entry — a burst of captures carrying the same save
+    // can't enqueue it twice.
+    if (autoHandled.indexOf(id) !== -1) return;
+    if (autoQueue.some((q) => q.id === id)) return;
+    autoQueue.push({ id, saved, notesEmail: (notes && notes.prospectEmail) || null });
+    processAutoQueue();
+  }
 
-    if (!state.settings.autoSyncNotes) return autoSkip("auto-sync is off in Settings");
-    if (!api) return autoSkip("notes sync isn't available in this build");
-    if (!state.auth.signedIn) return autoSkip("HubSpot isn't connected");
-    if (state.syncing) return autoSkip("a sync is already in flight");
-    if (saved.savedAt && Date.now() - saved.savedAt > AUTO_MAX_AGE_MS) {
-      return autoSkip("that save is too old to sync on its own");
+  function processAutoQueue() {
+    // A sync in flight isn't a reason to drop anything: runSync's finally
+    // drains the queue again the moment it settles.
+    if (state.syncing) return;
+    if (!autoQueue.length) return;
+    // After a failed auto-sync, hold the rest of the queue briefly: whatever
+    // failed (network, rate limit) would fail the next note too, and firing
+    // straight into it would also wipe the error line the rep is reading.
+    if (Date.now() < autoBackoffUntil) {
+      setTimeout(processAutoQueue, autoBackoffUntil - Date.now() + 100);
+      return;
     }
-    // Bleed guard: the note belongs to the prospect it was taken for. The scraper
-    // clears its own state on a prospect change; this catches the window where
-    // the capture and the CRM context disagree.
-    const ctxEmail = state.ctx && state.ctx.email;
-    if (notes.prospectEmail && ctxEmail && notes.prospectEmail !== ctxEmail) {
-      return autoSkip("the prospect changed after that note was captured");
-    }
-    if (!contactId() && !companyId()) {
-      return autoSkip("this prospect has no matched HubSpot record yet");
-    }
-    const hash = api.syncHash(text, prospectEmail());
-    if (state.lastSynced && state.lastSynced.hash === hash) {
-      return autoSkip("that exact note is already on the record");
-    }
-    const gate = api.syncGate({
-      signedIn: state.auth.signedIn,
-      text,
-      contactId: contactId(),
-      companyId: companyId(),
-      syncing: false,
-    });
-    if (!gate.enabled) return autoSkip(gate.reasons.join(" "));
+    while (autoQueue.length) {
+      const item = autoQueue[0];
+      const api = notesApi();
+      const saved = item.saved;
+      const text = String(saved.text || "").trim();
 
-    // eslint-disable-next-line no-console
-    console.debug("[EasyBooking] notes: auto-syncing saved note", id, `(${text.length}ch)`);
-    // Make sure the editor holds what we're about to send, so that if it fails
-    // the Sync button is a real fallback rather than a different note.
-    if (!state.userEdited && state.text.trim() !== text) {
-      state.text = saved.text;
-      render();
+      // --- Permanent reasons: resolve the signal, visibly, and move on. ----
+      if (!state.settings.autoSyncNotes) {
+        autoQueue.shift();
+        autoResolve(item.id);
+        autoSkip("auto-sync is off in Settings");
+        continue;
+      }
+      if (!api) {
+        autoQueue.shift();
+        autoResolve(item.id);
+        autoSkip("notes sync isn't available in this build");
+        continue;
+      }
+      if (saved.savedAt && Date.now() - saved.savedAt > AUTO_MAX_AGE_MS) {
+        autoQueue.shift();
+        autoResolve(item.id);
+        autoSkip("that save is too old to sync on its own");
+        continue;
+      }
+      // Bleed guard: the capture stream has moved on to a different prospect —
+      // this note must never land on the new prospect's record.
+      const notesEmail = state.notes && state.notes.prospectEmail;
+      if (item.notesEmail && notesEmail && item.notesEmail !== notesEmail) {
+        autoQueue.shift();
+        autoResolve(item.id);
+        autoSkip("the prospect changed after that note was captured");
+        continue;
+      }
+      const hash = api.syncHash(text, prospectEmail());
+      if (isHashSynced(hash)) {
+        autoQueue.shift();
+        autoResolve(item.id);
+        autoSkip("that exact note is already on the record");
+        continue;
+      }
+
+      // --- Transient blockers: keep the signal and wait for the event that
+      // clears it (each shows why, so the panel never goes silent). ---------
+      if (!state.auth.signedIn) {
+        return autoSkip("HubSpot isn't connected");
+      }
+      const ctxEmail = state.ctx && state.ctx.email;
+      if (item.notesEmail && ctxEmail && item.notesEmail !== ctxEmail) {
+        return autoSkip("the prospect changed after that note was captured");
+      }
+      if (!contactId() && !companyId()) {
+        return autoSkip("this prospect has no matched HubSpot record yet");
+      }
+
+      const gate = api.syncGate({
+        signedIn: state.auth.signedIn,
+        text,
+        contactId: contactId(),
+        companyId: companyId(),
+        syncing: false,
+      });
+      if (!gate.enabled) {
+        autoQueue.shift();
+        autoResolve(item.id);
+        autoSkip(gate.reasons.join(" "));
+        continue;
+      }
+
+      // --- Go. One at a time; the finally() hook processes the rest. -------
+      autoQueue.shift();
+      autoResolve(item.id);
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] notes: auto-syncing saved note", item.id, `(${text.length}ch)`);
+      // Make sure the editor holds what we're about to send, so that if it
+      // fails the Sync button is a real fallback rather than a different note.
+      if (!state.userEdited && state.text.trim() !== text) {
+        state.text = saved.text;
+        render();
+      }
+      runSync(saved.text, "auto");
+      return;
     }
-    runSync(saved.text, "auto");
   }
 
   // Typed errors from hubspot-notes.js carry their own rep-readable message; this
@@ -4239,6 +4338,8 @@
   window.addEventListener("eb:crm-match", (ev) => {
     state.crmMatch = (ev && ev.detail) || null;
     render();
+    // The live match confirming record IDs un-blocks queued saves too.
+    processAutoQueue();
   });
 
   // Storage first — captures that happened while the panel was closed only

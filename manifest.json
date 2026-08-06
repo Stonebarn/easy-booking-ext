@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dialer Helper Pro",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Auto-fills the booking form from the dialer and shows HubSpot contact, company, deal and activity context with call-note sync.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxQhL4tkvI7SI+aU2SAb2QfscnW2+wHp2RUFOKH4vE2AcsAmFRv27hJXk0GWm8JZnZhp2/vu8D1xg1WBEbF1O+tfAX1K4vY0GRz96fQSZkIAqhzKr9mZJ2m4Ktz62KJdJ1A45EMpDmtTmpv1+zakYANybsmeYwEBr7GO5YpWeo5yLdKl6uruK6ag/VvMEvqbIg4ZDe3JqmoUBHFm+0gmnUKKS+wG6/HxMULTDUgCYt6SERLZ6V36Ym8FFXogieB2L7Yyb0mv2mwkDwpOKqORZfIDoF9eohgIjI/C71NFVS5r1EnBT47qTHRxR3rt849XD/MiitHe8xZHAykkb2ZbVCwIDAQAB",
   "minimum_chrome_version": "114",

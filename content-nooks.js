@@ -641,12 +641,26 @@
     // The note dialog's two controls, matched by their own label text (they carry
     // no testids — see docs/nooks-dom-recon.md). Exact, trimmed,
     // case-insensitive. Save ARMS a pending save; Cancel positively disarms one.
-    SAVE_BUTTON_TEXTS: ["Save", "Save note", "Save Note", "Save & close", "Save changes"],
+    // The "Add …" variants match the dialog's own primary button (its title is
+    // "Add a Prospect Note") — the card-header "Add note" link that OPENS the
+    // dialog can never arm anything because arming requires the click to land
+    // INSIDE the dialog.
+    SAVE_BUTTON_TEXTS: ["Save", "Save note", "Save Note", "Save & close", "Save changes", "Add", "Add note", "Add Note", "Add a note"],
     CANCEL_BUTTON_TEXTS: ["Cancel", "Close", "Discard", "Delete"],
     // How long an armed save waits for the saved list to confirm it. Save shows a
     // progressbar while it persists, so this has to outlast a slow write — but
     // an unconfirmed save is dropped rather than assumed.
     SAVE_CONFIRM_WINDOW_MS: 20000,
+    // An armed (Save-clicked) note whose dialog has closed is confirmed even
+    // WITHOUT saved-list evidence after this long. The populated note list's
+    // DOM was never verified (recon happened with zero saved notes), so the
+    // list check is treated as an accelerator, not a requirement — a positive
+    // Save click plus the dialog completing is evidence enough on its own.
+    SAVE_CLICK_FALLBACK_MS: 4000,
+    // How close a Cancel/Close click must precede the dialog's disappearance
+    // to explain it. Beyond this, a closing dialog with a draft on record is
+    // treated as a possible save (confirmed only by saved-list evidence).
+    CANCEL_ATTRIBUTION_MS: 2500,
     // Debounce for note rescans. Deliberately longer than the prospect scan's
     // 300ms: this also runs on every keystroke in the note editor.
     DEBOUNCE_MS: 600,
@@ -844,32 +858,40 @@
     notesState.prospectEmail = email || null;
     notesState.lastSaved = null;
     pendingSave = null;
+    implicitSave = null;
     lastNotesSignature = null;
     return notesState;
   }
 
   // --- Save-transition detection ------------------------------------------
-  // The side panel can auto-sync a saved note to HubSpot, so "the rep saved this"
-  // has to be a fact, not a guess. It is detected in two positive steps:
+  // The side panel auto-syncs a saved note to HubSpot, so "the rep saved this"
+  // has to be evidence-based. Three layers, strongest first (live incident
+  // 2026-08-06: reps' saves were never detected — the original design required
+  // BOTH a recognized Save-button label AND the note's text turning up in a
+  // saved-list DOM that was never actually verified, so auto-sync never fired):
   //
-  //   1. ARM     — a click lands on the note dialog's Save control (the click
-  //                target is inside the dialog that holds the note editor). The
-  //                draft text is captured at that instant, before React unmounts
-  //                anything.
-  //   2. CONFIRM — a later scan finds the dialog gone AND the saved list for that
-  //                note's scope now carrying the text (or, if the structure-
-  //                agnostic reader can't match it exactly, that bucket having
-  //                changed and grown).
+  //   EXPLICIT — a click lands on a control inside the note dialog whose label
+  //              classifies as Save. The draft is captured at that instant.
+  //              Confirmed the moment the dialog is gone and the saved list
+  //              carries the text (or grew); if the list stays silent — or
+  //              there is no notes card on screen to check — the Save click
+  //              plus the dialog completing confirms it on its own after
+  //              SAVE_CLICK_FALLBACK_MS.
+  //   IMPLICIT — the dialog closed with a draft on record and nothing to
+  //              explain the close: no Save classified (unknown button label),
+  //              no Cancel within CANCEL_ATTRIBUTION_MS. Confirmed ONLY if the
+  //              draft's text actually appears in the saved list ("grew" is
+  //              not enough here — an Escape'd draft must never sync).
+  //   CANCEL   — a Cancel/Close/Discard click positively disarms everything
+  //              and stamps lastCancelAt so the close it causes is explained.
   //
-  // Both steps are required, which is what keeps Cancel out: a Cancel click never
-  // arms anything (and actively disarms), and "the draft disappeared" is never
-  // itself evidence of a save — Cancel does that too, as does the dialog being
-  // torn down for any other reason. A save that is armed but never confirmed
-  // expires silently inside SAVE_CONFIRM_WINDOW_MS.
-  //
-  // One save produces exactly one signal: confirming clears the pending save and
-  // publishes an id the panel can dedupe on.
-  let pendingSave = null; // { text, scope, armedAt }
+  // A candidate that never confirms expires silently inside
+  // SAVE_CONFIRM_WINDOW_MS. One save produces exactly one signal: confirming
+  // clears the candidates and publishes an id the panel can dedupe on.
+  let pendingSave = null; // { text, scope, armedAt, dialogGoneAt } — explicit (Save-clicked)
+  let implicitSave = null; // { text, scope, closedAt } — dialog closed unexplained
+  let lastCancelAt = 0;
+  let dialogSeenOpen = false; // last scan's dialog presence, for close transitions
   let saveSeq = 0;
 
   const collapse = (text) => String(text || "").replace(/\s+/g, " ").trim();
@@ -911,11 +933,13 @@
     if (!isWithin(target, dialog)) return null;
     const kind = classifyControl(controlAncestor(target, dialog));
     if (kind === "cancel") {
-      if (pendingSave) {
+      if (pendingSave || implicitSave) {
         // eslint-disable-next-line no-console
         console.debug("[EasyBooking] note dialog cancelled — no save to sync");
       }
       pendingSave = null;
+      implicitSave = null;
+      lastCancelAt = Date.now();
       return null;
     }
     if (kind !== "save") return null;
@@ -923,41 +947,24 @@
     if (!text) return null; // nothing typed: Nooks disables Save anyway
     const scope =
       (card && detectActiveTab(card)) || notesState.activeTab || NOTES_CONFIG.DEFAULT_TAB;
-    pendingSave = { text, scope, armedAt: Date.now() };
+    pendingSave = { text, scope, armedAt: Date.now(), dialogGoneAt: null };
+    implicitSave = null; // the explicit signal owns this dialog now
     // eslint-disable-next-line no-console
     console.debug("[EasyBooking] note save clicked; waiting for it to appear in the dialer");
     return pendingSave;
   }
 
-  // Step 2. Called once per scan, after the saved buckets have been refreshed.
-  // `before` is a snapshot of both buckets from the start of this pass.
-  function settlePendingSave(dialogOpen, before) {
-    if (!pendingSave) return null;
-    if (Date.now() - pendingSave.armedAt > NOTES_CONFIG.SAVE_CONFIRM_WINDOW_MS) {
-      // eslint-disable-next-line no-console
-      console.debug("[EasyBooking] a note save was never confirmed in the dialer; ignoring it");
-      pendingSave = null;
-      return null;
-    }
-    // Still open: either mid-save (Save shows a progressbar) or the save failed.
-    if (dialogOpen) return null;
-
-    const bucket = pendingSave.scope === "account" ? "savedAccountNotes" : "savedProspectNotes";
-    const after = collapse(notesState[bucket]).toLowerCase();
-    const needle = collapse(pendingSave.text).toLowerCase();
-    const prev = collapse(before && before[bucket]).toLowerCase();
-    const appeared = !!needle && !!after && after.indexOf(needle) !== -1;
-    const grew = !!after && after !== prev && after.length > prev.length;
-    if (!appeared && !grew) return null;
-
+  // The one place a confirmed save becomes a signal the panel can act on.
+  function confirmSave(text, scope, how) {
     saveSeq += 1;
     const signal = {
-      text: pendingSave.text,
-      scope: pendingSave.scope,
+      text,
+      scope,
       savedAt: Date.now(),
-      id: `save-${pendingSave.armedAt}-${saveSeq}`,
+      id: `save-${Date.now()}-${saveSeq}`,
     };
     pendingSave = null;
+    implicitSave = null;
     notesState.lastSaved = signal;
     // eslint-disable-next-line no-console
     console.debug(
@@ -965,9 +972,78 @@
       signal.id,
       `scope=${signal.scope}`,
       `${signal.text.length}ch`,
-      appeared ? "(text matched in the dialer)" : "(saved list grew)"
+      `(${how})`
     );
     return signal;
+  }
+
+  function bucketEvidence(candidate, before) {
+    const bucket = candidate.scope === "account" ? "savedAccountNotes" : "savedProspectNotes";
+    const after = collapse(notesState[bucket]).toLowerCase();
+    const needle = collapse(candidate.text).toLowerCase();
+    const prev = collapse(before && before[bucket]).toLowerCase();
+    return {
+      appeared: !!needle && !!after && after.indexOf(needle) !== -1,
+      grew: !!after && after !== prev && after.length > prev.length,
+    };
+  }
+
+  // Step 2. Called once per scan, after the saved buckets have been refreshed.
+  // `before` is a snapshot of both buckets from the start of this pass;
+  // `cardPresent` says whether there was a saved list to check at all.
+  function settlePendingSave(dialogOpen, before, cardPresent) {
+    if (pendingSave) {
+      if (Date.now() - pendingSave.armedAt > NOTES_CONFIG.SAVE_CONFIRM_WINDOW_MS) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] a note save was never confirmed in the dialer; ignoring it");
+        pendingSave = null;
+        return null;
+      }
+      // Still open: either mid-save (Save shows a progressbar) or the save failed.
+      if (dialogOpen) return null;
+      if (pendingSave.dialogGoneAt == null) {
+        pendingSave.dialogGoneAt = Date.now();
+        // The saved list may never speak (unverified DOM); make sure a scan
+        // runs again once the fallback window has elapsed, even if the page
+        // has gone quiet.
+        setTimeout(scheduleNotesScan, NOTES_CONFIG.SAVE_CLICK_FALLBACK_MS + 100);
+      }
+      const ev = bucketEvidence(pendingSave, before);
+      if (ev.appeared || ev.grew) {
+        return confirmSave(
+          pendingSave.text,
+          pendingSave.scope,
+          ev.appeared ? "text matched in the dialer" : "saved list grew"
+        );
+      }
+      // No list evidence. A positively-classified Save click plus the dialog
+      // completing is trusted on its own: immediately when there is no notes
+      // card to consult, otherwise after the fallback delay.
+      if (!cardPresent) {
+        return confirmSave(pendingSave.text, pendingSave.scope, "save click + dialog closed; no notes list on screen");
+      }
+      if (Date.now() - pendingSave.dialogGoneAt >= NOTES_CONFIG.SAVE_CLICK_FALLBACK_MS) {
+        return confirmSave(pendingSave.text, pendingSave.scope, "save click + dialog closed");
+      }
+      return null;
+    }
+
+    if (implicitSave) {
+      if (Date.now() - implicitSave.closedAt > NOTES_CONFIG.SAVE_CONFIRM_WINDOW_MS) {
+        implicitSave = null;
+        return null;
+      }
+      if (dialogOpen) return null;
+      // Implicit candidates carry no click evidence, so only the strongest
+      // list signal counts: the draft's own text showing up as saved. "Grew"
+      // alone could be lazy-loaded history — never enough to sync on.
+      const ev = bucketEvidence(implicitSave, before);
+      if (ev.appeared) {
+        return confirmSave(implicitSave.text, implicitSave.scope, "dialog closed + text matched in the dialer");
+      }
+      return null;
+    }
+    return null;
   }
 
   // One scan pass. Roots and email can be injected (that's the unit-test seam);
@@ -992,10 +1068,16 @@
 
     const card = "card" in opts ? opts.card : findNotesCard();
     const dialog = "dialog" in opts ? opts.dialog : findNoteDialog();
+    const dialogClosing = !dialog && dialogSeenOpen;
     // Bail before doing any work when the notes UI isn't on screen at all —
-    // unless the prospect just changed, in which case the cleared state still
-    // has to be published so the panel stops showing the last prospect's notes.
-    if (!card && !dialog && !didReset) return null;
+    // unless the prospect just changed (the cleared state still has to be
+    // published), a save candidate is waiting to settle, or the dialog just
+    // closed (the close transition itself is what implicit detection reads;
+    // the original early-bail here is why an off-screen notes card meant a
+    // save could never be confirmed).
+    if (!card && !dialog && !didReset && !pendingSave && !implicitSave && !dialogClosing) {
+      return null;
+    }
 
     if (dialog) {
       // Dialog open: mirror the editor exactly, including "the rep cleared it".
@@ -1022,9 +1104,28 @@
       notesState[bucket] = saved;
     }
 
+    // Close transition: the dialog was open last scan and is gone now. If no
+    // Save click was classified (unknown button label) and no recent Cancel
+    // explains the close, the draft on record becomes an implicit candidate —
+    // synced only if its text turns up in the saved list.
+    if (dialogClosing) {
+      const draftText = notesState.draft;
+      const cancelled = lastCancelAt && Date.now() - lastCancelAt < NOTES_CONFIG.CANCEL_ATTRIBUTION_MS;
+      if (!pendingSave && !implicitSave && draftText && !cancelled) {
+        implicitSave = {
+          text: draftText,
+          scope: notesState.activeTab || NOTES_CONFIG.DEFAULT_TAB,
+          closedAt: Date.now(),
+        };
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] note dialog closed with a draft; watching the saved list for it");
+      }
+    }
+    dialogSeenOpen = !!dialog;
+
     // Second half of save detection (the first half is the Save click). Runs
     // after the buckets are current, and only ever with the dialog gone.
-    settlePendingSave(!!dialog, savedBefore);
+    settlePendingSave(!!dialog, savedBefore, !!card);
 
     const payload = {
       draft: notesState.draft,
@@ -1151,5 +1252,6 @@
     armSaveFromClick,
     classifyControl,
     pendingSaveState: () => pendingSave,
+    implicitSaveState: () => implicitSave,
   };
 })();

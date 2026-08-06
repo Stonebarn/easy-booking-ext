@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-06
+
+### Fixed — every note saved in a session now syncs (auto-sync actually fires)
+
+Live report: with several notes in one call session, each note "overwrote"
+the previous one — only the last note manually synced ever reached HubSpot —
+and auto-sync on save never fired at all. Three root causes, all fixed:
+
+- **Save detection no longer depends on guessed button labels or the
+  unverified saved-list DOM** (`content-nooks.js`). A save is now confirmed
+  in layers: a classified Save click plus the dialog closing confirms on its
+  own (saved-list evidence just accelerates it, and its absence can no longer
+  veto it — including when the notes card isn't on screen at all, which
+  previously hit an early bail that skipped confirmation entirely). A dialog
+  that closes with a draft and no Cancel to explain it becomes an *implicit*
+  candidate, confirmed only if the draft's own text appears in the saved
+  list — so an Escape'd draft can never sync. "Add"/"Add Note" now classify
+  as Save (the dialog is titled "Add a Prospect Note").
+- **Save signals queue instead of being burned one-shot** (`sidepanel.js`).
+  The old code marked a signal handled before checking conditions, so a save
+  arriving mid-sync, before the record match, or while signed out was
+  skipped forever. Now permanent reasons resolve a signal visibly, transient
+  ones leave it queued, and every unblocking event (sign-in, context
+  arriving, the CRM match, a sync finishing) drains the queue in save order.
+  A failed auto-sync holds the queue for 15s rather than steamrolling the
+  error line.
+- **The idempotency record remembers every synced note, not just the last
+  one** (`hashes` ledger, bounded at 20). Re-saving an earlier note's text is
+  recognized as a duplicate; previously only the most recent hash counted.
+
+Continuous *typing* still never syncs by design: the note syncs when it is
+saved in the dialer, one HubSpot note per save.
+
 ## [0.5.1] - 2026-08-06
 
 ### Fixed — Lovable token function reference: fixed introspection, added failure logging and a hub allowlist
