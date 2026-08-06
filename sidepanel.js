@@ -1790,6 +1790,16 @@
         userId = info.userId || null;
         ownerId = info.ownerId || null;
       }
+      // getAuthState is a pure read, and on a connection whose identity was never
+      // captured it reads null (see ensureIdentity in hubspot-auth.js) — so ask
+      // for the healing versions of both, exactly as the notes sync does.
+      if (!userId && auth && typeof auth.ensureIdentity === "function") {
+        const who = await auth.ensureIdentity();
+        if (who) {
+          userId = who.userId || userId;
+          actor = actor || who.userEmail || null;
+        }
+      }
       if (!ownerId && auth && typeof auth.ensureOwnerId === "function") {
         ownerId = await auth.ensureOwnerId();
       }
@@ -3501,6 +3511,10 @@
   // the sign-in state may have flipped.
   const AUTH_KEY_PREFIX = "eb:hs";
   const HUBSPOT_URL_PREFIX = "https://app.hubspot.com/";
+  // A sync that reached HubSpot with no owner and no created-by is a real outcome
+  // and a rep-fixable one, so it is stated on the receipt rather than left to the
+  // console. Quiet on purpose: the note landed.
+  const UNATTRIBUTED_ASIDE = "Synced without attribution — reconnect HubSpot to fix.";
 
   const pillEl = document.getElementById("notes-pill");
   const hintEl = document.getElementById("notes-hint");
@@ -3637,7 +3651,9 @@
   let lastResultSig = "";
   let lastBlockersText = ""; // dedup guard for #notes-blockers, also role="status" — see render()
   function renderResult(display) {
-    const sig = display ? `${display.kind}|${display.message}|${display.url || ""}` : "";
+    const sig = display
+      ? `${display.kind}|${display.message}|${display.aside || ""}|${display.url || ""}`
+      : "";
     if (sig === lastResultSig) return;
     lastResultSig = sig;
     resultEl.textContent = "";
@@ -3647,6 +3663,17 @@
     resultEl.className =
       display.kind === "ok" ? "ok" : display.kind === "skip" ? "skip" : "err";
     resultEl.appendChild(document.createTextNode(display.message));
+    // A trailing clause the outcome above doesn't own — today, only "this landed
+    // but HubSpot doesn't know who from". It keeps the receipt's tone (the note
+    // DID reach the CRM) and takes the muted treatment the "skip" kind uses, so
+    // nothing new is introduced: one quiet sentence, same node, same live region.
+    if (display.aside) {
+      resultEl.appendChild(document.createTextNode(" "));
+      const aside = document.createElement("span");
+      aside.className = "aside";
+      aside.textContent = display.aside;
+      resultEl.appendChild(aside);
+    }
     // Only ever link to a URL this extension built from HubSpot record IDs.
     if (display.url && String(display.url).indexOf(HUBSPOT_URL_PREFIX) === 0) {
       resultEl.appendChild(document.createTextNode(" "));
@@ -3780,6 +3807,10 @@
       display = {
         kind: "ok",
         message: `${verb} to ${targets} ${ago(state.lastSynced.syncedAt)} ✓`,
+        // Only ever added when we KNOW it went out unattributed. A record written
+        // before this shipped has no `attributed` field at all, and an absent
+        // answer must not be rendered as a bad one.
+        aside: state.lastSynced.attributed === false ? UNATTRIBUTED_ASIDE : null,
         url: state.lastSynced.url,
       };
     }
@@ -3859,30 +3890,54 @@
     render();
   }
 
-  // The owner ID is what attributes the note ("Activity assigned to"). It can be
-  // missing on a connection whose one-shot lookup failed at login, so ask the auth
-  // module to resolve it on demand — that heals the stored record for good. A
-  // failure here never blocks the sync: an unattributed note beats a lost one.
-  async function resolveOwnerId() {
-    if (state.auth.ownerId) return state.auth.ownerId;
+  // Both halves of "this note is from me", resolved together right before the
+  // write — because both can be missing on a live connection and for the same
+  // reason (see ensureIdentity in hubspot-auth.js):
+  //   userId  → hs_created_by      ("Activity created by")
+  //   ownerId → hubspot_owner_id   ("Activity assigned to")
+  // Asking the auth module heals the stored record for good, so this costs one
+  // round trip per broken connection, not one per note. Neither lookup may block
+  // or fail the sync: an unattributed note beats a lost one, so every failure
+  // path here returns what it has and lets the write go out (visibly — see the
+  // `attributed` flag in runSync).
+  async function resolveAttribution() {
     const auth = window.EB && window.EB.hubspotAuth;
-    if (!auth || typeof auth.ensureOwnerId !== "function") return null;
-    try {
-      const ownerId = await auth.ensureOwnerId();
-      if (ownerId) {
-        state.auth.ownerId = ownerId;
-        return ownerId;
+    let ownerId = state.auth.ownerId || null;
+    let userId = state.auth.userId || null;
+
+    if (!userId && auth && typeof auth.ensureIdentity === "function") {
+      try {
+        const who = await auth.ensureIdentity();
+        if (who && who.userId) {
+          userId = String(who.userId);
+          state.auth.userId = userId;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] notes: identity lookup failed:", (e && e.message) || e);
       }
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.debug("[EasyBooking] notes: owner lookup failed:", (e && e.message) || e);
-      return null;
     }
-    // eslint-disable-next-line no-console
-    console.debug(
-      "[EasyBooking] notes: no HubSpot owner id available — syncing the note unattributed"
-    );
-    return null;
+    if (!ownerId && auth && typeof auth.ensureOwnerId === "function") {
+      try {
+        const resolved = await auth.ensureOwnerId();
+        if (resolved) {
+          ownerId = String(resolved);
+          state.auth.ownerId = ownerId;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] notes: owner lookup failed:", (e && e.message) || e);
+      }
+    }
+    if (!ownerId || !userId) {
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[EasyBooking] notes: syncing unattributed —",
+        `owner=${ownerId || "none"}`,
+        `user=${userId || "none"}`
+      );
+    }
+    return { ownerId, userId };
   }
 
   // --- Sync ---------------------------------------------------------------
@@ -3900,16 +3955,20 @@
     render();
 
     try {
-      const ownerId = await resolveOwnerId();
+      const who = await resolveAttribution();
       const res = await api.createNote({
         text,
         contactId: contactId(),
         companyId: companyId(),
-        ownerId,
+        ownerId: who.ownerId,
         // The SDR's HubSpot *user* id, which is not their owner id — it's what
         // hs_created_by ("Activity created by") wants.
-        userId: state.auth.userId,
+        userId: who.userId,
       });
+      // Both fields, or the note landed with someone else's name on it — which is
+      // "No user"/"No owner" in HubSpot's UI. `createdByDowngraded` counts too:
+      // HubSpot refused hs_created_by, so "Activity created by" is not the rep.
+      const attributed = !!(who.ownerId && who.userId && !res.createdByDowngraded);
       const record = {
         hash: api.syncHash(text, prospectEmail()),
         noteId: res.noteId,
@@ -3918,6 +3977,10 @@
         targets,
         syncedAt: Date.now(),
         auto,
+        // Read back by render()'s standing line, so an auto-sync's receipt says
+        // this too — that line, not `result`, is the only thing a rep sees when
+        // the panel wasn't the one that started the sync.
+        attributed,
       };
       await chrome.storage.local.set({ [SYNCED_KEY]: record });
       state.lastSynced = record;
@@ -3932,6 +3995,7 @@
           : {
               kind: "ok",
               message: `${auto ? "Auto-synced" : "Note added"} to ${targets || "HubSpot"} ✓`,
+              aside: attributed ? null : UNATTRIBUTED_ASIDE,
               url: res.url,
             };
       // eslint-disable-next-line no-console
@@ -3939,7 +4003,8 @@
         `[EasyBooking] notes ${auto ? "auto-" : ""}synced:`,
         record.noteId,
         `-> ${targets}`,
-        `owner=${ownerId || "none"}`,
+        `owner=${who.ownerId || "none"}`,
+        `user=${who.userId || "none"}`,
         res.createdByDowngraded ? "(created-by left to HubSpot)" : ""
       );
       return true;

@@ -1651,6 +1651,10 @@
       #notes-result.err { color: var(--tone-negative-fg); font-weight: var(--fw-value); }
       /* A skipped auto-sync: information, not an outcome — muted, body weight. */
       #notes-result.skip { color: var(--muted); }
+      /* A trailing clause on an outcome that stands (the note landed) but needs
+         one caveat said out loud — same muted treatment as .skip above, so the
+         receipt keeps its tone and the caveat doesn't compete with it. */
+      #notes-result .aside { color: var(--muted); font-weight: var(--fw-body); }
       #notes-result a { color: inherit; }
       .pill.synced { background: var(--tone-positive-bg); color: var(--tone-positive-fg); }
       /* ===== Tone classes ==================================================

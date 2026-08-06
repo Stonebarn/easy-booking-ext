@@ -9,9 +9,11 @@
 //                                                  user_email, user_id }
 //   POST { action: "refresh", refresh_token }  -> { access_token, expires_in }
 //
-// Identity now comes back from the exchange (the function does the introspect
-// server-side, since that call also needs the secret). Everything else — the
-// authorize redirect and every CRM call — stays client-side.
+// The exchange also *offers* identity (the function introspects server-side),
+// but it is never relied on: see ensureIdentity() below, which resolves the
+// signed-in SDR from the access token itself on whatever path needs it.
+// Everything else — the authorize redirect and every CRM call — stays
+// client-side.
 //
 // No host_permissions entry is needed for the function's domain: it answers the
 // preflight with Access-Control-Allow-Origin set to this extension's origin, so
@@ -240,11 +242,113 @@
     }
   }
 
+  // --- Signed-in identity --------------------------------------------------
+  // Who a note gets attributed to. hs_created_by ("Activity created by") wants
+  // the SDR's HubSpot *user* id, and every note this extension wrote came out as
+  // "No user" because that id was never actually known.
+  //
+  // Why: the exchange in login() was the ONE code path that ever captured it,
+  // straight from the token service's response — and that response carries
+  // user_id: null. The hosted function asks HubSpot's introspect endpoint for
+  // identity but posts the token as `access_token`, while the endpoint requires a
+  // form field named `token`; it 400s, the function swallows the failure
+  // (`if (intro.ok) who = intro.data;`) and returns nulls. Nothing looked again:
+  // a restored session reads the same null back out of storage, and a token
+  // refresh never touches identity at all. One silent failure at one moment,
+  // cached in chrome.storage.local for the life of the connection.
+  //
+  // So identity is resolved from the token instead, here, on demand:
+  // GET /oauth/v1/access-tokens/{token} is public token metadata — no client
+  // secret, the bearer token is the path segment — and answers { user (email),
+  // user_id, hub_id } for whoever the token belongs to. That answer is available
+  // on EVERY path (fresh login, session restored from storage, token just
+  // refreshed), which is the whole point: there is no longer a path that can
+  // leave a connection anonymous.
+  //
+  // Contract, because attribution must never cost a rep their note: single
+  // flight, persisted once resolved, and a failure returns null WITHOUT caching
+  // anything — the next sync simply asks again.
+  let inFlightIdentity = null;
+
+  async function fetchTokenIdentity() {
+    const token = await getAccessToken();
+    // The token rides in the path (HubSpot's own design for this endpoint);
+    // apiFetch additionally sends it as the bearer, which this endpoint ignores.
+    // Never logged, on either side.
+    const res = await apiFetch(`/oauth/v1/access-tokens/${encodeURIComponent(token)}`);
+    if (!res.ok) {
+      throw new HubSpotAuthError("API_ERROR", `HTTP ${res.status}`, res.status);
+    }
+    const body = (await res.json()) || {};
+    return {
+      userEmail: body.user ? String(body.user) : null,
+      userId: body.user_id != null ? String(body.user_id) : null,
+      hubId: body.hub_id != null ? String(body.hub_id) : null,
+    };
+  }
+
+  // Returns { userEmail, userId, hubId } — any field may still be null — or null
+  // when there is no connection at all. Callers carry on unattributed rather than
+  // lose the write.
+  async function ensureIdentity() {
+    const auth = await readAuth();
+    if (!auth || !auth.refreshToken) {
+      log("identity requested while not connected");
+      return null;
+    }
+    const have = {
+      userEmail: auth.userEmail || null,
+      userId: auth.userId || null,
+      hubId: auth.hubId || null,
+    };
+    // The user id is the field attribution actually needs; the email is what the
+    // owner lookup searches by. Either one missing is worth one round trip.
+    if (have.userEmail && have.userId) return have;
+    // Same single-flight shape as the owner lookup and the token refresh: the
+    // check and the assignment below have no await between them, so a second
+    // caller either sees no flight or sees this one.
+    if (inFlightIdentity) return inFlightIdentity;
+    const p = (async () => {
+      try {
+        const who = await fetchTokenIdentity();
+        const patch = {};
+        if (who.userId && who.userId !== have.userId) patch.userId = who.userId;
+        if (who.userEmail && who.userEmail !== have.userEmail) patch.userEmail = who.userEmail;
+        if (who.hubId && !have.hubId) patch.hubId = who.hubId;
+        if (Object.keys(patch).length) {
+          await patchAuth(patch);
+          log(
+            "backfilled the signed-in HubSpot identity from the access token:",
+            who.userEmail || "(no email)",
+            "user id",
+            who.userId || "(none)"
+          );
+        }
+        return {
+          userEmail: who.userEmail || have.userEmail,
+          userId: who.userId || have.userId,
+          hubId: who.hubId || have.hubId,
+        };
+      } catch (e) {
+        // Deliberately caches nothing: the flight is cleared in the finally
+        // below, so the next sync retries instead of inheriting this failure.
+        log("could not read the signed-in HubSpot identity:", (e && e.message) || e);
+        return have.userEmail || have.userId ? have : null;
+      }
+    })();
+    inFlightIdentity = p;
+    try {
+      return await p;
+    } finally {
+      if (inFlightIdentity === p) inFlightIdentity = null;
+    }
+  }
+
   // --- Owner identity ------------------------------------------------------
   // Owner ID ≠ user ID. Note attribution needs both, for different fields:
   // hubspot_owner_id wants the *owner* ID (this lookup), hs_created_by wants the
-  // *user* ID (which the exchange already handed us as `userId`). Still done
-  // client-side: it is an ordinary CRM read, no secret involved.
+  // *user* ID (ensureIdentity above). Still done client-side: it is an ordinary
+  // CRM read, no secret involved.
   async function lookupOwnerId(email) {
     const res = await apiFetch(`/crm/v3/owners/?email=${encodeURIComponent(email)}`);
     if (!res.ok) {
@@ -276,8 +380,17 @@
       return null;
     }
     if (auth.ownerId) return String(auth.ownerId);
-    if (!auth.userEmail) {
-      log("no HubSpot email stored for this connection — cannot resolve an owner id");
+    // The lookup searches by email, and the email can be missing for exactly the
+    // reason the user id was (see ensureIdentity) — so resolve identity first
+    // rather than giving up. This is what made the live failure total: no email
+    // meant no owner either, so BOTH attribution fields went unset.
+    let email = auth.userEmail || null;
+    if (!email) {
+      const who = await ensureIdentity();
+      email = (who && who.userEmail) || null;
+    }
+    if (!email) {
+      log("no HubSpot email for this connection — cannot resolve an owner id");
       return null;
     }
     // Single-flight, same reason as the token refresh: a prospect change can ask
@@ -285,7 +398,6 @@
     // The assignment is synchronous with the check above, so no second caller
     // can slip past it.
     if (inFlightOwnerLookup) return inFlightOwnerLookup;
-    const email = auth.userEmail;
     const p = (async () => {
       try {
         const ownerId = await lookupOwnerId(email);
@@ -369,9 +481,13 @@
     });
     log("HubSpot connected as", tok.user_email || "(email unknown)");
 
-    // Resolve the owner ID now so the first note of the session doesn't pay for
-    // it — but through the same lazy path, which swallows its own failures and
-    // will simply try again when a note needs it.
+    // Whatever the token service did or didn't tell us about identity, confirm it
+    // from the token itself — the exchange's user_email/user_id are null in
+    // practice (see ensureIdentity), and a connection that starts anonymous
+    // writes anonymous notes. Then the owner ID, so the first note of the session
+    // doesn't pay for either lookup. Both swallow their own failures and retry
+    // when a note needs them, so neither can cost us the refresh token above.
+    await ensureIdentity();
     await ensureOwnerId();
 
     return getAuthState();
@@ -499,8 +615,9 @@
       hubId: (auth && auth.hubId) || null,
       // Two different IDs, deliberately both exposed: ownerId attributes a note
       // ("Activity assigned to"), userId is what hs_created_by wants
-      // ("Activity created by"). ownerId may legitimately be null here — call
-      // ensureOwnerId() when you actually need it.
+      // ("Activity created by"). Either may legitimately be null here — this is a
+      // pure read of what's stored, called on every render. Call ensureIdentity()
+      // / ensureOwnerId() when you actually need them; those heal the record.
       ownerId: (auth && auth.ownerId) || null,
       userId: (auth && auth.userId) || null,
       connectedAt: (auth && auth.connectedAt) || null,
@@ -512,6 +629,7 @@
     logout,
     getAuthState,
     getAccessToken,
+    ensureIdentity,
     ensureOwnerId,
     apiFetch,
     HubSpotAuthError,

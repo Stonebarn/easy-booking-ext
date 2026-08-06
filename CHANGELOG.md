@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — synced notes are attributed to the signed-in SDR again
+
+Notes reached HubSpot but landed as **"Activity created by: No user"** and
+**"Activity assigned to: No owner"** on the live portal, because the extension
+never actually knew who the signed-in rep was.
+
+Root cause: the OAuth token exchange was the **only** code path that ever
+captured identity, and it captured nulls. The hosted token function asks
+HubSpot's introspect endpoint for the SDR's identity but posts the token as
+`access_token`, while that endpoint requires a form field named `token` — so it
+400s, the function swallows the failure and returns `user_email: null,
+user_id: null`. `login()` stored those nulls; no email meant the owner lookup
+had nothing to search by, so **both** attribution fields stayed unset. A
+restored session read the same nulls back out of `chrome.storage.local`, and a
+token refresh never looked at identity at all.
+
+Identity is now resolved **from the token itself**, on demand, on every path —
+fresh login, restored session, just-refreshed token:
+`GET /oauth/v1/access-tokens/{token}` is public token metadata (no client
+secret; the bearer token is the path segment) and returns the SDR's email,
+user id and hub id. The answer is persisted into `eb:hs:auth`, so a connection
+that has been writing anonymous notes for weeks heals itself on its next sync
+with nothing for the rep to do, and the owner lookup then resolves
+`hubspot_owner_id` from the email it just learned. `hs_created_by` gets the
+**user** id and `hubspot_owner_id` the **owner** id, still two different id
+spaces; `hs_created_by_user_id` remains read-only and is never sent.
+
+Enrichment can never cost a note: every lookup is single-flight, failures are
+never cached as a permanent null (the next sync retries), and a sync goes out
+unattributed rather than failing. When it does, the receipt under **Sync** now
+says so in one muted sentence — *"Synced without attribution — reconnect
+HubSpot to fix."* — instead of only whispering it to the console. The same
+healing applies to the phone-correction audit note. No token-function redeploy
+is required.
+
 ### Changed — the type scale is three sizes, and empty states get a headline
 
 Six font sizes (9–14px, adjacent steps as small as 8%) collapse to three:

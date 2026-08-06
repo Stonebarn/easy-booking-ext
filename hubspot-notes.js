@@ -394,7 +394,10 @@
       contactId,
       companyId,
       timestamp: payload.properties.hs_timestamp,
-      attributed: !!payload.properties.hubspot_owner_id,
+      // Attributed means the note carries BOTH ids: an owner with no created-by
+      // still shows "Activity created by: No user" in HubSpot, which is exactly
+      // the half-attributed state this had no way to report.
+      attributed: !!(payload.properties.hubspot_owner_id && payload.properties.hs_created_by),
       createdByDowngraded,
     };
   }

@@ -919,11 +919,19 @@ app's scope set (Phase 2); nothing new is requested at consent time.
 **Notes are attributed to the connected rep, by design.** Each note carries the
 HubSpot **owner ID** and **user ID** of the account that authorised the
 connection, so it shows up in HubSpot as that rep's activity (*Activity assigned
-to* / *Activity created by*) rather than as an anonymous integration write. The
-owner ID is looked up once from the rep's own HubSpot email
-(`GET /crm/v3/owners/?email=…`) and cached in `eb:hs:auth`; if that lookup ever
-fails, the note is still created — just unattributed — and the lookup is retried
-the next time. No other user's identity is ever sent.
+to* / *Activity created by*) rather than as an anonymous integration write.
+
+Both are resolved **from the rep's own access token**, on demand, and cached in
+`eb:hs:auth`. `GET /oauth/v1/access-tokens/{token}` returns the token's own
+metadata — the rep's HubSpot email and **user ID** — and needs no client secret;
+the **owner ID** is then a plain lookup by that email
+(`GET /crm/v3/owners/?email=…`). Doing it this way means every path arrives at
+the same answer (a fresh connection, a session restored from storage, a token
+just refreshed), which is what fixes notes that used to land as *No user* / *No
+owner* when the one path that captured identity came back empty. If either
+lookup fails the note is still created — just unattributed, and the receipt
+under **Sync** says so — and both are retried on the next sync. No other user's
+identity is ever sent.
 
 ### Where credentials live
 
