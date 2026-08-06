@@ -459,6 +459,107 @@
         color: var(--muted);
       }
 
+      /* ---- Wrong-number editor (Phase 10) ------------------------------- */
+      /* The one place the panel writes to a customer record, so it looks like a
+         form rather than a link: its own bordered box under the phone row, a
+         confirm step on the button, and every control full-width at 320px. */
+      .wn-open {
+        margin: 0;
+        width: auto;
+        padding: 0;
+        background: none;
+        border: 0;
+        color: var(--purple);
+        font-size: 11px;
+        font-weight: 700;
+        text-decoration: underline;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      .wn-open:focus-visible {
+        outline: 2px solid var(--purple);
+        outline-offset: 1px;
+      }
+      .wn {
+        margin-top: 6px;
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg);
+      }
+      .wn-title {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .wn-row { margin-top: 7px; }
+      .wn-row label {
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 3px;
+      }
+      .wn select,
+      .wn input {
+        width: 100%;
+        padding: 7px 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 13px;
+      }
+      .wn select:disabled,
+      .wn input:disabled { background: var(--surface); color: var(--muted); }
+      .wn select:focus-visible,
+      .wn input:focus-visible {
+        outline: 2px solid var(--purple);
+        outline-offset: 0;
+      }
+      /* What is on the record right now, for reference while typing. */
+      .wn-current {
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .wn-current .wn-was { font-weight: 700; color: var(--ink); }
+      .wn-note { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
+      /* Cancel and the write action share a row; the write action is the wide
+         one, and neither shrinks below tappable at 320px. */
+      .wn-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: stretch;
+        margin-top: 9px;
+      }
+      .wn-actions button { margin: 0; font-size: 12px; }
+      .wn-cancel {
+        flex: 0 0 auto;
+        width: auto;
+        padding: 8px 12px;
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+      /* Grows to fill the row, but never so narrow that its label is unreadable
+         at the panel's 320px floor — below that the two buttons stack. */
+      .wn-save { flex: 1 1 130px; }
+      /* Armed = one more click writes. Amber, because it is a warning, not a
+         success. */
+      .wn-save.armed { background: var(--amber-fg); }
+      .wn-result { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+      .wn-result.ok { color: var(--green-fg); font-weight: 600; }
+      .wn-result.err { color: var(--danger-fg); font-weight: 600; }
+      .wn-result .wn-sub { display: block; font-weight: 500; color: var(--muted); margin-top: 2px; }
+
       /* ---- Ownership, links, sequence (Phase 8) ------------------------- */
       /* Ownership is the block a rep reads before dialing, so it gets its own
          labelled rows instead of one anonymous name in .ident-meta. Outbound
@@ -954,6 +1055,9 @@
     <script src="hubspot-auth.js"></script>
     <script src="hubspot-data.js"></script>
     <script src="hubspot-notes.js"></script>
+    <!-- The write path (Phase 10). After notes, because a successful phone
+         correction files an audit note through hubspot-notes.js. -->
+    <script src="hubspot-write.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>

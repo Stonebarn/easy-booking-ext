@@ -73,7 +73,7 @@
     // cache, so a bundle cached by an earlier version of this file (same panel
     // session, before a reload) can never be rendered by newer code that expects
     // fields it doesn't have.
-    CACHE_VERSION: 8,
+    CACHE_VERSION: 9,
     // Characters of a note body kept for the one-line activity preview.
     NOTE_PREVIEW_CHARS: 120,
     // Characters of the company blurb shown inline; the full text rides along as
@@ -95,6 +95,13 @@
       "email",
       "jobtitle",
       "phone",
+      // --- Phase 10: the wrong-number workflow -----------------------------
+      // All three writable phone properties are read, not just the primary one:
+      // the panel's "Wrong number?" editor shows what is currently on each
+      // field and prefills the one being corrected. They come back on the
+      // contact read the panel already makes, so this costs no extra request.
+      "mobilephone",
+      "phone_number_2",
       "lifecyclestage",
       "hs_lead_status",
       "hubspot_owner_id",
@@ -1196,6 +1203,11 @@
       email: p.email || null,
       title: p.jobtitle || null,
       phone: p.phone || null,
+      // Phase 10: the other two writable numbers, for the wrong-number editor.
+      // Raw values — a phone property is displayed and edited as the portal
+      // stores it, never reformatted for display.
+      mobilePhone: p.mobilephone || null,
+      phone2: p.phone_number_2 || null,
       lifecycleStage: humanizeEnum(p.lifecyclestage) || null,
       leadStatus: humanizeEnum(p.hs_lead_status) || null,
       ownerId: p.hubspot_owner_id || null,

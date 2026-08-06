@@ -6,6 +6,65 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — fix a wrong number from the panel (write path)
+
+- **Reps can now correct a contact's phone number in HubSpot from the side
+  panel.** The SDR problem this solves: 100+ uncallable numbers per rep, fixed by
+  tabbing out to LinkedIn → Wiza → Outreach. HubSpot is the source of truth —
+  data flows **HubSpot → Outreach → the dialer** and Outreach cannot write back —
+  so the panel writes to HubSpot and lets it propagate.
+- **New `hubspot-write.js`** (`EB.hubspotWrite`), the extension's first non-note
+  write path, built on the same conventions as `hubspot-notes.js`:
+  `PATCH /crm/v3/objects/contacts/{id}` with `{properties: {[field]: value}}`
+  through `EB.hubspotAuth.apiFetch`.
+  - **Field allowlist**: `phone`, `mobilephone`, `phone_number_2` and nothing
+    else. Checked with `indexOf` over a fixed array, so `email`,
+    `hs_lead_status`, `__proto__`, `constructor` and friends are all rejected —
+    no caller can write an arbitrary property.
+  - **Digit-validated `contactId`** (same rule as the notes module): a write
+    aimed at the wrong record isn't something a rep can undo.
+  - **Confirm required at the module boundary too** — an unconfirmed call is
+    refused before any request, so the "no one-click writes" rule can't be lost
+    in a future refactor.
+  - **Phone validation and normalization**: unambiguous numbers become E.164
+    (10-digit NANP and `1`-prefixed 11-digit → `+1…`; anything with an explicit
+    `+` keeps its country code and loses only punctuation). Extensions, IDD
+    prefixes, 7–9-digit fragments and 10-digit values that aren't a valid NANP
+    shape are **passed through exactly as typed**, and the panel says so before
+    the rep confirms. Letters, <7 or >15 digits, junk characters and an unchanged
+    number are rejected **before** a request is spent.
+  - **Typed errors** mirroring the notes module: `INVALID_INPUT`, `NO_TARGET`,
+    `AUTH`, `FORBIDDEN`, `RATE_LIMITED` (honors `Retry-After`), `TRANSIENT`,
+    `API`. A **403 is `FORBIDDEN`, never "sign-in expired"** — per the Phase 7
+    rule — and no status, category or HubSpot response text reaches panel copy.
+- **Audit trail**: a successful phone change also files a HubSpot note —
+  *"Phone corrected by you@wiza.com: Mobile phone (415) 555-0134 → +14155559876
+  (via Dialer Helper Pro)"* — on the contact and company, attributed to the rep.
+  Strictly **best-effort**: a failed note never makes a successful update look
+  failed; it's reported as a footnote and logged.
+- **Panel UI in the identity block's phone row.** The row now shows every number
+  on the record (**Phone**, **Mobile**, **Phone 2** — `mobilephone` and
+  `phone_number_2` were added to the contact read, which costs no extra request)
+  plus a **Wrong number?** link (**Add a number** when the contact has none).
+  Opening it reveals: which field to update (a dropdown showing what's on each,
+  defaulting to the one displayed), the current value for reference, an input
+  prefilled with it, and **Cancel** / **Update in HubSpot**. The first click on
+  **Update in HubSpot** arms a **Confirm update** step that states the change in
+  full (*"Change Mobile phone from … to … on this contact in HubSpot?"*);
+  **nothing is written until the second click**, and any edit disarms it. The
+  button is dead unless HubSpot is connected, a real contact ID is matched, and
+  the number is valid *and* different — with the reason underneath, always.
+- **After a successful write**: *"Mobile phone updated in HubSpot ✓ — Outreach
+  usually picks it up within ~10 minutes; the dialer shows it after that."* The
+  row updates immediately and the cached bundle for that prospect is dropped, so
+  **Refresh** shows the new number instead of the old one. State is per contact:
+  a prospect change discards a half-typed correction rather than carrying it onto
+  someone else's record.
+- **No new scopes**: `crm.objects.contacts.write` was already in the app's scope
+  set. README's Privacy & permissions section now spells out that the extension
+  can **write contact phone numbers** — a meaningful capability change from
+  "notes only" for anyone reviewing it — with a table of every write it can make.
+
 ### Fixed — note attribution was blank
 
 - **Notes synced to HubSpot came out with "Activity assigned to: No owner".** The

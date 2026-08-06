@@ -744,6 +744,469 @@
     return row.childElementCount ? row : null;
   }
 
+  // ==== Wrong-number workflow (Phase 10) ===================================
+  // The panel's only write path, and it edits a customer record — so it is
+  // deliberately the most cautious control in here.
+  //
+  // Why it exists: a rep hears "that's not my number" 100+ times a quarter, and
+  // the old fix was four tabs (LinkedIn → Wiza thumbs-down → new number →
+  // Outreach). HubSpot is the source of truth — data flows HubSpot → Outreach →
+  // the dialer, and Outreach cannot write back — so correcting it here is both
+  // faster and the *right* place.
+  //
+  // Rules this UI holds to:
+  //   - nothing is written until the rep confirms a second time, with the exact
+  //     before → after change spelled out;
+  //   - the button is dead unless HubSpot is connected, a real contact ID is
+  //     matched, and the number is valid *and* actually different;
+  //   - the success line sets honest expectations about propagation delay;
+  //   - all validation and the field allowlist live in hubspot-write.js, so this
+  //     file only renders decisions it doesn't make.
+  //
+  // State is per-contact and lives for as long as the panel shows that contact:
+  // a prospect change resets it (see renderIdentitySection), and every render
+  // rebuilds the editor from it.
+  const writeApi = () => (self.EB && self.EB.hubspotWrite) || null;
+  const authApiFor = () => (self.EB && self.EB.hubspotAuth) || null;
+
+  const wn = {
+    open: false,
+    contactId: null, // which contact this state belongs to
+    field: null, // allowlisted property key
+    value: "", // what's in the input
+    touched: false, // the rep has typed: don't refill on a field switch
+    armed: false, // one click in; the next one writes
+    saving: false,
+    result: null, // { kind: "ok" | "err", message, sub }
+    host: null, // the container the editor is painted into
+    els: null, // the editor's own elements, while it exists
+  };
+
+  function wnResetFor(contactId) {
+    wn.open = false;
+    wn.contactId = contactId || null;
+    wn.field = null;
+    wn.value = "";
+    wn.touched = false;
+    wn.armed = false;
+    wn.saving = false;
+    wn.result = null;
+    wn.els = null;
+  }
+
+  // The record's current value for one of the three writable fields. Raw, as the
+  // portal stores it — a phone number is never reformatted for display.
+  function wnCurrent(contact, field) {
+    const api = writeApi();
+    const key = api ? api.fieldKey(field) : null;
+    if (!contact || !key) return "";
+    if (key === "phone") return contact.phone || "";
+    if (key === "mobilephone") return contact.mobilePhone || "";
+    if (key === "phone_number_2") return contact.phone2 || "";
+    return "";
+  }
+
+  // Default to the number the rep is looking at in the phone row, then to
+  // whichever field actually has something, then to the primary.
+  function wnDefaultField(contact) {
+    if (contact && contact.phone) return "phone";
+    if (contact && contact.mobilePhone) return "mobilephone";
+    if (contact && contact.phone2) return "phone_number_2";
+    return "phone";
+  }
+
+  function wnGate(contact) {
+    const api = writeApi();
+    if (!api) {
+      return {
+        enabled: false,
+        reasons: ["Updating numbers isn't available in this build. Reload the extension."],
+        analysis: null,
+        note: null,
+      };
+    }
+    return api.updateGate({
+      signedIn: crm.connected,
+      contactId: contact && contact.id,
+      field: wn.field,
+      value: wn.value,
+      current: wnCurrent(contact, wn.field),
+      saving: wn.saving,
+    });
+  }
+
+  function wnRenderResult(node, result) {
+    clearNode(node);
+    node.className = "wn-result";
+    node.hidden = !result;
+    if (!result) return;
+    node.className = "wn-result " + (result.kind === "ok" ? "ok" : "err");
+    node.appendChild(document.createTextNode(result.message));
+    // The expectation-setting half of the success state, muted on its own line.
+    if (result.sub) node.appendChild(el("span", "wn-sub", result.sub));
+  }
+
+  // Everything that changes as the rep types, switches field, arms the confirm
+  // or waits on the request. Deliberately does not rebuild the input or the
+  // select, so typing keeps its caret.
+  function wnSync(contact) {
+    const els = wn.els;
+    if (!els) return;
+    const api = writeApi();
+    const gate = wnGate(contact);
+    const current = wnCurrent(contact, wn.field);
+    const label = (api && api.fieldLabel(wn.field)) || "Phone";
+
+    clearNode(els.current);
+    els.current.appendChild(document.createTextNode("On the record now: "));
+    els.current.appendChild(el("span", "wn-was", current || "not set"));
+
+    els.select.disabled = wn.saving;
+    els.input.disabled = wn.saving;
+    els.cancel.disabled = wn.saving;
+
+    const armed = wn.armed && gate.enabled;
+    els.save.disabled = !gate.enabled;
+    els.save.classList.toggle("armed", armed);
+    els.save.textContent = wn.saving
+      ? "Updating…"
+      : armed
+        ? "Confirm update"
+        : "Update in HubSpot";
+    els.save.title = gate.enabled
+      ? `Writes ${label} on this contact in HubSpot.`
+      : gate.reasons.join(" ");
+
+    // One line under the button, in priority order: the confirm sentence, then
+    // why the button is dead, then what we're about to do to the number.
+    const next = gate.analysis ? gate.analysis.value : String(wn.value || "").trim();
+    const justWrote = !!(wn.result && wn.result.kind === "ok");
+    // After a successful write the editor holds what the record holds, so the
+    // button is off for the right reason — saying "change it before updating"
+    // under a success line would only read as a contradiction.
+    els.cancel.textContent = justWrote ? "Close" : "Cancel";
+    let note = "";
+    if (wn.saving) {
+      note = "Writing this to HubSpot…";
+    } else if (justWrote && gate.unchanged) {
+      note = "";
+    } else if (armed) {
+      note = `Change ${label} from ${current || "empty"} to ${next} on this contact in HubSpot? Click Confirm update to write it.`;
+    } else if (gate.reasons.length) {
+      note = gate.reasons.join(" ");
+    } else if (gate.note) {
+      note = gate.note;
+    } else if (gate.analysis && gate.analysis.normalized) {
+      note = `Will be saved as ${next}.`;
+    }
+    els.note.textContent = note;
+
+    wnRenderResult(els.result, wn.result);
+  }
+
+  // Built once per open (and once per identity re-render), from state.
+  function wnEditor(contact) {
+    const api = writeApi();
+    const panel = el("div", "wn");
+    panel.appendChild(el("div", "wn-title", "Update the number in HubSpot"));
+
+    const fieldRow = el("div", "wn-row");
+    const fieldLabel = el("label", null, "Which number");
+    fieldLabel.htmlFor = "wn-field";
+    const select = document.createElement("select");
+    select.id = "wn-field";
+    const fields = (api && api.FIELDS) || [];
+    for (const f of fields) {
+      const opt = document.createElement("option");
+      opt.value = f.key;
+      const cur = wnCurrent(contact, f.key);
+      // Every option carries what's on that field, so "which one is wrong" is
+      // answerable without closing the editor. CRM values, so textContent.
+      opt.textContent = cur ? `${f.label} — ${cur}` : `${f.label} — not set`;
+      if (f.key === wn.field) opt.selected = true;
+      select.appendChild(opt);
+    }
+    fieldRow.appendChild(fieldLabel);
+    fieldRow.appendChild(select);
+    panel.appendChild(fieldRow);
+
+    const currentLine = el("div", "wn-current");
+    panel.appendChild(currentLine);
+
+    const valueRow = el("div", "wn-row");
+    const valueLabel = el("label", null, "Corrected number");
+    valueLabel.htmlFor = "wn-value";
+    const input = document.createElement("input");
+    input.type = "tel";
+    input.id = "wn-value";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = "e.g. (415) 555-0134";
+    input.value = wn.value;
+    valueRow.appendChild(valueLabel);
+    valueRow.appendChild(input);
+    panel.appendChild(valueRow);
+
+    const note = el("p", "wn-note");
+    panel.appendChild(note);
+
+    const actions = el("div", "wn-actions");
+    const cancel = el("button", "wn-cancel", "Cancel");
+    cancel.type = "button";
+    const save = el("button", "wn-save", "Update in HubSpot");
+    save.type = "button";
+    actions.appendChild(cancel);
+    actions.appendChild(save);
+    panel.appendChild(actions);
+
+    const result = el("p", "wn-result");
+    result.hidden = true;
+    // The write's outcome arrives asynchronously, so announce it rather than
+    // leaving a screen-reader user to go looking for it.
+    result.setAttribute("aria-live", "polite");
+    panel.appendChild(result);
+
+    wn.els = { panel, select, input, current: currentLine, note, cancel, save, result };
+
+    select.addEventListener("change", () => {
+      wn.field = select.value;
+      wn.armed = false;
+      wn.result = null;
+      // Switching field re-prefills only while the rep hasn't typed their own
+      // correction — never clobber what they wrote.
+      if (!wn.touched) {
+        wn.value = wnCurrent(contact, wn.field);
+        input.value = wn.value;
+      }
+      wnSync(contact);
+    });
+
+    input.addEventListener("input", () => {
+      wn.value = input.value;
+      wn.touched = true;
+      // Any edit disarms: the confirm step must always describe the change the
+      // rep is actually looking at.
+      wn.armed = false;
+      wn.result = null;
+      wnSync(contact);
+    });
+
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      // Enter arms, exactly like the first click does. It can never write on its
+      // own — wnSubmit refuses until the confirm step is armed.
+      wnSubmit(contact);
+    });
+
+    cancel.addEventListener("click", () => {
+      wnResetFor(contact && contact.id);
+      wnPaint(contact);
+    });
+
+    save.addEventListener("click", () => {
+      wnSubmit(contact);
+    });
+
+    return panel;
+  }
+
+  function wnPaint(contact) {
+    const host = wn.host;
+    if (!host) return;
+    clearNode(host);
+    wn.els = null;
+    if (!wn.open || !contact) return;
+    // Belt and braces: the select and the gate must agree on which field is
+    // being edited, even if state arrived here without one.
+    if (!wn.field) wn.field = wnDefaultField(contact);
+    host.appendChild(wnEditor(contact));
+    wnSync(contact);
+  }
+
+  // The affordance in the phone row. Hidden while the editor is open (the editor
+  // owns Cancel), and absent entirely when there's no contact record to write
+  // to or the write module didn't load.
+  function wnOpenButton(contact) {
+    if (!contact || !writeApi()) return null;
+    if (wn.open && wn.contactId === contact.id) return null;
+    const has = !!(contact.phone || contact.mobilePhone || contact.phone2);
+    const btn = el("button", "wn-open", has ? "Wrong number?" : "Add a number");
+    btn.type = "button";
+    btn.title = has
+      ? "Correct this number in HubSpot — it syncs on to Outreach and the dialer."
+      : "Add a number to this contact in HubSpot.";
+    btn.addEventListener("click", () => {
+      wn.open = true;
+      wn.contactId = contact.id;
+      wn.field = wnDefaultField(contact);
+      wn.value = wnCurrent(contact, wn.field);
+      wn.touched = false;
+      wn.armed = false;
+      wn.result = null;
+      wnPaint(contact);
+      if (wn.els && wn.els.input) {
+        wn.els.input.focus();
+        wn.els.input.select();
+      }
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] wrong-number editor opened for contact", contact.id);
+    });
+    return btn;
+  }
+
+  // Mounts (and repaints) the editor's container inside the identity block.
+  function wnMount(contact) {
+    if (!contact || !writeApi()) {
+      wn.host = null;
+      return null;
+    }
+    const host = el("div");
+    wn.host = host;
+    wnPaint(contact);
+    return host;
+  }
+
+  function wnSubmit(contact) {
+    const api = writeApi();
+    if (!api || wn.saving) return;
+    const gate = wnGate(contact);
+    if (!gate.enabled) {
+      wnSync(contact); // re-state why it can't go
+      return;
+    }
+    // The confirm step. A customer record is never mutated on one click, and
+    // hubspot-write.js refuses an unconfirmed call too — this is the UI half of
+    // that rule, not the whole of it.
+    if (!wn.armed) {
+      wn.armed = true;
+      wn.result = null;
+      wnSync(contact);
+      return;
+    }
+    wnWrite(contact);
+  }
+
+  // What the rep is told after a successful write. The propagation delay is
+  // stated honestly rather than implying the dialer updates immediately, and the
+  // two footnotes (saved as typed / audit note missing) never contradict the
+  // success.
+  function wnSuccessSub(res) {
+    const parts = [
+      "Outreach usually picks it up within ~10 minutes; the dialer shows it after that.",
+    ];
+    if (!res.normalized) parts.push("Saved exactly as you typed it.");
+    if (res.auditFailed) parts.push("The number changed, but the timeline note couldn't be added.");
+    return parts.join(" ");
+  }
+
+  function wnErrorText(e) {
+    const api = writeApi();
+    const codes = (api && api.ERROR_CODES) || [];
+    const typed = !!(e && e.code && codes.indexOf(e.code) !== -1 && e.message);
+    if (!typed) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] phone update failed with an untyped error:", e);
+      return "Couldn't update the number. Try again, and change it in HubSpot directly if it keeps failing.";
+    }
+    return e.message;
+  }
+
+  // Show the new number immediately. The cached bundle is busted inside
+  // hubspot-write.js, so a Refresh refetches rather than serving the old value;
+  // this is only about the panel in front of the rep right now.
+  function wnApplyLocally(contact, field, value) {
+    if (!contact) return;
+    if (field === "phone") contact.phone = value;
+    else if (field === "mobilephone") contact.mobilePhone = value;
+    else if (field === "phone_number_2") contact.phone2 = value;
+  }
+
+  async function wnWrite(contact) {
+    const api = writeApi();
+    if (!api || !contact) return;
+    const field = api.fieldKey(wn.field);
+    const previous = wnCurrent(contact, field);
+
+    wn.saving = true;
+    wn.armed = false;
+    wn.result = null;
+    wnSync(contact);
+
+    // Attribution for the audit note, all best-effort: a missing owner ID costs
+    // the note its assignee, never the phone update.
+    let actor = null;
+    let ownerId = null;
+    let userId = null;
+    try {
+      const auth = authApiFor();
+      if (auth && typeof auth.getAuthState === "function") {
+        const info = (await Promise.resolve(auth.getAuthState())) || {};
+        actor = info.userEmail || null;
+        userId = info.userId || null;
+        ownerId = info.ownerId || null;
+      }
+      if (!ownerId && auth && typeof auth.ensureOwnerId === "function") {
+        ownerId = await auth.ensureOwnerId();
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[EasyBooking] couldn't read HubSpot identity for the phone audit note:",
+        (e && e.message) || e
+      );
+    }
+
+    try {
+      const res = await api.updateContactPhone({
+        contactId: contact.id,
+        field,
+        value: wn.value,
+        currentValue: previous,
+        confirmed: true, // the rep armed and confirmed above
+        companyId: (crm.bundle && crm.bundle.company && crm.bundle.company.id) || null,
+        email: (crm.bundle && crm.bundle.email) || crmEmail(),
+        ownerId,
+        userId,
+        actor,
+      });
+      wnApplyLocally(contact, res.field, res.value);
+      // The editor now holds what the record holds, which also means the button
+      // goes back to disabled ("that's the number already on the record").
+      wn.value = res.value;
+      wn.touched = false;
+      wn.result = {
+        kind: "ok",
+        message: `${res.label} updated in HubSpot ✓`,
+        sub: wnSuccessSub(res),
+      };
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[EasyBooking] phone corrected:",
+        `contact ${res.contactId}`,
+        `${res.field}:`,
+        res.previous || "(empty)",
+        "->",
+        res.value,
+        res.auditNoteId ? `audit note ${res.auditNoteId}` : "(no audit note)"
+      );
+    } catch (e) {
+      wn.result = { kind: "err", message: wnErrorText(e), sub: null };
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[EasyBooking] phone update failed:",
+        (e && e.code) || "?",
+        (e && e.message) || e
+      );
+    } finally {
+      wn.saving = false;
+      // Re-render the identity block: the phone row above the editor has to show
+      // the new number, and the editor is rebuilt from the state set above.
+      crmRender();
+    }
+  }
+  // ==== end wrong-number workflow ==========================================
+
   // One block for both records, three lines deep:
   //   1  Name · lifecycle stage
   //   2  Title @ Company        (both linked to their HubSpot records)
@@ -756,9 +1219,15 @@
     const c = bundle.contact;
     const co = bundle.company;
 
+    // Phase 10: the wrong-number editor's state belongs to one contact. A
+    // different contact (or no contact at all) starts clean — a half-typed
+    // correction must never follow the rep onto someone else's record.
+    if (!c || wn.contactId !== c.id) wnResetFor(c && c.id);
+
     if (!c && !co) {
       setPill(crmEls.identityPill, "Not in HubSpot");
       setNote(body, `No HubSpot contact for ${bundle.email}`);
+      wn.host = null; // nothing to write to, and the old host just went away
       return;
     }
     // A company matched by email domain with no contact record is a real state:
@@ -791,12 +1260,26 @@
     // Owner used to sit here, unlabelled — and it was the wrong field for the
     // question reps were using it to answer. It now lives in ownershipBlock
     // below, labelled, with the outbound owner first.
+    //
+    // Phase 10 turned this into the *phone row*: all three writable numbers when
+    // the record has them (labelled, because an unlabelled second number is a
+    // guess), and the "Wrong number?" affordance that opens the editor.
     const meta = el("div", "ident-meta");
+    const hasAnyPhone = !!(c && (c.phone || c.mobilePhone || c.phone2));
     appendAll(meta, [
       c && c.phone ? el("span", null, c.phone) : null,
+      c && c.mobilePhone ? el("span", null, `Mobile: ${c.mobilePhone}`) : null,
+      c && c.phone2 ? el("span", null, `Phone 2: ${c.phone2}`) : null,
+      c && !hasAnyPhone ? el("span", null, "No phone number") : null,
       c && c.leadStatus ? el("span", null, c.leadStatus) : null,
+      wnOpenButton(c),
     ]);
     if (meta.childElementCount) block.appendChild(meta);
+
+    // Phase 10: the editor sits directly under the numbers it edits (state was
+    // reset above if this is a different contact).
+    const wnHost = wnMount(c);
+    if (wnHost) block.appendChild(wnHost);
 
     const own = ownershipBlock(bundle.ownership);
     if (own) block.appendChild(own);
