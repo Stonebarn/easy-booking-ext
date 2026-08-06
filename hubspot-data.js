@@ -46,6 +46,18 @@
 //                   it is deliberately the cheapest shape that answers the
 //                   question: one association read capped at 25 + one batch read,
 //                   nothing when the prospect has no company, and never a search.
+// and, added in Phase 11 — all of it pure, none of it costing a request:
+//   accountContext.techStack  the tech row as a real view-model: clean vendor
+//                   labels (web_technologies holds snake_case enum values, so the
+//                   panel used to print literal underscores), a competitor flag
+//                   per item, and a visible/hidden split for the MORE toggle in
+//                   which a competitor is never the thing being hidden
+//   ownership.roles the three owner rows the panel always draws, each carrying a
+//                   three-state "is this me?" — so a rep can be told an account
+//                   is someone else's, but only when that is actually known
+//   status.tone     datapoint kind + raw value → a semantic tone NAME
+//                   (positive/caution/negative/neutral/info) for status pills.
+//                   The theme owns the colours; this file owns the meaning.
 // Those last helpers are shaped for the UI on purpose: they are pure functions
 // over the fetched items, which is what makes the tab bar unit-testable without
 // a DOM (same reasoning as the exported formatters).
@@ -81,7 +93,8 @@
     // session, before a reload) can never be rendered by newer code that expects
     // fields it doesn't have. 10 = Phase 9's `colleagues` + Phase 10's extra
     // phone fields (both landed on 9 independently, so neither number is safe).
-    CACHE_VERSION: 10,
+    // 11 = Phase 11's accountContext.techStack and ownership.roles.
+    CACHE_VERSION: 11,
     // Colleagues shown for the account (Phase 9). This is the *association page
     // limit we ask for* as well as the row cap, which is the point: one page, one
     // batch read, no paging, ever. 25 names is already more than a rep reads
@@ -322,6 +335,349 @@
       "sbcglobal.net",
     ],
 
+    // --- Tech-stack labels (Phase 11) --------------------------------------
+    // web_technologies is a delimited list of HubSpot *enum* values, so it
+    // arrives as snake_case slugs ("google_analytics", "hubspot_crm",
+    // "salesforce_crm") and the panel was printing the underscores. The label
+    // pipeline is:
+    //
+    //   split → slug each value (lowercase, runs of non-alphanumerics → "_")
+    //         → look the whole slug up here
+    //         → else walk the words left to right, matching the LONGEST run of
+    //           words that has an entry here
+    //         → else Title Case the word
+    //
+    // Because matching is per-run rather than per-value, one entry per vendor
+    // covers every compound the portal spells it in:
+    //   hubspot → "HubSpot"  covers hubspot, hubspot_crm, hubspot_forms, …
+    //   crm     → "CRM"      covers salesforce_crm, hubspot_crm, …
+    //
+    // TO EXTEND: add one entry keyed on the slug (lowercase, words joined by
+    // "_") whose value is the exact casing to print. Alternate spellings the
+    // portal uses get their own key pointing at the same label. Nothing else in
+    // this file needs to change, and unknown values still Title Case rather than
+    // breaking.
+    TECH_LABELS: {
+      // Contact-data / prospecting vendors (mostly COMPETITORS, see below)
+      apollo_io: "Apollo.io",
+      // Not the competitor: Apollo GraphQL is a web framework. See the note on
+      // COMPETITOR_EXCEPTIONS.
+      apollo_graphql: "Apollo GraphQL",
+      zoominfo: "ZoomInfo",
+      leadiq: "LeadIQ",
+      lead_iq: "LeadIQ",
+      seamless_ai: "Seamless.AI",
+      snov_io: "Snov.io",
+      snov: "Snov.io",
+      hunter_io: "Hunter.io",
+      adapt_io: "Adapt.io",
+      rocketreach: "RocketReach",
+      rocket_reach: "RocketReach",
+      contactout: "ContactOut",
+      contact_out: "ContactOut",
+      uplead: "UpLead",
+      up_lead: "UpLead",
+      people_data_labs: "People Data Labs",
+      datanyze: "Datanyze",
+      salesintel: "SalesIntel",
+      sales_intel: "SalesIntel",
+      dropcontact: "Dropcontact",
+      drop_contact: "Dropcontact",
+      findymail: "Findymail",
+      prospeo: "Prospeo",
+      clearbit: "Clearbit",
+      cognism: "Cognism",
+      kaspr: "Kaspr",
+      lusha: "Lusha",
+      clay: "Clay",
+      amplemarket: "Amplemarket",
+      // CRM, sales engagement, revenue — integrations and partners, never
+      // competitors (see NON_COMPETITORS)
+      hubspot: "HubSpot",
+      salesforce: "Salesforce",
+      outreach: "Outreach",
+      salesloft: "Salesloft",
+      gong: "Gong",
+      nooks: "Nooks",
+      marketo: "Marketo",
+      zendesk: "Zendesk",
+      intercom: "Intercom",
+      drift: "Drift",
+      qualified: "Qualified",
+      chili_piper: "Chili Piper",
+      calendly: "Calendly",
+      gainsight: "Gainsight",
+      churnzero: "ChurnZero",
+      churn_zero: "ChurnZero",
+      zuora: "Zuora",
+      netsuite: "NetSuite",
+      workday: "Workday",
+      greenhouse: "Greenhouse",
+      lever: "Lever",
+      ashby: "Ashby",
+      // Analytics, product, marketing automation
+      google_analytics: "Google Analytics",
+      google_tag_manager: "Google Tag Manager",
+      gtm: "Google Tag Manager",
+      mixpanel: "Mixpanel",
+      segment: "Segment",
+      amplitude: "Amplitude",
+      heap: "Heap",
+      pendo: "Pendo",
+      hotjar: "Hotjar",
+      fullstory: "FullStory",
+      full_story: "FullStory",
+      optimizely: "Optimizely",
+      vwo: "VWO",
+      looker: "Looker",
+      tableau: "Tableau",
+      snowflake: "Snowflake",
+      braze: "Braze",
+      iterable: "Iterable",
+      klaviyo: "Klaviyo",
+      attentive: "Attentive",
+      mailchimp: "Mailchimp",
+      sendgrid: "SendGrid",
+      twilio: "Twilio",
+      // Platform, infrastructure, front end
+      amazon_web_services: "Amazon Web Services",
+      aws: "Amazon Web Services",
+      cloudflare: "Cloudflare",
+      wordpress: "WordPress",
+      shopify: "Shopify",
+      stripe: "Stripe",
+      zapier: "Zapier",
+      slack: "Slack",
+      zoom: "Zoom",
+      okta: "Okta",
+      auth0: "Auth0",
+      datadog: "Datadog",
+      sentry: "Sentry",
+      new_relic: "New Relic",
+      postgresql: "PostgreSQL",
+      postgres: "PostgreSQL",
+      mysql: "MySQL",
+      mongodb: "MongoDB",
+      mongo_db: "MongoDB",
+      node_js: "Node.js",
+      nodejs: "Node.js",
+      react: "React",
+      next_js: "Next.js",
+      nextjs: "Next.js",
+      vue_js: "Vue.js",
+      vuejs: "Vue.js",
+      vue: "Vue.js",
+      jquery: "jQuery",
+      typescript: "TypeScript",
+      javascript: "JavaScript",
+      graphql: "GraphQL",
+      recaptcha: "reCAPTCHA",
+      // Social / media
+      youtube: "YouTube",
+      vimeo: "Vimeo",
+      facebook: "Facebook",
+      linkedin: "LinkedIn",
+      x_twitter: "X (Twitter)",
+      twitter: "X (Twitter)",
+      instagram: "Instagram",
+      tiktok: "TikTok",
+      // Acronyms that would otherwise Title Case into nonsense ("Crm", "Api").
+      // These are single-word entries matched by the same run walk, so they fix
+      // every compound at once.
+      crm: "CRM",
+      api: "API",
+      ai: "AI",
+      ui: "UI",
+      ux: "UX",
+      seo: "SEO",
+      sdk: "SDK",
+      cdn: "CDN",
+      cms: "CMS",
+      css: "CSS",
+      html: "HTML",
+      php: "PHP",
+      sql: "SQL",
+      saas: "SaaS",
+      b2b: "B2B",
+      iot: "IoT",
+      gdpr: "GDPR",
+    },
+    // Longest run of words looked up in TECH_LABELS at once. 4 covers the
+    // longest entry above ("people data labs" is 3); raising it only costs a few
+    // failed object lookups per value.
+    TECH_LABEL_MAX_WORDS: 4,
+
+    // --- Competitors (Phase 11) ---------------------------------------------
+    // Wiza sells B2B contact data / prospecting, so a competitor already in the
+    // account's stack is the most useful thing in the whole tech row: it turns a
+    // cold pitch into a displacement conversation. Flagged items are also pulled
+    // into the visible set (see techStackView) so one can never hide behind
+    // "MORE".
+    //
+    // Matched case-insensitively against the *slug* of each tech value with
+    // word-boundary semantics: the entry must appear as a contiguous run of the
+    // slug's "_"-separated words. Naive substring matching is deliberately NOT
+    // used — it would flag "Clearbit" inside unrelated strings like
+    // "clearbitmap" and burn the rep's trust in the pill.
+    //
+    // TO EXTEND: add the competitor's slug, plus any alternate spelling the
+    // portal uses, as its own entry. TO STOP flagging one: delete its entries.
+    COMPETITORS: [
+      // AMBIGUITY, deliberate and documented: a bare "apollo" in
+      // web_technologies may be Apollo GraphQL — a web framework, not a
+      // competitor — rather than Apollo.io. It is flagged anyway, because
+      // Apollo.io dominates this portal's data and a missed displacement opening
+      // costs more than a rep glancing at one wrong pill. TO STOP: delete this
+      // one line; "apollo_io" keeps working on its own, and the explicit GraphQL
+      // spellings are already in COMPETITOR_EXCEPTIONS.
+      "apollo",
+      "apollo_io",
+      "zoominfo",
+      "leadiq",
+      "lead_iq",
+      "people_data_labs",
+      "lusha",
+      "cognism",
+      "seamless_ai",
+      "rocketreach",
+      "rocket_reach",
+      "hunter_io",
+      "clearbit",
+      "uplead",
+      "up_lead",
+      "snov_io",
+      "snov",
+      "kaspr",
+      "contactout",
+      "contact_out",
+      "datanyze",
+      "salesintel",
+      "sales_intel",
+      "adapt_io",
+      "prospeo",
+      "findymail",
+      "dropcontact",
+      "drop_contact",
+      "clay",
+      "amplemarket",
+    ],
+    // Values that match a COMPETITORS entry but are not the competitor. Matched
+    // on the WHOLE slug (exact), not by word run, so an entry here can only ever
+    // excuse the exact value it names — "clearbit_for_salesforce" is still a
+    // competitor.
+    COMPETITOR_EXCEPTIONS: ["apollo_graphql", "apollo_server", "apollo_client", "apollo_federation"],
+    // Integrations and partners. They share no name with anything in
+    // COMPETITORS, so this list changes no behaviour today — it is a guard with
+    // a name: if a future COMPETITORS entry ever collides with one of these, the
+    // partner wins and nobody has to rediscover why HubSpot got flagged as a
+    // competitor in the panel. Exact-slug, same as COMPETITOR_EXCEPTIONS.
+    NON_COMPETITORS: [
+      "hubspot",
+      "salesforce",
+      "outreach",
+      "salesloft",
+      "nooks",
+      "gong",
+      "intercom",
+      "segment",
+      "mixpanel",
+      "zendesk",
+      "marketo",
+    ],
+
+    // --- Status pill tones (Phase 11) ---------------------------------------
+    // Tone NAMES, never colours: the theme decides what "caution" looks like in
+    // light and dark, and a hex code in this file would be a second source of
+    // truth for it. Keyed kind → value slug → tone.
+    //
+    // An unknown kind, or a value nobody mapped, is `neutral`. That is the
+    // whole safety property: a status this file has never heard of is not
+    // evidence of anything, and a confidently wrong colour is worse than grey.
+    //
+    // TO EXTEND: add the value's slug under its kind. Kinds are the HubSpot
+    // property names wherever one exists, so the renderer can pass the property
+    // it already has; STATUS_KINDS below maps the panel's own aliases onto them.
+    STATUS_TONES: {
+      // Account grade. Letters only — "A+"/"a-" slug down to their letter.
+      account_grade_v1: {
+        a: "positive",
+        b: "positive",
+        c: "caution",
+        d: "negative",
+        f: "negative",
+      },
+      // Company Status (the portal's own lifecycle field, not HubSpot's).
+      company_lifecycle_stage: {
+        customer: "positive",
+        active_deal: "positive",
+        active_customer: "positive",
+        prospecting: "info",
+        open: "info",
+        new: "info",
+        nurture: "caution",
+        cool_down: "caution",
+        cooldown: "caution",
+        disqualified: "negative",
+        churned: "negative",
+        closed_lost: "negative",
+      },
+      // HubSpot's stock contact lifecycle stage. Both spellings the API returns
+      // ("salesqualifiedlead" and "SALES_QUALIFIED_LEAD") are keyed.
+      lifecyclestage: {
+        subscriber: "neutral",
+        lead: "info",
+        marketingqualifiedlead: "info",
+        marketing_qualified_lead: "info",
+        salesqualifiedlead: "info",
+        sales_qualified_lead: "info",
+        opportunity: "positive",
+        customer: "positive",
+        evangelist: "positive",
+        other: "neutral",
+        disqualified: "negative",
+      },
+      // Wiza account status on the contact.
+      wiza_status: { active: "positive", closed: "negative" },
+      // The AI ICP verdict. "moderate" is not in the portal's picklist today but
+      // costs nothing to map and is the obvious middle value.
+      icp_fit: { strong: "positive", moderate: "info", medium: "info", weak: "caution" },
+      // Deal state. Accepts either a slug or a deal row from getDeals(), which
+      // is what the panel actually has (see dealStateSlug).
+      deal: {
+        open: "info",
+        closed_won: "positive",
+        closedwon: "positive",
+        won: "positive",
+        closed_lost: "negative",
+        closedlost: "negative",
+        lost: "negative",
+        closed: "neutral",
+      },
+      // Sequence enrolment. `info`, not `caution`: being worked is a fact about
+      // the record, and the "don't step on a teammate" judgement belongs to the
+      // rep reading the owner next to it — a warning colour on every sequenced
+      // contact would cry wolf on the common case.
+      sequence: { enrolled: "info", not_enrolled: "neutral" },
+    },
+    // Aliases → the STATUS_TONES key they mean, so the renderer can ask for
+    // either the HubSpot property name or the label the panel shows.
+    STATUS_KINDS: {
+      grade: "account_grade_v1",
+      account_grade: "account_grade_v1",
+      company_status: "company_lifecycle_stage",
+      status: "company_lifecycle_stage",
+      contact_lifecycle_stage: "lifecyclestage",
+      contact_status: "lifecyclestage",
+      lifecycle_stage: "lifecyclestage",
+      lifecyclestage_contact: "lifecyclestage",
+      wiza: "wiza_status",
+      icp: "icp_fit",
+      deal_stage: "deal",
+      deal_status: "deal",
+      sequence_enrolled: "sequence",
+      in_sequence: "sequence",
+    },
+
     // Portal currency. Amounts come back as bare numbers in the portal's
     // currency, with no unit in the payload.
     CURRENCY: "USD",
@@ -475,6 +831,13 @@
 
   // --- Small helpers -------------------------------------------------------
   const isId = (v) => v != null && /^\d+$/.test(String(v));
+
+  // Lookup on a plain-object map that can never return something off
+  // Object.prototype: a CRM value of "constructor" or "toString" must miss, not
+  // hand back a function that then gets rendered.
+  const own = (obj, key) =>
+    obj && key != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : null;
+
   const normEmail = (v) => String(v || "").trim().toLowerCase();
 
   // HubSpot returns every property as a string, including numbers and booleans,
@@ -535,14 +898,14 @@
     return null;
   }
 
-  // A delimited CRM property (web_technologies is semicolon-ish, but the portal
-  // has commas and newlines in it too) as a capped, de-duplicated list:
-  // { items, more, total, all }. `more` is what "+N more" prints; `all` is the
-  // full list for the hover title. Null when there is nothing to show.
-  function delimitedList(value, max) {
+  // The split half of delimitedList, shared with the tech-stack view-model:
+  // a delimited CRM property (web_technologies is semicolon-ish, but the portal
+  // has commas and newlines in it too) → trimmed, whitespace-collapsed items,
+  // de-duplicated case-insensitively, empty entries dropped. Always an array, so
+  // "a__b;;c-d;" and null and 42 are all just inputs, never special cases.
+  function splitDelimited(value) {
     const raw = asText(value);
-    if (!raw) return null;
-    const cap = Number(max) > 0 ? Number(max) : CONFIG.TECH_STACK_MAX;
+    if (!raw) return [];
     const seen = Object.create(null);
     const all = [];
     for (const part of raw.split(/[;,|\r\n\t]+/)) {
@@ -553,8 +916,204 @@
       seen[key] = true;
       all.push(item);
     }
+    return all;
+  }
+
+  // A delimited CRM property as a capped, de-duplicated list:
+  // { items, more, total, all }. `more` is what "+N more" prints; `all` is the
+  // full list for the hover title. Null when there is nothing to show.
+  //
+  // Raw values, verbatim: this is the generic helper, and callers that need
+  // vendor-cased labels go through techStackView instead.
+  function delimitedList(value, max) {
+    const all = splitDelimited(value);
     if (!all.length) return null;
+    const cap = Number(max) > 0 ? Number(max) : CONFIG.TECH_STACK_MAX;
     return { items: all.slice(0, cap), more: Math.max(0, all.length - cap), total: all.length, all };
+  }
+
+  // --- Tech stack (Phase 11; pure, exported, unit-tested) -------------------
+  // The normalized key for a CRM enum value: lowercase, every run of
+  // non-alphanumerics collapsed to a single "_", no leading or trailing "_".
+  // Everything that matches on a value — TECH_LABELS, COMPETITORS,
+  // STATUS_TONES — matches on this, so "Google Analytics", "google_analytics"
+  // and "GOOGLE-ANALYTICS" are one thing, and "Apollo.io" is apollo_io.
+  function enumSlug(value) {
+    const s = value == null ? "" : String(value);
+    return s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  // Title Case for one word, without mangling casing the portal got right: a
+  // word that is already mixed-case ("iPhone", "1C:Enterprise") is a deliberate
+  // spelling and is left alone. Anything else is lowercased and gets its first
+  // letter raised — the first *letter*, so "(twitter)" becomes "(Twitter)".
+  function titleCaseWord(word) {
+    const w = String(word == null ? "" : word);
+    if (!w) return "";
+    if (/[A-Z]/.test(w) && /[a-z]/.test(w)) return w;
+    return w.toLowerCase().replace(/[a-z]/, (c) => c.toUpperCase());
+  }
+
+  // One tech value → the label a rep should read. See CONFIG.TECH_LABELS for the
+  // pipeline and how to extend it. Never returns an empty string: a value with
+  // no letters or digits at all (";", "-") returns null so the caller drops it
+  // rather than rendering a stray delimiter.
+  function techLabel(value) {
+    const raw = asText(value);
+    if (!raw) return null;
+    // Punctuation only ("-", ";", "()") is not a label. Unicode-aware so a
+    // non-ASCII vendor name — which slugs to nothing — still passes through.
+    if (!/[\p{L}\p{N}]/u.test(raw)) return null;
+    const slug = enumSlug(raw);
+    // Whole-value lookup, then the same value with its separators collapsed, so
+    // one entry per vendor also covers the portal's other spelling of it:
+    // "zoom_info" finds zoominfo, "clear_bit" finds clearbit. Exact-value only —
+    // it never widens the per-run matching below.
+    const whole = own(CONFIG.TECH_LABELS, slug) || own(CONFIG.TECH_LABELS, slug.replace(/_/g, ""));
+    if (whole) return whole;
+    // Words as the portal wrote them (only "_" and "-" become spaces), so
+    // punctuation inside an unknown vendor name survives; the map is keyed on
+    // the slug of each run, which is what makes "Node.js" and "node_js" the
+    // same lookup.
+    const words = raw.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().split(" ");
+    const maxRun = Number(CONFIG.TECH_LABEL_MAX_WORDS) > 0 ? Number(CONFIG.TECH_LABEL_MAX_WORDS) : 4;
+    const out = [];
+    let i = 0;
+    while (i < words.length) {
+      let hit = null;
+      let len = 0;
+      for (let n = Math.min(maxRun, words.length - i); n >= 1; n--) {
+        const found = own(CONFIG.TECH_LABELS, enumSlug(words.slice(i, i + n).join("_")));
+        if (found) {
+          hit = found;
+          len = n;
+          break;
+        }
+      }
+      if (hit) {
+        out.push(hit);
+        i += len;
+      } else {
+        out.push(titleCaseWord(words[i]));
+        i += 1;
+      }
+    }
+    const label = out.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    return label || null;
+  }
+
+  // Word-boundary containment on a slug: `phrase` must appear as a contiguous
+  // run of the slug's "_"-separated words. Padding both sides with "_" turns
+  // that into one substring test — "clearbit" hits "clearbit_enrichment" and
+  // misses "clearbitmap".
+  function slugHasRun(slug, phrase) {
+    if (!slug || !phrase) return false;
+    if (slug === phrase) return true;
+    return `_${slug}_`.indexOf(`_${phrase}_`) !== -1;
+  }
+
+  // Is this tech value one of Wiza's competitors? See CONFIG.COMPETITORS (which
+  // spellings, and the deliberate bare-"apollo" ambiguity),
+  // CONFIG.COMPETITOR_EXCEPTIONS (exact values that only look like one) and
+  // CONFIG.NON_COMPETITORS (partners, which win on an exact match).
+  function isCompetitorTech(value) {
+    const slug = enumSlug(value);
+    if (!slug) return false;
+    if ((CONFIG.COMPETITOR_EXCEPTIONS || []).indexOf(slug) !== -1) return false;
+    // The whole value with separators collapsed, compared for EQUALITY only:
+    // "zoom_info" and "snovio" are spellings of listed competitors, while
+    // "clearbitmap" — which a substring test on the collapsed form would have
+    // matched — still misses.
+    const compact = slug.replace(/_/g, "");
+    let matched = false;
+    for (const entry of CONFIG.COMPETITORS || []) {
+      if (slugHasRun(slug, entry) || compact === entry.replace(/_/g, "")) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) return false;
+    return (CONFIG.NON_COMPETITORS || []).indexOf(slug) === -1;
+  }
+
+  // The tech row's whole view-model. Returns null when there is nothing to show
+  // (no property, or a value that was only delimiters).
+  //
+  //   { items, visible, hidden, visibleCount, hiddenCount, more, total, max,
+  //     competitors, competitorCount, hasCompetitors, all }
+  //
+  // `items` is EVERY item, never truncated — the renderer needs the full list
+  // for a MORE/LESS toggle — as { label, slug, isCompetitor, raw } objects.
+  // Competitors are partitioned to the front (original order kept within each
+  // group) and `visibleCount` is never smaller than the number of them, so a
+  // competitor can never be the thing hidden behind "MORE". Surfacing one is the
+  // entire reason this row is worth the space.
+  function techStackView(value, options) {
+    const opts = options || {};
+    const parts = splitDelimited(value);
+    if (!parts.length) return null;
+    const cap = Number(opts.max) > 0 ? Number(opts.max) : CONFIG.TECH_STACK_MAX;
+
+    const seen = Object.create(null);
+    const items = [];
+    for (const part of parts) {
+      const label = techLabel(part);
+      if (!label) continue;
+      const slug = enumSlug(label) || enumSlug(part);
+      // De-duplicated on the *normalized* value, not the raw one, so
+      // "google_analytics" and "Google Analytics" in the same property are one
+      // chip rather than two.
+      const key = slug || label.toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      items.push({
+        label,
+        slug: key,
+        // Checked on both the raw value and the canonical label: the portal's
+        // spelling ("lead_iq") and ours ("LeadIQ") are each enough on their own.
+        isCompetitor: isCompetitorTech(part) || isCompetitorTech(label),
+        raw: part,
+      });
+    }
+    if (!items.length) return null;
+
+    const ordered = items
+      .filter((t) => t.isCompetitor)
+      .concat(items.filter((t) => !t.isCompetitor));
+    const competitors = ordered.filter((t) => t.isCompetitor);
+    const visibleCount = Math.min(ordered.length, Math.max(cap, competitors.length));
+    return {
+      items: ordered,
+      visible: ordered.slice(0, visibleCount),
+      hidden: ordered.slice(visibleCount),
+      visibleCount,
+      hiddenCount: ordered.length - visibleCount,
+      // Same name delimitedList uses for the "+N more" count, so a renderer that
+      // already prints one does not have to learn a second word for it.
+      more: ordered.length - visibleCount,
+      total: ordered.length,
+      max: cap,
+      competitors: competitors.map((t) => t.label),
+      competitorCount: competitors.length,
+      hasCompetitors: competitors.length > 0,
+      all: ordered.map((t) => t.label),
+    };
+  }
+
+  // The pre-Phase-11 { items, more, total, all } shape, built from the cleaned
+  // labels. Kept because it is what the panel's tech row renders today, and a
+  // label fix should not have to wait for a renderer change to reach a rep.
+  function techListLegacy(stack) {
+    if (!stack) return null;
+    return {
+      items: stack.visible.map((t) => t.label),
+      more: stack.hiddenCount,
+      total: stack.total,
+      all: stack.all,
+    };
   }
 
   function truncate(text, max) {
@@ -728,6 +1287,109 @@
     if (/[a-z]/.test(v) && !/_/.test(v)) return v; // already a label
     const words = v.toLowerCase().replace(/_/g, " ").trim();
     return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+
+  // --- Status pill tones (Phase 11; pure, exported, unit-tested) ------------
+  // The five tones a pill can have. NAMES, not colours — see CONFIG.STATUS_TONES
+  // for why, and for the kind → value → tone table itself.
+  const TONES = ["positive", "caution", "negative", "neutral", "info"];
+
+  // Accepts either a STATUS_TONES key or one of the CONFIG.STATUS_KINDS aliases;
+  // null for a kind nobody has mapped (which tones as `neutral`).
+  function statusKindOf(kind) {
+    const slug = enumSlug(kind);
+    if (!slug) return null;
+    if (own(CONFIG.STATUS_TONES, slug)) return slug;
+    const alias = own(CONFIG.STATUS_KINDS, slug);
+    return alias && own(CONFIG.STATUS_TONES, alias) ? alias : null;
+  }
+
+  // A deal row from getDeals() → the state its pill is about. Same precedence as
+  // dealOutcome(): the portal's explicit hs_is_closed_lost flag wins over the
+  // pipeline probability, and closed-and-not-won is lost.
+  function dealStateSlug(deal) {
+    if (!deal || typeof deal !== "object") return null;
+    if (!deal.closed) return "open";
+    return deal.closedLost === true || !deal.won ? "closed_lost" : "closed_won";
+  }
+
+  // The value's key in STATUS_TONES[kind]. Two kinds take richer input than a
+  // string because that is what the panel actually holds: `deal` accepts a deal
+  // row, `sequence` accepts the tri-state enrolment boolean (or a sequence
+  // view-model). Everything else is slugged.
+  function statusValueSlug(kind, value) {
+    const k = statusKindOf(kind);
+    if (k === "deal" && value && typeof value === "object") return dealStateSlug(value);
+    if (k === "sequence") {
+      const v = value && typeof value === "object" ? value.enrolled : value;
+      if (v === true) return "enrolled";
+      if (v === false) return "not_enrolled";
+      const s = enumSlug(v);
+      if (!s) return null;
+      if (/^(true|yes|1|enrolled|in_sequence|in_a_sequence)$/.test(s)) return "enrolled";
+      if (/^(false|no|0|not_enrolled|not_in_sequence|not_in_a_sequence)$/.test(s)) {
+        return "not_enrolled";
+      }
+      return s;
+    }
+    // No other kind has an object form, and String({}) is "[object Object]" —
+    // which must never become a slug, a label, or a tone.
+    if (value && typeof value === "object") return null;
+    const slug = enumSlug(value);
+    if (!slug) return null;
+    if (k === "account_grade_v1") {
+      // "A", "A+", "b-", "grade_b" are all the same grade; the modifier is not
+      // a separate tone.
+      const m = /^(?:grade_)?([a-z])(?:_.*)?$/.exec(slug);
+      return m ? m[1] : slug;
+    }
+    return slug;
+  }
+
+  // (kind, value) → one of TONES. Never throws, and never guesses: an unmapped
+  // kind or value is `neutral`.
+  function statusTone(kind, value) {
+    const k = statusKindOf(kind);
+    if (!k) return "neutral";
+    const slug = statusValueSlug(k, value);
+    if (!slug) return "neutral";
+    const map = own(CONFIG.STATUS_TONES, k) || {};
+    // The second lookup absorbs HubSpot's two spellings of the same enum
+    // ("SALES_QUALIFIED_LEAD" and "salesqualifiedlead") without a second entry.
+    const tone = own(map, slug) || own(map, slug.replace(/_/g, ""));
+    return TONES.indexOf(tone) !== -1 ? tone : "neutral";
+  }
+
+  // humanizeEnum, then a capital: HubSpot's lowercase picklists ("active",
+  // "customer") already look like labels to humanizeEnum, and a pill reads as a
+  // label, not as a sentence fragment.
+  function statusLabel(value) {
+    const h = humanizeEnum(value);
+    return h ? h.charAt(0).toUpperCase() + h.slice(1) : null;
+  }
+
+  // Everything a status pill needs: { kind, slug, label, tone }. Null when there
+  // is no value at all, so the caller drops the pill instead of drawing an empty
+  // one. `kind` is the canonical STATUS_TONES key (aliases resolved), or null if
+  // the kind is unmapped — the pill still renders, tone `neutral`.
+  function statusPill(kind, value) {
+    const k = statusKindOf(kind);
+    const slug = statusValueSlug(k, value);
+    const tone = statusTone(k, value);
+    const raw = value && typeof value === "object" ? null : value;
+    let label;
+    if (k === "sequence") {
+      label =
+        slug === "enrolled"
+          ? "In sequence"
+          : slug === "not_enrolled"
+            ? "Not in a sequence"
+            : statusLabel(raw) || statusLabel(slug);
+    } else {
+      label = statusLabel(raw) || statusLabel(slug);
+    }
+    if (!slug && !label) return null;
+    return { kind: k, slug: slug || null, label: label || null, tone };
   }
 
   // Call length as a clock reading (mm:ss, h:mm:ss past an hour) — reps compare
@@ -913,6 +1575,31 @@
     if (!raw) return null;
     if (!isId(raw)) return raw;
     return ownerName(owners, raw);
+  }
+
+  // "Is this me?" — three states, and the third one is the whole point.
+  //
+  //   true   the record's owner ID is the connected rep's own
+  //   false  a different owner, and we can name them
+  //   null   we cannot say, and the renderer must NOT draw a "not yours" flag:
+  //          telling a rep an account isn't theirs when it might be is worse
+  //          than saying nothing. Three ways to land here:
+  //            · no connected owner ID (the connection never resolved one)
+  //            · no owner ID on the record — including a property that holds a
+  //              *name* rather than an ID, which is not comparable to an ID
+  //            · an owner ID that resolved to no name. "Someone else, and we
+  //              can't tell you who" is not a flag worth raising; a name is what
+  //              makes it actionable.
+  //
+  // The one asymmetry, deliberately: an ID equal to the rep's own is `true` even
+  // when the name lookup failed. It is their own ID — there is nothing left to
+  // be unsure about, and "yours" is the claim that cannot cause a false alarm.
+  function ownerIsMine(ownerId, selfOwnerId, resolvedName) {
+    const self = isId(selfOwnerId) ? String(selfOwnerId) : null;
+    const id = isId(ownerId) ? String(ownerId) : null;
+    if (!self || !id) return null;
+    if (id === self) return true;
+    return asText(resolvedName) ? false : null;
   }
 
   // --- Contact / company resolution ---------------------------------------
@@ -1354,6 +2041,7 @@
 
       const name = [asText(p.firstname), asText(p.lastname)].filter(Boolean).join(" ").trim();
       const ownerId = asText(p.hubspot_owner_id);
+      const resolvedOwner = ownerName(owners, ownerId);
       // Tri-state on purpose: true / false / unknown. A contact whose enrolment
       // flag the portal doesn't set must not be reported as "not sequenced" —
       // that is a claim, and the panel makes no claims it can't back.
@@ -1379,11 +2067,13 @@
         // Resolved through the shared session owner cache by the caller. Null
         // when it couldn't be resolved (or wasn't looked up) — the row then shows
         // no owner rather than a number.
-        ownerName: ownerName(owners, ownerId),
-        // true = the connected rep's own contact, false = a teammate's, null =
-        // we don't know whose (unknown owner, or the connection has no owner ID
-        // resolved yet). Null renders as neither claim.
-        isMine: selfOwnerId && ownerId ? ownerId === selfOwnerId : null,
+        ownerName: resolvedOwner,
+        // true = the connected rep's own contact, false = a named teammate's,
+        // null = we can't say (no connected owner ID, no owner on the row, or an
+        // owner ID that resolved to no name). Null renders as neither claim —
+        // identical semantics to the ownership rows, same helper. See
+        // ownerIsMine.
+        isMine: ownerIsMine(ownerId, selfOwnerId, resolvedOwner),
         linkedinUrl: linkedInUrl(p.hs_linkedin_url),
         url: recordUrl("contact", id),
       });
@@ -1458,15 +2148,65 @@
   // prominent one; the rest are supporting detail. Every value goes through
   // ownerRef, which resolves ID-shaped values and drops the ones it can't
   // resolve — a bare numeric ID is never a name.
-  function ownershipView(contact, company, owners) {
+  // One ownership row: { key, label, name, ownerId, isMine, missing, unresolved }.
+  //
+  // `name` is null rather than a number when the value is an ID the owner cache
+  // could not resolve — the pre-existing rule, and `unresolved` is how the
+  // renderer tells that case ("owner on file, name unavailable") apart from
+  // `missing` ("nobody owns this"), which are different facts and read
+  // differently to a rep.
+  function ownerRole(key, label, value, owners, selfOwnerId) {
+    const raw = asText(value);
+    const ownerId = raw && isId(raw) ? String(raw) : null;
+    const name = ownerRef(raw, owners);
+    return {
+      key,
+      label,
+      name: name || null,
+      ownerId,
+      isMine: ownerIsMine(ownerId, selfOwnerId, name),
+      missing: !raw,
+      unresolved: !!raw && !name,
+    };
+  }
+
+  // Phase 11 adds `roles`: Outbound, Company and Contact owner ALWAYS present, in
+  // that order, because the panel now draws all three unconditionally — an unset
+  // one is a row saying "unassigned", not a row that vanishes. (A missing
+  // ownership row used to be indistinguishable from a section that hadn't
+  // loaded.) Each row carries the three-state `isMine` from ownerIsMine; the
+  // renderer flags outbound and contact, and the null state is never flagged.
+  //
+  // `options.selfOwnerId` is the connected rep's owner ID (connectedOwnerId()).
+  // Omit it and every `isMine` is null, which is the honest answer when the
+  // connection never resolved one — the function stays pure either way.
+  function ownershipView(contact, company, owners, options) {
     const cp = (company && company.properties) || {};
     const kp = (contact && contact.properties) || {};
+    const selfOwnerId = isId(options && options.selfOwnerId) ? String(options.selfOwnerId) : null;
+
+    const roles = [
+      ownerRole("outbound", "Outbound owner", cp.sdr_company_owner, owners, selfOwnerId),
+      ownerRole("company", "Company owner", cp.hubspot_owner_id, owners, selfOwnerId),
+      ownerRole("contact", "Contact owner", kp.hubspot_owner_id, owners, selfOwnerId),
+    ];
+    // The CSM is supporting detail, not one of the three the panel always draws,
+    // so it stays out of `roles` — a renderer iterating `roles` must always get
+    // exactly the three rows it promised the rep.
+    const csmRole = ownerRole("csm", "CSM", cp.cs_company_owner, owners, selfOwnerId);
+
     const own = {
-      outbound: ownerRef(cp.sdr_company_owner, owners),
-      csm: ownerRef(cp.cs_company_owner, owners),
-      companyOwner: ownerRef(cp.hubspot_owner_id, owners),
-      contactOwner: ownerRef(kp.hubspot_owner_id, owners),
+      // Unchanged flat fields (what the panel renders today).
+      outbound: roles[0].name,
+      csm: csmRole.name,
+      companyOwner: roles[1].name,
+      contactOwner: roles[2].name,
       changedAt: toMillis(cp.outbound_ownership_change_date) || null,
+      // Phase 11.
+      roles,
+      byKey: { outbound: roles[0], company: roles[1], contact: roles[2], csm: csmRole },
+      csmRole,
+      selfOwnerId,
     };
     own.hasData = !!(own.outbound || own.csm || own.companyOwner || own.contactOwner);
     return own;
@@ -1511,8 +2251,14 @@
       icpFit: humanizeEnum(p.icp_fit) || null,
       icpReasoning: reasoningFull ? truncate(reasoningFull, CONFIG.REASONING_CHARS) : null,
       icpReasoningFull: reasoningFull,
-      tech: delimitedList(p.web_technologies),
+      // Phase 11: the tech row's real view-model — cleaned vendor labels, a
+      // competitor flag per item, and a visible/hidden split for MORE/LESS.
+      techStack: techStackView(p.web_technologies),
+      // The { items, more, total, all } shape the panel renders today, built from
+      // the same cleaned labels so the underscore bug is fixed for both readers.
+      tech: null,
     };
+    ctx.tech = techListLegacy(ctx.techStack);
     ctx.hasData = !!(
       ctx.grade ||
       ctx.status ||
@@ -1729,7 +2475,9 @@
       company: companyView(company, owners),
       // Phase 8 view-models. Additive: every existing bundle field is untouched,
       // and each of these is independently "no data" for a thin record.
-      ownership: ownershipView(contact, company, owners),
+      // selfOwnerId rides in so every ownership row can answer "is this me?" —
+      // read from the stored connection above, so it costs nothing.
+      ownership: ownershipView(contact, company, owners, { selfOwnerId }),
       accountContext: accountContextView(company),
       sequence: sequenceView(contact),
       // Phase 9. Always an array (never null), so the panel's only decision is
@@ -1829,6 +2577,31 @@
       dealOutcome,
       // Phase 9 (pure: records + resolved owner names in, ordered rows out)
       accountContacts: accountContactsView,
+      // Phase 11
+      techStack: techStackView,
+      // (ownerId, selfOwnerId, resolvedName) → true | false | null. Exported
+      // because the three-state rule is the part a renderer can get wrong: null
+      // must never be drawn as "not yours".
+      isMine: ownerIsMine,
+    },
+    // Phase 11: status pills. Tone NAMES only — the theme owns the colours.
+    //   tone(kind, value)  → "positive" | "caution" | "negative" | "neutral" | "info"
+    //   pill(kind, value)  → { kind, slug, label, tone } | null
+    status: {
+      TONES,
+      tone: statusTone,
+      pill: statusPill,
+      label: statusLabel,
+      kindOf: statusKindOf,
+      dealState: dealStateSlug,
+    },
+    // Phase 11: tech-stack labelling and competitor detection, on their own so a
+    // renderer can label a single value without building a whole stack.
+    tech: {
+      stack: techStackView,
+      label: techLabel,
+      slug: enumSlug,
+      isCompetitor: isCompetitorTech,
     },
     activity: {
       TABS: ACTIVITY_TABS,
@@ -1851,6 +2624,9 @@
       linkedInUrl,
       firstText,
       delimitedList,
+      splitDelimited,
+      slug: enumSlug,
+      techLabel,
       toMillis,
       recordUrl,
     },
