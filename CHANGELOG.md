@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-06
+
 ### Fixed — Lovable token function reference: fixed introspection, added failure logging and a hub allowlist
 
 `lovable/hubspot-token-function.ts` (the reference source for the deployed
