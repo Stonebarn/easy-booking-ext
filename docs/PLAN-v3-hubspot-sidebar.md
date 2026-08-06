@@ -106,6 +106,82 @@ On prospect change (email in `eb:currentProspect`), the panel fetches and render
    - Null-safe: non-user prospects show "Not a Wiza user yet".
 3. **Activity deep-dive**: tabs (All | Calls | Emails | Meetings | Notes | Tasks) with per-type counts; every row attributed to its owner ("by Jenny Choi" — `hubspot_owner_id` on each engagement resolved via the owner cache); richer per-type detail (duration/disposition/direction, outcome, task status, note preview); up to 25 per type in a fixed-height scrollable list so the section stays visually small.
 
+## Phase 7 — Auto-sync on save + note attribution (added 2026-08-05, post-audit)
+
+Live test proved sync works (note `114293088808`) but attribution was empty.
+Property metadata from the live portal:
+
+| Field (UI label) | Property | Writable? |
+|---|---|---|
+| Activity assigned to | `hubspot_owner_id` | **Yes** — owner ID (Jack = 84788315) |
+| Activity created by | `hs_created_by` | **Yes** — *user* ID, which differs from owner ID (Logan Ross: owner 969836223 / user 75087807) |
+| Created by user ID | `hs_created_by_user_id` | **No** — "set automatically by HubSpot"; stays "No user" for OAuth-app writes |
+
+1. **Self-healing owner resolution** — root cause of the blank owner: the lookup
+   runs once at login, best-effort, and a failure leaves `ownerId` null forever.
+   Resolve lazily on demand and cache, so an existing connection heals itself
+   without a reconnect.
+2. **Attribution on every note**: `hubspot_owner_id` = SDR's owner ID,
+   `hs_created_by` = SDR's HubSpot user ID (from the OAuth introspect response,
+   stored as `userId`). Send `hs_created_by` best-effort — if HubSpot rejects it
+   as read-only, retry without it rather than failing the sync.
+3. **Auto-sync on save**: when the scraper detects a note *saved* in the dialer
+   (not just drafted), sync it automatically — with a per-SDR toggle in the
+   settings popover (default on), the existing idempotency hash preventing
+   duplicates, a visible result/undo affordance in the panel, and manual Sync
+   still available for drafts.
+
+## Phases 8–10 — SDR scoping-call requests (added 2026-08-05)
+
+From the SDR scoping call. Every property name below was verified live against
+portal 40063500. **`sdr_company_owner` is the outbound owner — HubSpot's own
+description says explicitly "use this for outbound ownership, not
+hubspot_owner_id"**, which means the identity block currently shows the wrong
+owner for the SDRs' main use case (verifying ownership before dialing).
+
+Already shipped and covering their asks: Nooks→HubSpot notes sync (P4/P7 — the
+#1 complaint), Wiza plan/status/recent-usage (P6), activity with owner
+attribution (P6). Note the extension also sidesteps Savannah's "HubSpot tab
+never auto-opens in Nooks" issue entirely — the panel shows the record without
+depending on Nooks' Outreach record-ID handoff.
+
+### Phase 8 — Dialing-decision context (properties only, additive)
+- **Ownership (fix)**: company `sdr_company_owner` (Outbound Owner) as the
+  primary owner shown, `cs_company_owner` (CSM) and `hubspot_owner_id` clearly
+  distinguished; `outbound_ownership_change_date`. Never conflate again.
+- **Closed-lost talk track**: on closed deals, `closed_lost_reason`,
+  `closed_loss_category`, `closed_lost_category__secondary_`, `hs_is_closed_lost`.
+- **Worth-calling check**: `account_grade_v1` (grade), `asm_sales_team_size`
+  ("sales team using Wiza Data" — the ASM field they named), `ae_team_size`,
+  `ob_team_size`, `sales_leadership_team_size`, `company_lifecycle_stage`.
+- **Company context snippet** (the "do you even know what we do?" objection):
+  `description` / `about_us` / `linkedinbio`, `industry_wiza`, `account_icp` +
+  `account_icp_ai_reasoning` (who they sell to), `icp_fit`.
+- **Tech stack**: `web_technologies`.
+- **LinkedIn, one click**: company `linkedin_company_page`, contact
+  `hs_linkedin_url` (note `linkedin_url` is deprecated) — kills the tab-out.
+- Contact sequence context: `hs_sequences_is_enrolled`,
+  `hs_latest_sequence_enrolled`, `hs_latest_sequence_enrolled_date`,
+  `notes_last_contacted`.
+
+### Phase 9 — Account-level "who else are we touching"
+Company→contacts associations, showing each contact's name/title, sequence
+enrollment, last-contacted, and owner — answering "who else has been sequenced
+from this account" during a live call, plus names to drop when a prospect says
+"wrong person". Must respect the rate-limit budget (batch read, cached with the
+bundle).
+
+### Phase 10 — Wrong-number workflow (write path)
+100+ uncallable numbers per rep, and HubSpot is the source of truth
+(HubSpot → Outreach → Nooks). From the panel: mark the current number bad and
+write a corrected `phone` / `mobilephone` / `phone_number_2` to the HubSpot
+contact, so the fix propagates without tabbing out. Needs confirm-before-write,
+an audit note of what changed, and clear "syncs to Outreach in ~10 min" copy.
+
+**Out of scope / not ours**: Outreach note surfacing (no Outreach integration),
+dead Trellis transcript links, and the Nooks call-card field requests (those are
+Nooks-side asks — our panel is the workaround).
+
 ## Phase 5 — Hardening, settings UI & rollout (runs LAST, after 4 + 6 merge)
 
 - **Settings popover (added 2026-08-05)**: gear icon in the panel header (top right, next to Refresh); clicking opens a small popover containing the Refresh action and the HubSpot connection controls (connect / connected-as / disconnect). The dedicated HubSpot section leaves the panel body — connection state shows as a subtle header indicator instead.
