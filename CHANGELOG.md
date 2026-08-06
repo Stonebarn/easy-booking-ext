@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-06
+
 ### Added — Wiza custom objects: richer usage data, and two sparklines
 
 The "Wiza usage" section (renamed from "Wiza user/account information" — the
