@@ -10,8 +10,9 @@ A Chrome extension (Manifest V3) for the sales team. It does two things:
   (e.g. `/21470/queue/10664`).
 - **A HubSpot sidebar.** A Chrome side panel that, once a rep connects **their
   own** HubSpot login, shows the prospect's HubSpot context (identity, Wiza
-  product data, deals, every logged call/email/meeting/note/task) and syncs the
-  call notes they take in the dialer onto the matched contact and company.
+  product data, deals, every logged call/email/meeting/note/task, and who else
+  the team is touching at the same account) and syncs the call notes they take in
+  the dialer onto the matched contact and company.
 
 > **Network egress.** Once a rep connects HubSpot, the extension talks to
 > `api.hubapi.com` and to a hosted token endpoint. Read
@@ -123,8 +124,9 @@ their own keys.
    here — see [Privacy & permissions](#privacy--permissions).
 6. **`hubspot-data.js`** does the CRM reads for the panel: it resolves the
    prospect to a HubSpot contact and company (including the Wiza product
-   properties on both), then loads deals and up to 25 engagements per type, each
-   attributed to the rep who logged it. Resolution prefers the **record IDs scraped from the dialer's
+   properties on both), then loads deals, up to 25 engagements per type — each
+   attributed to the rep who logged it — and the other contacts on the same
+   company (two requests, capped at 25 names, skipped when there is no company). Resolution prefers the **record IDs scraped from the dialer's
    HubSpot panes** (a direct `GET` by ID) and only falls back to CRM Search —
    which is capped at **5 requests/second for the entire portal**, shared by
    every rep — when there is no ID to use. Results are cached per email for 5
@@ -213,16 +215,17 @@ client ID that *is* checked in is a public identifier, not a credential.
 
 ### CRM sidebar
 
-With HubSpot connected, loading a prospect in the dialer fills five sections in
+With HubSpot connected, loading a prospect in the dialer fills six sections in
 the side panel — who they are, whether the account is worth calling and what to
-open with, whether they use Wiza, their deals, and every
-call/email/meeting/note/task on the record. Everything is read-only, and every
-record name links out to HubSpot (opens in a new tab).
+open with, **who else you're touching at the account**, whether they use Wiza,
+their deals, and every call/email/meeting/note/task on the record. Everything is
+read-only, and every record name links out to HubSpot (opens in a new tab).
 
 | Section | What it shows |
 |---|---|
 | **Contact & company** | One compact identity block: the contact's name (linked to the record) with a lifecycle-stage pill; their job title *@* their company (also linked); then phone and lead status. Hover the company name for its domain, industry and headcount. Underneath, in this order: **who owns this account** (see below), **LinkedIn** and **Company LinkedIn** links (one click, no tabbing out to search for them), and the **sequence line** — *"In sequence: Outbound Q3 since Jul 2, 2026"* or *"Not in a sequence"*, plus *"Last contacted 3d ago"* (hover for the exact time). The company is matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"*; a company matched with no contact record says *"No contact record"*. |
 | **Account context** | Is this worth calling, and what do you open with. The **account grade** sits in the section header (*"Grade A"*). Inside: the company's own blurb in its own words (the first couple of lines, hover for the rest), **Company status**, **ICP fit**, **Sales team using Wiza** (the size of their sales team using Wiza data), **AE team**, **Outbound team**, **Sales leadership**, a **Tech stack** row (*"Salesforce · Outreach · Gong … +2 more"*, hover for the full list), and a muted *"Why: …"* line with the ICP reasoning (hover for all of it). Companies with **none** of this hide the whole section rather than showing an empty card. |
+| **Others at this account (N)** | Everyone *else* on the same company record — who else you're touching there, without leaving the call. Collapsible, and the count is in the heading. Each row: the colleague's **name** (linked to their HubSpot contact record), an **In sequence** badge (hover it for the sequence name and start date) or a muted **Not sequenced** when HubSpot says so either way, their **job title**, **Last contacted 3d ago** (hover for the exact time), the **owner** — *"Owner: You"* when it's yours, otherwise their name — and a small **in** link straight to their LinkedIn profile when the record has one. Sorted so the useful ones are first: anyone currently in a sequence, then whoever was contacted most recently. Empty: *"No other contacts on this account"*. A prospect with no company at all doesn't get the section. |
 | **Wiza** | Whether this prospect is a Wiza user, and what their account looks like. **User**: an Active/Closed status pill, sign-up date, plan (status · credits · frequency), credits used in the last 30 days, when they last used Wiza, their Wiza ID, and **Open in Wiza Admin** / **Usage logs** links when the record has them. **Account** (from the company): account ID, subscribed accounts, API credit balance, credits used in 30 days, last credit purchase, ICP, industry, use case, and a **Target account** badge. Most prospects aren't users — those read *"Not a Wiza user yet"*, and any single value that isn't set is left out rather than shown blank. |
 | **Deals** | One row per associated deal — name (linked), human-readable stage, amount, close date, owner. Open deals sort first; closed-won gets a green pill. **Closed** rows also carry a one-line *why*: *"Lost: Went with incumbent vendor · Price"* (reason, then category, then secondary category — duplicates collapsed, long reasons capped with the rest on hover) or *"Won: Champion moved from a customer account"*. Open deals never show one, and a closed deal with nothing on file shows no line at all. Empty: *"No open deals"*. |
 | **Activity** | A tab per engagement type — **All · Calls · Emails · Meetings · Notes · Tasks** — each with its count, and up to 25 rows per type. Types with nothing logged are dimmed and not clickable. Every row is attributed to whoever logged it ("by Jenny Choi") and carries a relative timestamp with the exact date on hover, plus per-type detail: direction arrow, disposition and duration (`4:07`) on calls; direction and subject on emails; title and outcome on meetings; the first line of the body on notes; subject and status on tasks. **All** merges every type newest-first. The list scrolls inside a fixed height (about 40% of the panel) so the section stays small no matter how much history there is; your chosen tab sticks as you move between prospects. |
@@ -247,6 +250,24 @@ None of the ownership, account-context, LinkedIn, sequence or closed-deal detail
 costs an extra API call — it all comes back on the same contact, company and deal
 reads the panel already made, so it's free against the rate limit the whole team
 shares.
+
+**Two things "Others at this account" is for.** Both came straight from the SDR
+scoping call:
+
+- *"Who else has been sequenced from that account."* You can see this on the full
+  dialer tab by filtering on the account — but not during an active call, which is
+  exactly when you need it. Now it's on screen the whole time, with the sequenced
+  colleagues sorted to the top so you don't step on a teammate's sequence.
+- *"Wrong person."* Instead of opening the company's LinkedIn page and reading
+  names off it mid-call, you have the colleague list in front of you — names,
+  titles, and a one-click LinkedIn link each. Pick the pivot and carry on.
+
+This section is the one piece of CRM context that **does** cost requests: exactly
+**two** per prospect (one "which contacts belong to this company" read, then one
+batched read of up to 25 of them). It never touches HubSpot's search limit — the
+scarce one the whole team shares — it makes no request at all when the prospect has
+no company, and it's cached with everything else for five minutes, so clicking back
+and forth through a call list costs nothing.
 
 - Sections show **loading placeholders** while a lookup is in flight, and each
   one reports its own failure — a rate-limited Deals fetch doesn't blank the
@@ -390,14 +411,17 @@ email does not disturb the booking tab.
 | `ACTIVITY_PER_TYPE_LIMIT` | Rows kept **per engagement type** (newest first) — what one Activity tab can hold | `25` |
 | `BATCH_MAX` | Objects per `batch/read` and IDs per association read (HubSpot's own ceiling) | `100` |
 | `RETRY_AFTER_FALLBACK_S` | Wait used when a `429` carries no usable `Retry-After` header | `10` |
-| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `8` |
+| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `9` |
 | `NOTE_PREVIEW_CHARS` | Characters of a note body kept for its one-line activity row | `120` |
 | `SNIPPET_CHARS` | Characters of the company blurb shown inline in **Account context** (the full text becomes the row's hover) | `200` |
 | `REASONING_CHARS` | Ceiling on the ICP rationale kept for its hover title | `400` |
 | `TECH_STACK_MAX` | Technologies listed before "+N more" | `8` |
 | `OUTCOME_CHARS` | Characters of a closed deal's reason shown on its row (rest on hover) | `140` |
+| `ACCOUNT_CONTACTS_LIMIT` | Colleagues shown in **Others at this account** — and the page size the association read asks for, so one page is always enough and there is never a second request | `25` |
+| `ACCOUNT_OWNER_LOOKUP_MAX` | Colleague owner IDs looked up *for the first time* per prospect. Cached names are always resolved; this only stops an account whose contacts each have a different owner from turning a 2-request section into 27. Rows past it show no owner rather than a number | `10` |
 | `CONTACT_PROPERTIES` | Contact properties requested | firstname, lastname, email, jobtitle, phone, lifecyclestage, hs_lead_status, hubspot_owner_id, notes_last_updated, **wiza_status, wiza_id, signed_up_at, plan_status, plan_credits, plan_frequency, number_of_credits_used_in_last_30_days, date_of_last_wiza_usage, wiza_admin_url, wiza_usage_logs, wiza_email_confirmed**, *hs_linkedin_url, hs_sequences_is_enrolled, hs_latest_sequence_enrolled, hs_latest_sequence_enrolled_date, notes_last_contacted* |
 | `COMPANY_PROPERTIES` | Company properties requested | name, domain, industry, numberofemployees, hubspot_owner_id, **api_wiza_account_id, primary_account_id_associated_wiza, number_of_associated_accounts, number_of_associated_subscribed_accounts, api_credit_balance, number_of_credits_used_in_last_30_days, last_api_credit_purchase, times_api_credits_purchased, account_icp, industry_wiza, hs_is_target_account, use_case**, *sdr_company_owner, cs_company_owner, outbound_ownership_change_date, account_grade_v1, asm_sales_team_size, ae_team_size, ob_team_size, sales_leadership_team_size, company_lifecycle_stage, description, about_us, linkedinbio, account_icp_ai_reasoning, icp_fit, web_technologies, linkedin_company_page* |
+| `ACCOUNT_CONTACT_PROPERTIES` | Properties read for each *other* contact on the account. Deliberately a short list rather than `CONTACT_PROPERTIES`: 25 contacts × the full Wiza property set is a large response for a list of names | firstname, lastname, jobtitle, email, phone, hubspot_owner_id, hs_sequences_is_enrolled, hs_latest_sequence_enrolled, hs_latest_sequence_enrolled_date, notes_last_contacted, notes_last_updated, lifecyclestage, hs_linkedin_url |
 | `DEAL_PROPERTIES` | Deal properties requested | dealname, dealstage, pipeline, amount, closedate, hubspot_owner_id, *closed_lost_reason, closed_loss_category, closed_lost_category\_\_secondary\_, hs_is_closed_lost, closed_won_reason* |
 | `ACTIVITY_TYPES` | The five engagement types, their display + tab labels and per-type properties (every type also asks for `hubspot_owner_id` and `hs_created_by`, which is how rows get attributed) | calls, emails, meetings, notes, tasks |
 | `FREE_EMAIL_DOMAINS` | Domains the company-by-domain fallback refuses to search on (a `gmail.com` search matches something irrelevant) | gmail, outlook, yahoo, … |
@@ -467,7 +491,7 @@ easy-booking-ext/
 ├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", settings popover, CRM rendering, notes sync
 ├── hubspot-config.js      # HubSpot OAuth app config (client id, scopes — no secret)
 ├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
-├── hubspot-data.js        # CRM reads: contact/company resolution, Wiza data, deals, activity, caching
+├── hubspot-data.js        # CRM reads: contact/company resolution, Wiza data, deals, activity, account contacts, caching
 ├── hubspot-notes.js       # note creation: POST /crm/v3/objects/notes + contact/company associations
 ├── lovable/
 │   └── hubspot-token-function.ts  # hosted token exchange (holds the secret; deployed to Lovable Cloud)

@@ -450,12 +450,13 @@
   }
 
   // ==========================================================================
-  // CRM context — identity block, Account context, Wiza product data, Deals,
-  // Activity.
+  // CRM context — identity block, Account context, Others at this account, Wiza
+  // product data, Deals, Activity.
   //
   // Phase 8 added the dialing-decision bits: labelled ownership (outbound owner
   // first — see ownershipBlock), one-click LinkedIn, sequence state, the account
-  // context section, and the closed-deal outcome line. All of it renders from
+  // context section, and the closed-deal outcome line. Phase 9 added the
+  // colleague list ("who else are we touching here"). All of it renders from
   // view-models on the same bundle; nothing here fetches.
   //
   // Input is "eb:prospectContext" (email + identity + the HubSpot record IDs
@@ -486,6 +487,13 @@
     accountSection: document.getElementById("crm-account-section"),
     account: document.getElementById("crm-account"),
     accountPill: document.getElementById("crm-account-pill"),
+    // Others at this account (Phase 9). Like Account context this section hides
+    // itself outright — here when the prospect has no company at all — and its
+    // count lives in the title rather than a pill, because "Others at this
+    // account (4)" is the whole headline.
+    colleaguesSection: document.getElementById("crm-colleagues-section"),
+    colleaguesTitle: document.getElementById("crm-colleagues-title"),
+    colleagues: document.getElementById("crm-colleagues"),
     wiza: document.getElementById("crm-wiza"),
     wizaPill: document.getElementById("crm-wiza-pill"),
     deals: document.getElementById("crm-deals"),
@@ -497,6 +505,7 @@
   const crmBodies = [
     crmEls.identity,
     crmEls.account,
+    crmEls.colleagues,
     crmEls.wiza,
     crmEls.deals,
     crmEls.activity,
@@ -896,6 +905,128 @@
     }
   }
 
+  // --- Others at this account (Phase 9) -------------------------------------
+  // The SDR ask, in their words: "who else has been sequenced from that account —
+  // currently visible on the full dialer tab filtered by account, but not during
+  // an active call". Same section answers "wrong person" — the names reps
+  // currently get by opening the company's LinkedIn page mid-call.
+  //
+  // Ordering is EB.hubspotData.view.accountContacts' job (in-sequence first, then
+  // most recently contacted); this is layout. Every string is a CRM value going
+  // through textContent, and both links are already-validated hrefs: the record
+  // link is built from a digits-only ID, the LinkedIn one from a safeUrl'd
+  // property.
+  const COLLEAGUES_TITLE = "Others at this account";
+
+  // The count belongs in the title ("Others at this account (4)"), and there is
+  // no count to show in any state but a rendered list.
+  function setColleaguesCount(n) {
+    if (!crmEls.colleaguesTitle) return;
+    crmEls.colleaguesTitle.textContent =
+      typeof n === "number" && n > 0 ? `${COLLEAGUES_TITLE} (${n})` : COLLEAGUES_TITLE;
+  }
+
+  function colleagueRow(row) {
+    const node = el("div", "peer");
+
+    const top = el("div", "peer-top");
+    top.appendChild(recordLink(row.name, row.url, "peer-name"));
+
+    // Compact sequence state. Enrolled is the signal the rep is scanning for, so
+    // it gets the purple treatment; a definite "no" is muted; an unknown gets no
+    // badge at all rather than a placeholder — the portal simply didn't say.
+    if (row.inSequence === true) {
+      const badge = el("span", "pill stage tiny", "In sequence");
+      // The sequence name and start date are useful but not row-worthy at 320px.
+      const which = [
+        row.sequenceName ? `In sequence: ${row.sequenceName}` : "In sequence",
+        row.sequenceEnrolledAt ? `since ${fmt.date(row.sequenceEnrolledAt)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (which) badge.title = which;
+      top.appendChild(badge);
+    } else if (row.inSequence === false) {
+      top.appendChild(el("span", "pill info tiny", "Not sequenced"));
+    }
+
+    // One-click LinkedIn per colleague: this is the tab-out the section exists to
+    // kill, so it belongs on the row and not behind a hover.
+    if (row.linkedinUrl) {
+      const li = el("a", "peer-li", "in");
+      li.href = row.linkedinUrl;
+      li.target = "_blank";
+      li.rel = "noopener noreferrer";
+      li.title = `${row.name} on LinkedIn`;
+      li.setAttribute("aria-label", `${row.name} on LinkedIn`);
+      top.appendChild(li);
+    }
+    node.appendChild(top);
+
+    const meta = el("div", "peer-meta");
+    // Owner: "You" when the ID matches the connected rep (that comparison is on
+    // IDs, so it holds even when the name didn't resolve), a teammate's name when
+    // we have it, and nothing at all otherwise. Never a bare owner ID.
+    let owner = null;
+    if (row.isMine === true || row.ownerName) {
+      owner = el("span", "peer-owner", "Owner: ");
+      owner.appendChild(el("span", "peer-who", row.isMine === true ? "You" : row.ownerName));
+    }
+    const contacted = row.lastContactedAt
+      ? el("span", "peer-when", `Last contacted ${fmt.relativeTime(row.lastContactedAt)}`)
+      : null;
+    if (contacted) {
+      const exact = fmt.dateTime(row.lastContactedAt);
+      if (exact) contacted.title = exact;
+    }
+    appendAll(meta, [
+      row.title ? el("span", "peer-title", row.title) : null,
+      contacted,
+      owner,
+    ]);
+    if (meta.childElementCount) node.appendChild(meta);
+
+    return node;
+  }
+
+  function renderColleaguesSection(bundle) {
+    const body = crmEls.colleagues;
+    if (!body) return;
+    // No company → there is no account to be "others at", and no request was
+    // made either. Hide it rather than explaining an absence.
+    if (!bundle.company) {
+      setColleaguesCount(null);
+      crmEls.colleaguesSection.hidden = true;
+      clearNode(body);
+      return;
+    }
+    crmEls.colleaguesSection.hidden = false;
+
+    const rows = bundle.colleagues || [];
+    const errors = bundle.errors || {};
+    // Same precedence as Deals and Activity: rows — or a clean empty result —
+    // always beat an error line, so "nobody else here" can never read as
+    // "something's broken".
+    if (errors.colleagues && !rows.length) {
+      setColleaguesCount(null);
+      setNote(
+        body,
+        sectionErrorText(errors.colleagues, errors.colleaguesRetryAfterMs, "other contacts on this account"),
+        true
+      );
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] account contacts unavailable:", errors.colleagues);
+      return;
+    }
+    setColleaguesCount(rows.length);
+    if (!rows.length) {
+      setNote(body, "No other contacts on this account");
+      return;
+    }
+    clearNode(body);
+    for (const row of rows) body.appendChild(colleagueRow(row));
+  }
+
   // active → green (the default pill), closed → muted outline, anything else a
   // portal admin adds later → the neutral "info" treatment.
   function wizaStatusVariant(status) {
@@ -1233,8 +1364,11 @@
     setPill(crmEls.dealsPill, null);
     setPill(crmEls.activityPill, null);
     // Account context hides itself when a company has none; every other state
-    // (loading, error, signed out) has something to say, so it comes back.
+    // (loading, error, signed out) has something to say, so it comes back. Same
+    // for "Others at this account", whose count is only ever a rendered list's.
     crmEls.accountSection.hidden = false;
+    crmEls.colleaguesSection.hidden = false;
+    setColleaguesCount(null);
     // Nothing below this point shows tabs unless a bundle is actually rendered.
     hideActivityTabs();
 
@@ -1257,6 +1391,7 @@
     if (crm.status === "loading") {
       skeleton(crmEls.identity, 3);
       skeleton(crmEls.account, 3);
+      skeleton(crmEls.colleagues, 3);
       skeleton(crmEls.wiza, 3);
       skeleton(crmEls.deals, 2);
       skeleton(crmEls.activity, 4);
@@ -1273,6 +1408,7 @@
     }
     renderIdentitySection(crm.bundle);
     renderAccountSection(crm.bundle);
+    renderColleaguesSection(crm.bundle);
     renderWizaSection(crm.bundle);
     renderDealsSection(crm.bundle);
     renderActivitySection(crm.bundle);
@@ -1349,6 +1485,8 @@
         (bundle.deals || []).length,
         "activity:",
         (bundle.activity || []).length,
+        "others at account:",
+        (bundle.colleagues || []).length,
         // Which sections came back short, and why — the first thing to look at
         // when a rep says a section is empty or complaining.
         "section errors:",

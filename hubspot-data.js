@@ -39,6 +39,13 @@
 //                   sdr_company_owner, not hubspot_owner_id
 //   accountContext  grade, team sizes, company blurb, ICP, tech stack
 //   sequence        whether this contact is already being worked
+// and, added in Phase 9:
+//   colleagues      the other contacts on the same company — who else is being
+//                   sequenced from this account, and names to pivot to when the
+//                   prospect says "wrong person". This one DOES cost requests, so
+//                   it is deliberately the cheapest shape that answers the
+//                   question: one association read capped at 25 + one batch read,
+//                   nothing when the prospect has no company, and never a search.
 // Those last helpers are shaped for the UI on purpose: they are pure functions
 // over the fetched items, which is what makes the tab bar unit-testable without
 // a DOM (same reasoning as the exported formatters).
@@ -72,8 +79,20 @@
     // Bumped whenever the bundle's *shape* changes. It namespaces the per-email
     // cache, so a bundle cached by an earlier version of this file (same panel
     // session, before a reload) can never be rendered by newer code that expects
-    // fields it doesn't have.
-    CACHE_VERSION: 8,
+    // fields it doesn't have. 9 = Phase 9's `colleagues`.
+    CACHE_VERSION: 9,
+    // Colleagues shown for the account (Phase 9). This is the *association page
+    // limit we ask for* as well as the row cap, which is the point: one page, one
+    // batch read, no paging, ever. 25 names is already more than a rep reads
+    // mid-call, and the section scrolls.
+    ACCOUNT_CONTACTS_LIMIT: 25,
+    // Ceiling on owner IDs from colleague rows that are looked up *for the first
+    // time* in a bundle. Cache hits are free and the SDR team is small, so in
+    // practice this never bites; it exists so one account whose 25 contacts each
+    // have a different owner cannot turn a 2-request section into 27 on the
+    // general pool. Rows past the cap render without an owner name — never a
+    // bare ID.
+    ACCOUNT_OWNER_LOOKUP_MAX: 10,
     // Characters of a note body kept for the one-line activity preview.
     NOTE_PREVIEW_CHARS: 120,
     // Characters of the company blurb shown inline; the full text rides along as
@@ -168,6 +187,27 @@
       "icp_fit",
       "web_technologies",
       "linkedin_company_page",
+    ],
+    // --- Phase 9: the other contacts on the account ------------------------
+    // Deliberately NOT CONTACT_PROPERTIES: that array carries the whole Wiza
+    // product block and the full identity set, and 25 contacts × ~35 properties
+    // is a needlessly large response for a list of names. This is exactly what a
+    // row renders — who they are, whether they're being worked, when they were
+    // last touched, whose they are, and the LinkedIn link that saves the tab-out.
+    ACCOUNT_CONTACT_PROPERTIES: [
+      "firstname",
+      "lastname",
+      "jobtitle",
+      "email",
+      "phone",
+      "hubspot_owner_id",
+      "hs_sequences_is_enrolled",
+      "hs_latest_sequence_enrolled",
+      "hs_latest_sequence_enrolled_date",
+      "notes_last_contacted",
+      "notes_last_updated",
+      "lifecyclestage",
+      "hs_linkedin_url",
     ],
     DEAL_PROPERTIES: [
       "dealname",
@@ -807,6 +847,51 @@
     return (o && o.name) || null;
   };
 
+  // Budget guard for Phase 9's colleague rows. Owner IDs already in the session
+  // cache are kept unconditionally (they cost nothing); IDs never seen before are
+  // kept only up to `max`. So the common case — an account whose contacts are
+  // owned by two or three people the panel has already resolved — resolves every
+  // row, and the pathological case (25 contacts, 25 distinct unseen owners)
+  // cannot quietly become 25 extra general-pool requests. Rows whose owner was
+  // not resolved render with no owner name at all; a bare numeric ID is never a
+  // name a rep should have to read.
+  function capNewOwnerIds(ids, max) {
+    const limit = Number(max) > 0 ? Number(max) : 0;
+    let budget = limit;
+    const out = [];
+    for (const raw of ids || []) {
+      const id = String(raw == null ? "" : raw);
+      if (!isId(id) || out.indexOf(id) !== -1) continue;
+      if (ownerCache.has(ownerKey(id, "owner"))) {
+        out.push(id);
+        continue;
+      }
+      if (budget <= 0) continue;
+      budget--;
+      out.push(id);
+    }
+    return out;
+  }
+
+  // The connected SDR's own owner ID, so a colleague row can say whether it is
+  // theirs or a teammate's. Read from the stored auth record only — this is
+  // deliberately NOT ensureOwnerId(), which may spend a request: the Phase 9
+  // section's whole claim is that it costs two requests, and an ownership marker
+  // is not worth a third. Unknown stays unknown (null), and the row then shows
+  // the owner's name with no claim either way.
+  async function connectedOwnerId() {
+    try {
+      const auth = EB.hubspotAuth;
+      if (!auth || typeof auth.getAuthState !== "function") return null;
+      const state = await auth.getAuthState();
+      const id = state && state.ownerId;
+      return isId(id) ? String(id) : null;
+    } catch (e) {
+      log("could not read the connected owner id:", (e && e.message) || e);
+      return null;
+    }
+  }
+
   // The portal's ownership properties (sdr_company_owner, cs_company_owner) are
   // not typed the way hubspot_owner_id is: depending on how the record was
   // written they hold either an owner-ID reference *or* an already-resolved
@@ -1185,6 +1270,131 @@
     return list;
   }
 
+  // --- Account contacts (Phase 9) ------------------------------------------
+  // "Who else are we touching at this account" — the question a rep currently
+  // answers by filtering the full dialer tab by account (impossible mid-call) or
+  // by opening the company's LinkedIn page and reading employee names off it.
+  //
+  // Cost, exactly, and this is the whole design constraint:
+  //   1  GET  /crm/v4/objects/companies/{id}/associations/contacts?limit=25
+  //   2  POST /crm/v3/objects/contacts/batch/read
+  // Two requests, both on the general pool (110 req/10s), never the CRM Search
+  // pool (5 req/s, portal-wide, shared by the whole team) — there is no search
+  // here and there must never be one. No company → zero requests. No associated
+  // contacts → one request. The result rides in the per-email bundle, so the
+  // 5-minute cache and the in-flight dedup cover it like every other section: a
+  // rep clicking back and forth through a call list pays this once.
+  //
+  // Returns raw HubSpot records; shaping, filtering and ordering are
+  // accountContactsView's job (pure, and unit-tested without a DOM).
+  async function getAccountContacts(companyId) {
+    if (!isId(companyId)) return [];
+    const limit = CONFIG.ACCOUNT_CONTACTS_LIMIT;
+    const body = await orNull(
+      request(
+        `/crm/v4/objects/companies/${encodeURIComponent(companyId)}/associations/contacts?limit=${limit}`
+      )
+    );
+    // Asking for one page of `limit` and slicing to the same number means paging
+    // is not a code path that exists here.
+    const ids = v4Ids(body).slice(0, limit);
+    if (!ids.length) return [];
+    const read = await post("/crm/v3/objects/contacts/batch/read", {
+      properties: CONFIG.ACCOUNT_CONTACT_PROPERTIES,
+      inputs: ids.map((id) => ({ id })),
+    });
+    const results = (read && read.results) || [];
+    log("account contacts:", results.length, "of", ids.length, "associated to company", companyId);
+    return results;
+  }
+
+  // The view-model (pure over fetched records + resolved owner names).
+  //
+  // Ordering, most-useful-first, and no further:
+  //   1  in a sequence now  — the literal ask ("who else has been sequenced from
+  //                           that account"); someone already being worked is
+  //                           both the best pivot and the teammate you must not
+  //                           step on
+  //   2  most recently contacted — a colleague touched last week is warmer than
+  //                           one nobody has called since 2023
+  //   3  name, then id      — deterministic only; rows must not shuffle between
+  //                           renders of the same account
+  // Job-title seniority is deliberately NOT a sort key: it needs a title
+  // taxonomy to be anything better than a guess, and a wrong guess about who
+  // matters at an account is worse than alphabetical.
+  //
+  // Excluded: the prospect the rep is already looking at — by record ID, and by
+  // email for the case where the contact record wasn't matched but the same
+  // person is in the association list.
+  function accountContactsView(records, options) {
+    const opts = options || {};
+    const excludeId = isId(opts.excludeContactId) ? String(opts.excludeContactId) : null;
+    const excludeEmail = normEmail(opts.excludeEmail) || null;
+    const selfOwnerId = isId(opts.selfOwnerId) ? String(opts.selfOwnerId) : null;
+    const owners = opts.owners || null;
+
+    const rows = [];
+    const seen = Object.create(null);
+    for (const rec of records || []) {
+      if (!rec || !isId(rec.id)) continue;
+      const id = String(rec.id);
+      if (id === excludeId || seen[id]) continue;
+      const p = rec.properties || {};
+      const email = normEmail(p.email) || null;
+      if (excludeEmail && email === excludeEmail) continue;
+      seen[id] = true;
+
+      const name = [asText(p.firstname), asText(p.lastname)].filter(Boolean).join(" ").trim();
+      const ownerId = asText(p.hubspot_owner_id);
+      // Tri-state on purpose: true / false / unknown. A contact whose enrolment
+      // flag the portal doesn't set must not be reported as "not sequenced" —
+      // that is a claim, and the panel makes no claims it can't back.
+      const enrolled = asBool(p.hs_sequences_is_enrolled);
+      rows.push({
+        id,
+        // Never blank, and never a placeholder glyph: a name, else the email,
+        // else an honest label.
+        name: name || email || "(no name)",
+        title: asText(p.jobtitle),
+        email,
+        phone: asText(p.phone),
+        lifecycleStage: humanizeEnum(p.lifecyclestage) || null,
+        inSequence: enrolled,
+        // The sequence *name* is only meaningful as "the one they're in" when
+        // they are in one; otherwise it is a historical fact about a past
+        // enrolment and belongs nowhere in a one-line row.
+        sequenceName: enrolled === true ? asText(p.hs_latest_sequence_enrolled) : null,
+        sequenceEnrolledAt: toMillis(p.hs_latest_sequence_enrolled_date) || null,
+        lastContactedAt: toMillis(p.notes_last_contacted) || null,
+        lastActivityAt: toMillis(p.notes_last_updated) || null,
+        ownerId,
+        // Resolved through the shared session owner cache by the caller. Null
+        // when it couldn't be resolved (or wasn't looked up) — the row then shows
+        // no owner rather than a number.
+        ownerName: ownerName(owners, ownerId),
+        // true = the connected rep's own contact, false = a teammate's, null =
+        // we don't know whose (unknown owner, or the connection has no owner ID
+        // resolved yet). Null renders as neither claim.
+        isMine: selfOwnerId && ownerId ? ownerId === selfOwnerId : null,
+        linkedinUrl: linkedInUrl(p.hs_linkedin_url),
+        url: recordUrl("contact", id),
+      });
+    }
+
+    rows.sort((a, b) => {
+      const aSeq = a.inSequence === true ? 0 : 1;
+      const bSeq = b.inSequence === true ? 0 : 1;
+      if (aSeq !== bSeq) return aSeq - bSeq;
+      const aWhen = a.lastContactedAt || 0;
+      const bWhen = b.lastContactedAt || 0;
+      if (bWhen !== aWhen) return bWhen - aWhen;
+      const byName = String(a.name).localeCompare(String(b.name));
+      if (byName !== 0) return byName;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    return rows;
+  }
+
   // --- Bundle --------------------------------------------------------------
   function contactView(contact, owners) {
     if (!contact) return null;
@@ -1438,6 +1648,20 @@
     let deals = [];
     let activity = [];
 
+    // Phase 9's colleagues read is gated on the COMPANY, not the contact (an
+    // account can be worth showing even when this particular person isn't in the
+    // CRM), so it starts here and is awaited below — it rides alongside the
+    // deals/activity reads instead of adding a serial leg. No company means no
+    // request at all, which is the common case for a free-mail prospect.
+    const colleaguesPromise = company
+      ? getAccountContacts(company.id).catch((e) => {
+          errors.colleagues = isDataError(e) ? e.code : "TRANSIENT";
+          if (isDataError(e) && e.retryAfterMs) errors.colleaguesRetryAfterMs = e.retryAfterMs;
+          log("account contacts fetch failed:", e && e.message);
+          return [];
+        })
+      : Promise.resolve([]);
+
     if (contact) {
       const dealIds = associatedIds(contact, "deals");
       // Deals and activity are independent sections: one failing must not blank
@@ -1460,17 +1684,28 @@
       activity = activityResult;
     }
 
+    const accountContacts = await colleaguesPromise;
+    // Best-effort, and free: read from the stored connection, never looked up.
+    const selfOwnerId = await connectedOwnerId();
+
     // One batched owner-name pass for every ID the bundle will render. The two
     // Phase 8 ownership properties join it here rather than getting a lookup of
     // their own: resolveOwners ignores any value that isn't all digits, so a
     // property that already holds a name costs nothing, and one that holds an ID
     // shares this call (and the session cache the whole team's records hit).
+    // Phase 9's colleague owners join the same pass — capped at
+    // ACCOUNT_OWNER_LOOKUP_MAX *new* IDs so a list of 25 differently-owned
+    // contacts can't multiply into 25 general-pool requests.
     const owners = await resolveOwners([
       contact && contact.properties && contact.properties.hubspot_owner_id,
       company && company.properties && company.properties.hubspot_owner_id,
       company && company.properties && company.properties.sdr_company_owner,
       company && company.properties && company.properties.cs_company_owner,
       ...deals.map((d) => d.ownerId),
+      ...capNewOwnerIds(
+        accountContacts.map((r) => r && r.properties && r.properties.hubspot_owner_id),
+        CONFIG.ACCOUNT_OWNER_LOOKUP_MAX
+      ),
     ]);
     for (const d of deals) d.ownerName = ownerName(owners, d.ownerId);
 
@@ -1484,6 +1719,14 @@
       ownership: ownershipView(contact, company, owners),
       accountContext: accountContextView(company),
       sequence: sequenceView(contact),
+      // Phase 9. Always an array (never null), so the panel's only decision is
+      // "is there a company" → show/hide, then "any rows" → list or empty state.
+      colleagues: accountContactsView(accountContacts, {
+        excludeContactId: contact && contact.id,
+        excludeEmail: email,
+        selfOwnerId,
+        owners,
+      }),
       wiza: { user: wizaUserView(contact), account: wizaAccountView(company) },
       deals,
       activity,
@@ -1554,6 +1797,7 @@
     resolveProspect,
     getDeals,
     getActivity,
+    getAccountContacts,
     getDealPipelines,
     resolveOwners,
     getBundle,
@@ -1570,6 +1814,8 @@
       accountContext: accountContextView,
       sequence: sequenceView,
       dealOutcome,
+      // Phase 9 (pure: records + resolved owner names in, ordered rows out)
+      accountContacts: accountContactsView,
     },
     activity: {
       TABS: ACTIVITY_TABS,
