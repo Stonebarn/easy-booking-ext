@@ -128,6 +128,57 @@ action. The "no booking tab open at all" case still shows the original
 message; the stale-capture re-stamp and the "Fill triggered." result notice
 are unchanged.
 
+### Changed — Notes recast as a dialer receipt, not an editor
+
+The SDR types in Nooks; this section only ever scraped and synced it — but its
+big bordered textarea at "type here" size read as the primary editor even to a
+design reviewer. Nothing about the sync path changed (same gate, same arming,
+same idempotency, same storage keys) — only how the section presents itself:
+
+- The section title is now **"Dialer notes"** — provenance leads. The caption
+  under the textarea leans further into the existing "draft from the dialer,
+  Xm ago" line: it now reads **"captured from your dialer notes, Xm ago."**
+- The textarea drops visual weight: borderless and ~2 lines tall at rest, a
+  soft fill instead of a hard edge, growing to full height and its border back
+  only on focus. It is still fully editable — pre-sync touch-ups are legitimate
+  — but the **Sync to HubSpot** button and the sync-state line underneath it
+  are now the section's visually primary elements, not the box.
+- Copy no longer invites typing into the box: the placeholder is now "Notes you
+  save in the dialer appear here." and the empty state reads "No dialer note
+  captured yet — notes you save in the dialer appear here."
+
+### Fixed — sync outcome and blockers are now screen-reader-audible
+
+`#notes-result` and `#notes-blockers` both carry `role="status"`, mirroring the
+`wn-result` idiom (the wrong-number editor already did this via an explicit
+`aria-live="polite"`). Both are guarded against re-announcing unchanged text —
+`render()` runs on every keystroke and on the new `eb:crm-match` event (see
+below), and neither node is touched unless its message actually changed.
+
+### Fixed — CRM empty/signed-out states no longer repeat the same line six times
+
+Signed out, or no prospect captured: every one of the six CRM section cards
+(Contact & company, Account context, Others at this account, Wiza, Deals,
+Activity) used to render the identical sentence. Now only the first section
+(Contact & company — it never hides itself) shows the message, with the Connect
+action where relevant; the other five hide outright. Loading, error and
+"nothing loaded yet" are unchanged — they still render per-section. The booking
+cluster's full-width fallback (`mountBooking`) is untouched and still renders
+independently of CRM state in both cases.
+
+### Fixed — notes Sync gate no longer trusts a scraped ID the live fetch just contradicted
+
+The Sync button gated on `eb:prospectContext`'s dialer-scraped
+`hsContactId`/`hsCompanyId`, which is Nooks' own cached idea of the record and
+can outlive it (deleted or merged in HubSpot after Nooks displayed it). The CRM
+module's live fetch — the same one that renders "Not in HubSpot" on the
+identity card — now publishes what it actually found for the current prospect
+(an in-memory `eb:crm-match` event; nothing persisted). Once that confirmation
+is in, it's authoritative for what a sync can target; the scraped ID is trusted
+only while no confirmation has arrived yet (bundle pending) or can't (signed
+out) — matching what identity already shows, instead of occasionally
+disagreeing with it.
+
 ## [0.4.0] - 2026-08-06
 
 ### Changed — the live capture lives in the Contact column

@@ -589,6 +589,10 @@
     dealsSection: document.getElementById("crm-deals-section"),
     deals: document.getElementById("crm-deals"),
     dealsPill: document.getElementById("crm-deals-pill"),
+    // Activity never hid itself before (an empty prospect always got a "No
+    // activity found" card) — it gains a section ref here only so the two
+    // all-sections-empty states below can hide it along with the rest.
+    activitySection: document.getElementById("crm-activity-section"),
     activity: document.getElementById("crm-activity"),
     activityPill: document.getElementById("crm-activity-pill"),
     activityTabs: document.getElementById("crm-activity-tabs"),
@@ -3036,7 +3040,51 @@
     return "Reloads this prospect from HubSpot. Otherwise their data is cached for 5 minutes.";
   }
 
+  // Data-flow note (design critique, item 4): the Notes section gates its
+  // Sync button on the dialer-scraped hsContactId/hsCompanyId, because that
+  // is all it has before any network round trip. Those IDs are Nooks' own
+  // cached idea of the record, though, and can outlive it (deleted or merged
+  // in HubSpot after Nooks displayed it) — this module is the one place that
+  // actually confirms a record still exists, via the exact same live fetch
+  // that drives "Not in HubSpot" in the identity card. Publishing what it
+  // found lets the Notes module's gate agree with the identity card instead
+  // of trusting a scraped ID the live fetch just contradicted. In-memory
+  // only (a same-document CustomEvent, not storage) — both modules run in
+  // this one page, and the answer is only ever useful right now.
+  function publishCrmMatch() {
+    window.dispatchEvent(
+      new CustomEvent("eb:crm-match", {
+        detail: {
+          email: crmEmail(),
+          status: crm.status, // "idle" | "loading" | "ready" | "error"
+          contactId: crm.bundle && crm.bundle.contact ? crm.bundle.contact.id : null,
+          companyId: crm.bundle && crm.bundle.company ? crm.bundle.company.id : null,
+        },
+      })
+    );
+  }
+
+  // Used only by the two all-sections-empty branches in crmRender (signed
+  // out, no prospect): everything downstream of Contact & company hides
+  // outright so the one message on that first section doesn't get repeated
+  // five more times. Every other state (loading, error, a bundle with real
+  // data) restores these to `false` at the top of crmRender before this
+  // could ever apply, so it never leaks into a state that has something to
+  // show.
+  function hideDownstreamCrmSections() {
+    crmEls.accountSection.hidden = true;
+    crmEls.colleaguesSection.hidden = true;
+    crmEls.wizaSection.hidden = true;
+    crmEls.dealsSection.hidden = true;
+    crmEls.activitySection.hidden = true;
+  }
+
   function crmRender() {
+    // crm.status/bundle/connected are always set by the caller before it
+    // calls crmRender() (crmFetch, crmSync, refreshHubSpotState, …), so
+    // reading them here — before any of the branches below run — publishes
+    // the freshest known answer exactly once per render.
+    publishCrmMatch();
     const email = crmEmail();
     // Park the booking cluster in its own section BEFORE anything clears the
     // identity card it may be sitting in — every branch below either leaves it
@@ -3056,11 +3104,14 @@
     // (Account context, Others at this account, Wiza, Deals); every other state
     // — loading, error, signed out — has something to say, so they all come
     // back here. The colleagues count and its shared-owner note are only ever a
-    // rendered list's.
+    // rendered list's. Activity joins them here too now (it never hid itself
+    // before) purely so the dedup below can hide it — it must come back here
+    // every render or it would stay hidden the first time that ever fires.
     crmEls.accountSection.hidden = false;
     crmEls.colleaguesSection.hidden = false;
     crmEls.wizaSection.hidden = false;
     crmEls.dealsSection.hidden = false;
+    crmEls.activitySection.hidden = false;
     setColleaguesCount(null);
     setColleaguesOwnerNote(null);
     // Nothing below this point shows tabs unless a bundle is actually rendered.
@@ -3072,14 +3123,20 @@
       }
       return;
     }
+    // The two states where every section would otherwise say the exact same
+    // sentence: say it once, on the first CRM section (Contact & company —
+    // it never hides itself, so it is always there to hold it), and hide the
+    // other five outright rather than spend five more cards repeating it.
+    // Loading, error and "nothing loaded yet" below are per-section still —
+    // only these two fully-empty states dedupe.
     if (!crm.connected) {
-      for (const body of crmBodies) setConnectNote(body);
+      setConnectNote(crmEls.identity);
+      hideDownstreamCrmSections();
       return;
     }
     if (!email) {
-      for (const body of crmBodies) {
-        setNote(body, "No prospect captured yet — open one in the dialer.");
-      }
+      setNote(crmEls.identity, "No prospect captured yet — open one in the dialer.");
+      hideDownstreamCrmSections();
       return;
     }
     if (crm.status === "loading") {
@@ -3353,6 +3410,10 @@
     // The id of the last save signal this panel acted on (or deliberately
     // skipped). Set before any await, so one save can never start two syncs.
     autoHandledId: null,
+    // The CRM module's most recent live-match snapshot for whatever prospect
+    // it last rendered — { email, status, contactId, companyId } — or null
+    // before the first one arrives. See confirmedMatch() below.
+    crmMatch: null,
   };
 
   // --- Derived values ------------------------------------------------------
@@ -3364,8 +3425,35 @@
   const prospectEmail = () =>
     (state.notes && state.notes.prospectEmail) || (state.ctx && state.ctx.email) || null;
 
-  const contactId = () => (state.ctx && state.ctx.hsContactId) || null;
-  const companyId = () => (state.ctx && state.ctx.hsCompanyId) || null;
+  const lower = (s) => String(s || "").trim().toLowerCase();
+
+  // The scraped IDs are the fast path — they let Sync light up before any
+  // network round trip — but they are Nooks' cached idea of the record, and
+  // it can go stale (deleted or merged since Nooks displayed it). The CRM
+  // module's live fetch is the one thing that actually confirms a record
+  // still exists, and it broadcasts what it found for the current prospect
+  // (see publishCrmMatch() in that module, and the "eb:crm-match" listener
+  // below). Once that confirmation is in for THIS exact prospect, it is the
+  // truth for what a sync can target — a scraped ID the live fetch just
+  // failed to find is not a real target, whatever Nooks still shows. Until
+  // that confirmation arrives (bundle pending) or can't (signed out), the
+  // scraped ID is the only answer there is, so it stands unchallenged.
+  function confirmedMatch() {
+    const m = state.crmMatch;
+    if (!m || m.status !== "ready") return null; // pending or signed out — no answer yet
+    const email = prospectEmail();
+    if (!email || lower(m.email) !== lower(email)) return null; // stale answer, wrong prospect
+    return m;
+  }
+
+  const contactId = () => {
+    const confirmed = confirmedMatch();
+    return confirmed ? confirmed.contactId : (state.ctx && state.ctx.hsContactId) || null;
+  };
+  const companyId = () => {
+    const confirmed = confirmedMatch();
+    return confirmed ? confirmed.companyId : (state.ctx && state.ctx.hsCompanyId) || null;
+  };
 
   function currentHash() {
     const api = notesApi();
@@ -3412,7 +3500,21 @@
     }
   }
 
+  // #notes-result is role="status" (see sidepanel.html): a screen reader
+  // announces it whenever its content actually changes. render() runs on
+  // every state tick, including ones that leave this line saying exactly
+  // what it already said (a keystroke, an unrelated storage change, the
+  // eb:crm-match snapshot arriving) — rebuilding the node every time would
+  // re-announce an unchanged message on each one. This remembers the last
+  // signature it spoke and skips the DOM write (and the announcement) when
+  // nothing changed, the same live-region hygiene the wn-result idiom
+  // depends on by only ever touching that node from one place, once.
+  let lastResultSig = "";
+  let lastBlockersText = ""; // dedup guard for #notes-blockers, also role="status" — see render()
   function renderResult(display) {
+    const sig = display ? `${display.kind}|${display.message}|${display.url || ""}` : "";
+    if (sig === lastResultSig) return;
+    lastResultSig = sig;
     resultEl.textContent = "";
     resultEl.className = "";
     resultEl.hidden = !display;
@@ -3455,13 +3557,17 @@
     }
 
     // Where the text came from, and whether the dialer has since moved on.
+    // This is the section's provenance line — "captured from your dialer
+    // notes" is the headline idea the whole section leans on (see the
+    // section title and the placeholder below); this is where it gets a
+    // timestamp.
     const capture = captureText(state.notes);
     if (state.userEdited && capture && capture !== text) {
       sourceEl.textContent = "your edits (dialer draft has changed)";
     } else if (state.userEdited && trimmed) {
       sourceEl.textContent = "your edits";
     } else if (capture) {
-      sourceEl.textContent = `draft from the dialer, ${ago(state.notes && state.notes.capturedAt)}`;
+      sourceEl.textContent = `captured from your dialer notes, ${ago(state.notes && state.notes.capturedAt)}`;
     } else {
       sourceEl.textContent = "";
     }
@@ -3469,13 +3575,15 @@
     // Hint: only rendered when it has direction to give. In the normal state —
     // a note is here and the prospect is matched — it restated the textarea's
     // own placeholder, so it is hidden rather than spending two lines at 320px.
+    // Neither branch invites typing here: this is a receipt for what the rep
+    // wrote in the dialer, not the place they're asked to write it.
     if (!state.ctx) {
       hintEl.hidden = false;
       hintEl.textContent =
         "Prospect not matched yet — open the prospect in the dialer so Dialer Helper Pro can read its HubSpot records.";
     } else if (!capture && !trimmed) {
       hintEl.hidden = false;
-      hintEl.textContent = "No note captured yet — write one in the dialer, or type it here.";
+      hintEl.textContent = "No dialer note captured yet — notes you save in the dialer appear here.";
     } else {
       hintEl.hidden = true;
       hintEl.textContent = "";
@@ -3505,7 +3613,17 @@
     else if (synced) syncBtn.textContent = "Sync again";
     else syncBtn.textContent = "Sync to HubSpot";
 
-    blockersEl.textContent = gate.reasons.join(" ");
+    // #notes-blockers is role="status" too, so it announces when the reason
+    // the button is dead actually changes (the note gains text, the prospect
+    // matches, sign-in changes) — but render() also runs on every keystroke,
+    // where the reasons very often come out identical. Same dedup guard as
+    // renderResult(): skip the write when nothing changed, so a rep typing
+    // doesn't get the same line read back on every character.
+    const reasonsText = gate.reasons.join(" ");
+    if (reasonsText !== lastBlockersText) {
+      lastBlockersText = reasonsText;
+      blockersEl.textContent = reasonsText;
+    }
     syncBtn.title = gate.enabled
       ? "Creates a HubSpot note on the matched contact and company, attributed to you."
       : gate.reasons.join(" ");
@@ -3899,6 +4017,15 @@
   // the auth state whenever the panel comes back into view.
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshAuth();
+  });
+
+  // The CRM module's live-fetch confirmation (see publishCrmMatch() there and
+  // confirmedMatch() above) — an in-memory event, not storage, since both
+  // modules live in this one document and the answer is only ever needed by
+  // the code running right now.
+  window.addEventListener("eb:crm-match", (ev) => {
+    state.crmMatch = (ev && ev.detail) || null;
+    render();
   });
 
   // Storage first — captures that happened while the panel was closed only

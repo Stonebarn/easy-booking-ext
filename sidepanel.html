@@ -1568,24 +1568,34 @@
          normal case, so the line is hidden rather than restating it. */
       #notes-hint { font-size: 12px; color: var(--muted); margin: 0 0 5px; }
       #notes-hint[hidden] { display: none; }
+      /* This is a receipt with pre-sync touch-ups allowed, not the primary
+         editor — the Sync button and the sync-state line below carry that
+         weight. At rest the field is quiet: no border, ~2 lines, a soft fill
+         instead of a hard edge, so it reads as "here's what came from the
+         dialer" rather than "type here". Focus (the rep actually touching it
+         up) restores the field's full presence — border, room to write, the
+         same accent ring every other field in the panel gets. */
       #notes-text {
         width: 100%;
-        min-height: 66px;
+        min-height: 42px;
         resize: vertical;
-        padding: 8px 9px;
-        border: 1px solid var(--field-line);
+        padding: 7px 8px;
+        border: 1px solid transparent;
         border-radius: 7px;
-        background: var(--bg);
+        background: var(--surface);
         color: var(--ink);
         font-family: inherit;
         font-size: 13px;
         line-height: 1.45;
       }
       #notes-text:disabled { background: var(--surface); color: var(--muted); }
+      #notes-text:focus { min-height: 80px; }
       /* The one field that was still taking Chrome's own blue focus ring. */
       #notes-text:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 0;
+        border-color: var(--field-line);
+        background: var(--bg);
       }
       .notes-meta {
         display: flex;
@@ -1967,7 +1977,14 @@
         </div>
       </section>
 
-      <!-- ===== Notes → HubSpot sync (Phase 4) ===== -->
+      <!-- ===== Dialer notes → HubSpot sync (Phase 4) =====
+           A receipt, not the primary editor: the rep types in Nooks, this
+           scrapes it and syncs it to HubSpot — the only write path, since
+           Nooks' own HubSpot integration is display-only. The title leads
+           with "Dialer" so the section reads as provenance first; the
+           textarea stays editable for a pre-sync touch-up, but quiet (see
+           #notes-text) so the Sync button and its result line, not the box,
+           carry the section's visual weight. -->
       <hr class="divider" />
 
       <section id="notes-section">
@@ -1977,14 +1994,14 @@
               <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17z" />
               <path d="M13.8 5.2 19.3 10.7" />
             </svg>
-            <span class="section-title">Notes</span>
+            <span class="section-title">Dialer notes</span>
           </span>
           <span class="pill synced" id="notes-pill" hidden></span>
         </div>
-        <p id="notes-hint">Call notes from the dialer, ready to sync to HubSpot.</p>
+        <p id="notes-hint">No dialer note captured yet — notes you save in the dialer appear here.</p>
         <textarea
           id="notes-text"
-          placeholder="Notes you write in the dialer appear here — edit before syncing."
+          placeholder="Notes you save in the dialer appear here."
           spellcheck="true"
         ></textarea>
         <div class="notes-meta">
@@ -1996,8 +2013,13 @@
           <div id="notes-saved-body"></div>
         </details>
         <button id="notes-sync" disabled>Sync to HubSpot</button>
-        <p id="notes-blockers"></p>
-        <p id="notes-result" hidden></p>
+        <!-- Both announce to a screen reader, but only when their text truly
+             changes — see the dedup guard around renderResult()/blockersEl in
+             sidepanel.js. Without it, an unrelated re-render (a keystroke, a
+             storage tick) would re-speak an unchanged line. Mirrors the
+             wn-result idiom (see wnEditor in sidepanel.js). -->
+        <p id="notes-blockers" role="status"></p>
+        <p id="notes-result" role="status" hidden></p>
       </section>
     </main>
 
