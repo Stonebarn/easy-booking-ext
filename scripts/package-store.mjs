@@ -81,7 +81,9 @@ const zipName = `dialer-helper-pro-v${manifest.version}${dev ? "-dev" : ""}.zip`
 execFileSync("zip", ["-r", "-X", join("..", zipName), "."], { cwd: stage, stdio: "pipe" });
 rmSync(stage, { recursive: true, force: true });
 
-console.log(`dist/${zipName} ready (key stripped, description ${storeManifest.description.length}/132 chars).`);
+console.log(
+  `dist/${zipName} ready (${dev ? "DEV zip — key kept, do not upload to the store" : "key stripped"}, description ${storeManifest.description.length}/132 chars).`
+);
 console.log("Upload it at https://chrome.google.com/webstore/devconsole — after the first upload,");
 console.log("copy the listing's extension ID and hand it to Claude so the HubSpot app's OAuth");
 console.log("redirect URL can be registered for store installs.");
