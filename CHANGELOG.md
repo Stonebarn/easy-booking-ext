@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-06
+
+### Added — the won-meeting moment
+
+The panel now celebrates the thing the whole call is for. When a booking is
+confirmed on the booking form, a positive-tone receipt appears at the top of
+the column (who was booked, the day's count, a link to the HubSpot record)
+and a confetti burst plays in the panel — hand-rolled on a canvas, drawn from
+the brand's purple scale, bigger for the 3rd and 5th booking of the day.
+
+- **The trigger is evidence, not a guess** (`content-scheduler.js`). A filled
+  form is never a booking: the signal is published only when a submit-classified
+  click on a form *this extension filled* is followed by evidence it landed —
+  a confirmation URL, a confirmation phrase that was **not** on screen when the
+  click happened (the page's own copy mentions "booked"), or the form closing
+  and staying closed. No evidence, no celebration.
+- Deliberately absent: audio of any kind (the rep is on a live call), emoji,
+  and anything that moves focus. `prefers-reduced-motion` keeps the receipt and
+  drops the confetti; Settings has an off switch.
+- The dialer's own "Meeting booked" disposition is the other natural trigger,
+  but its DOM has never been captured (it only exists during a live call).
+  `docs/diagnostics/booked-signal-probe.js` collects what's needed to wire it.
+
+### Added — a motion language for the panel
+
+The panel had almost no motion (one caret rotate, one skeleton pulse). Four
+small pieces now explain what it already says in words: the signature sparkline
+strokes itself in as usage data lands, a prospect's sections rise together in
+reading order (stagger capped at 6 × 26ms), a synced note's ✓ settles in over
+160ms so a routine write reads as *certain*, and the live capture dot sends a
+slow ring outward while a prospect is loaded. One easing curve, four durations,
+all documented in DESIGN.md's new Motion section. Everything is additive to an
+already-visible default and reduced-motion guarded.
+
+### Fixed — two label weights were silently rendering at 400
+
+The won-meeting label and tally chip referenced a `--fw-label` token that does
+not exist (the 10px caps weight is `--fw-head`), and the receipt's dismiss
+button inherited the base full-width `button` rule, which crushed the card's
+text to one character per line. Both caught by the harness before shipping.
+
 ## [0.5.2] - 2026-08-06
 
 ### Fixed — every note saved in a session now syncs (auto-sync actually fires)

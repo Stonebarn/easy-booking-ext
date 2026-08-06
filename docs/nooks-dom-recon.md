@@ -80,6 +80,16 @@ label-only approach.
 
 ## Still unverified / to capture later
 
+- **The disposition / call-outcome control** — the trigger the won-meeting
+  celebration wants ("Meeting Booked"). It only exists during or after a live
+  call, so no capture has it. Until it is captured, the celebration fires from
+  the booking form instead (see the booking detection in content-scheduler.js).
+  Run `docs/diagnostics/booked-signal-probe.js` in the dialer console on a
+  freshly-dispositioned call; it prints the control's anchors and its option
+  labels, which is everything the dialer-side trigger needs.
+- **The booking confirmation screen** on scheduler.default.com — the same probe,
+  run on the booking tab after a real booking, replaces today's deliberately
+  broad phrase/URL guesses with the page's real markup.
 - Populated note list DOM (need a saved note on screen).
 - The **in-call view** (live dialing session) — recon above is the queue's
   expanded prospect view; the on-call layout may differ. Capture during a real

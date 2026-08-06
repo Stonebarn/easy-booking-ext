@@ -79,6 +79,19 @@ components:
     backgroundColor: "{colors.card-mist}"
     textColor: "{colors.deep-plum-ink}"
     rounded: "{rounded.card}"
+  card-won:
+    backgroundColor: "{colors.meadow-tint}"
+    borderColor: "{colors.meadow-green}"
+    textColor: "{colors.meadow-green-text}"
+    rounded: "{rounded.card}"
+motion:
+  ease-out: "cubic-bezier(0.16, 1, 0.3, 1)"
+  feedback: "160ms"
+  state: "240ms"
+  entrance: "320ms"
+  focal-burst: "1100–1800ms"
+  stagger-step: "26ms"
+  stagger-cap: 6
 ---
 
 # Design System: Dialer Helper Pro
@@ -260,6 +273,50 @@ fill; a small trend arrow (up = meadow green, down = dusk grey — never red;
 usage decline is information, not an alarm). A zero latest value renders
 muted, not bold — a zero is an absence, not a headline. Under 3 history
 points the chart disappears and the value stands alone.
+
+### The won-meeting receipt
+A positive-tone card (meadow tint, meadow-green hairline) at the very top of
+the column when a booking is confirmed: 10px caps "MEETING BOOKED" over the
+prospect's 12px name, an "Open in HubSpot" out-link, the day's count as a
+white round chip on the tone border, and a drawn dismiss glyph. It is the one
+place a second decorated surface is allowed, because it is a fact with
+valence rather than decoration — and it is transient. Absent by default;
+never a modal, never focus-stealing.
+
+## Motion
+
+Motion here is feedback first and spectacle once. The panel opens with every
+element already in its final state, so a blocked or reduced animation costs
+nothing but the explanation.
+
+**Timing.** One easing curve for arrivals — `cubic-bezier(0.16, 1, 0.3, 1)`,
+an exponential ease-out — at four durations: 160ms for feedback (a check
+landing), 240ms for a state change (a card arriving), 320ms for an entrance
+(the receipt), and 420ms for the sparkline drawing itself. Nothing routine
+runs past half a second; long feedback reads as latency, and the rep is
+mid-call.
+
+**The focal moment.** Exactly one: the confetti burst when a meeting is
+booked (1.1s / 1.45s / 1.8s for the 1st, 3rd, and 5th of the day). Canvas,
+hand-rolled, purple scale with a single positive-tone piece, two cannons in
+the bottom corners firing up and inward — the shape that reads in a 320px
+column. It never takes a pointer event, stops the instant the panel is
+hidden, and removes itself when spent.
+
+**The supporting four.** The signature sparkline strokes in left to right
+(`pathLength="1"`, so one keyframe serves every series); a prospect's
+sections rise together in reading order with the stagger capped at 6 × 26ms;
+a synced note's ✓ settles in over 160ms so a routine write feels certain
+rather than celebrated; the live capture dot sends a slow ring outward while
+a prospect is loaded. Each one explains something the panel already states in
+words.
+
+**Rules.** No audio, ever — the rep is on a live call and a sound would go
+down the line. Nothing animates on every render: the arrival runs once per
+prospect, the draw-in clears its own class. `prefers-reduced-motion` drops
+every animation and the confetti entirely, keeping all final states. And the
+one flourish has an off switch in Settings, because a delight nobody can
+decline stops being one.
 
 ## Do's and Don'ts
 

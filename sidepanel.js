@@ -1090,6 +1090,7 @@
     fill.setAttribute("fill", "currentColor");
     fill.setAttribute("fill-opacity", "0.1");
     fill.setAttribute("stroke", "none");
+    fill.setAttribute("class", "spark-area");
     svg.appendChild(fill);
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", d);
@@ -1098,7 +1099,17 @@
     path.setAttribute("stroke-width", "1.5");
     path.setAttribute("stroke-linecap", "round");
     path.setAttribute("stroke-linejoin", "round");
+    // pathLength normalizes the stroke's length to 1 so the draw-in keyframe
+    // (stroke-dashoffset 1 → 0, see .spark-draw in sidepanel.html) works
+    // identically for every series without measuring the real geometry. The
+    // final state is a fully drawn line, so a blocked animation loses nothing.
+    path.setAttribute("pathLength", "1");
+    path.setAttribute("class", "spark-line");
     svg.appendChild(path);
+    // The line draws itself once, as the data lands. The class is removed when
+    // it finishes so a re-render of the same section doesn't replay it.
+    svg.classList.add("spark-draw");
+    svg.addEventListener("animationend", () => svg.classList.remove("spark-draw"), { once: true });
     return svg;
   }
 
@@ -3298,6 +3309,36 @@
     renderWizaSection(crm.bundle);
     renderDealsSection(crm.bundle);
     renderActivitySection(crm.bundle);
+    markArrival(crm.bundle.email || email);
+  }
+
+  // A prospect's sections arrive as one set, so they enter as one set: a short
+  // rise in reading order with the stagger capped (see .crm-arrive in
+  // sidepanel.html). Once per prospect only — a refresh, a retry, or a
+  // late-arriving section must not replay it, because motion on every update is
+  // noise to someone mid-call, and the sections are already visible by default.
+  let arrivedFor = null;
+  let arriveTimer = null;
+  function markArrival(email) {
+    const key = String(email || "").trim().toLowerCase();
+    if (!key || key === arrivedFor) return;
+    arrivedFor = key;
+    const main = document.querySelector("main");
+    if (!main) return;
+    const sections = main.querySelectorAll("section");
+    let i = 0;
+    for (const section of sections) {
+      if (section.hidden) continue;
+      section.style.setProperty("--arrive-i", String(i));
+      i += 1;
+    }
+    main.classList.remove("crm-arrive");
+    void main.offsetWidth; // restart the run for a genuinely new prospect
+    main.classList.add("crm-arrive");
+    clearTimeout(arriveTimer);
+    // Drop the class once the longest-delayed card has landed, so nothing
+    // re-animates on the next unrelated render.
+    arriveTimer = setTimeout(() => main.classList.remove("crm-arrive"), 600);
   }
 
   // --- fetching ------------------------------------------------------------
@@ -3674,7 +3715,21 @@
     if (!display) return;
     resultEl.className =
       display.kind === "ok" ? "ok" : display.kind === "skip" ? "skip" : "err";
-    resultEl.appendChild(document.createTextNode(display.message));
+    // The receipt's own check gets a 160ms settle so a sync reads as *certain*
+    // (see .tick in sidepanel.html) — a routine write should feel sure of
+    // itself, not celebrated. Splitting the trailing glyph into its own span
+    // leaves the line's text exactly as composed, so the message is unchanged
+    // for a screen reader and for anything reading textContent.
+    const tickAt = display.message.lastIndexOf("✓");
+    if (display.kind === "ok" && tickAt !== -1 && tickAt === display.message.length - 1) {
+      resultEl.appendChild(document.createTextNode(display.message.slice(0, tickAt)));
+      const tick = document.createElement("span");
+      tick.className = "tick";
+      tick.textContent = "✓";
+      resultEl.appendChild(tick);
+    } else {
+      resultEl.appendChild(document.createTextNode(display.message));
+    }
     // A trailing clause the outcome above doesn't own — today, only "this landed
     // but HubSpot doesn't know who from". It keeps the receipt's tone (the note
     // DID reach the CRM) and takes the muted treatment the "skip" kind uses, so
@@ -4356,4 +4411,482 @@
     await refreshAuth();
     applyNotes(res[NOTES_KEY]);
   })();
+})();
+
+// ===========================================================================
+// The won-meeting moment
+//
+// One authored celebration, for the one outcome the whole call is for. It fires
+// on "eb:booked" — written by content-scheduler.js only after a booking was
+// submitted AND the page showed evidence it landed, never on a filled form (a
+// celebration for a meeting that didn't happen is the same broken promise as a
+// false red flag, and this panel's first rule is that it never lies).
+//
+// Three things happen, in this order of importance:
+//   1. the receipt — a positive-tone card naming who was booked, which stays
+//      until the prospect changes or the rep dismisses it;
+//   2. the day's count — an SDR's own scoreboard, kept locally per calendar
+//      day, which also decides how big the burst is (the 3rd and 5th of a day
+//      earn more than the 1st);
+//   3. the confetti — decoration, so it is drawn from the purple scale, on a
+//      canvas that never takes a pointer event and is removed when it ends.
+//
+// Deliberately absent: audio of any kind (the rep is on a live call), emoji,
+// and anything that moves focus. Reduced motion keeps 1 and 2 and drops 3.
+// Reads "eb:booked" + "eb:prospectContext"; owns "eb:booked:tally"; shares the
+// "eb:settings" object with the notes module (both merge, neither clobbers).
+// ===========================================================================
+(() => {
+  "use strict";
+
+  const BOOKED_KEY = "eb:booked";
+  const TALLY_KEY = "eb:booked:tally";
+  const CONTEXT_KEY = "eb:prospectContext";
+  const SETTINGS_KEY = "eb:settings";
+  const HUBSPOT_URL_PREFIX = "https://app.hubspot.com/";
+  // A booking older than this is history, not news: the panel may have been
+  // closed for hours, and confetti for a meeting booked this morning would be
+  // a lie about when. The receipt is skipped too — the tally already has it.
+  const MAX_AGE_MS = 10 * 60 * 1000;
+  // If the panel was hidden when the news arrived, the burst waits this long
+  // for the rep to come back and see it. Beyond that, the receipt stands alone.
+  const DEFER_MS = 2 * 60 * 1000;
+
+  const bookedEl = document.getElementById("booked");
+  const celebrateEl = document.getElementById("setting-celebrate");
+  if (!bookedEl) return; // markup absent: this module simply doesn't exist
+
+  const state = {
+    booked: null, // the eb:booked payload being shown
+    ctx: null, // eb:prospectContext, for the prospect's name and record id
+    tally: null, // { day, count, ids }
+    celebrate: true, // eb:settings.celebrate — confetti on/off
+    handledId: null, // the booking id already rendered (one receipt per booking)
+    pendingBurst: null, // { tier } waiting for the panel to become visible
+  };
+
+  // --- Small helpers -------------------------------------------------------
+  // Local calendar day, not UTC: a rep's "today" is their own day, and a UTC
+  // rollover mid-afternoon would reset the count while they were still working.
+  function localDay(ts) {
+    const d = new Date(ts || Date.now());
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${month}-${day}`;
+  }
+
+  function ordinal(n) {
+    const num = Number(n) || 0;
+    const rem100 = num % 100;
+    if (rem100 >= 11 && rem100 <= 13) return `${num}th`;
+    const suffix = { 1: "st", 2: "nd", 3: "rd" }[num % 10] || "th";
+    return `${num}${suffix}`;
+  }
+
+  const lower = (s) => String(s || "").trim().toLowerCase();
+
+  // Intensity earns itself: the first of the day is a win, the third is a good
+  // day, the fifth is a great one. Bigger means more pieces and a longer fall,
+  // never louder colour.
+  function tierFor(count) {
+    if (count >= 5) return "big";
+    if (count >= 3) return "mid";
+    return "small";
+  }
+
+  // --- The receipt ---------------------------------------------------------
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  // A drawn glyph in the panel's existing 2px-stroke icon language — not a
+  // multiplication sign standing in for an icon.
+  function dismissIcon() {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    for (const d of ["M6 6 18 18", "M18 6 6 18"]) {
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    }
+    return svg;
+  }
+
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  // Who was booked. The context's name is the good answer; the booked email is
+  // the honest fallback, and both can be absent — in which case the label
+  // carries the news on its own rather than inventing a subject.
+  function whoText() {
+    const booked = state.booked;
+    const ctx = state.ctx;
+    const sameProspect = !!(booked && ctx && ctx.email && lower(ctx.email) === lower(booked.email));
+    if (sameProspect && ctx.name) return ctx.name;
+    if (booked && booked.email) return booked.email;
+    return "";
+  }
+
+  function hubspotUrl() {
+    const booked = state.booked;
+    const ctx = state.ctx;
+    if (!booked || !ctx || !ctx.hsContactId) return null;
+    if (!ctx.email || lower(ctx.email) !== lower(booked.email)) return null;
+    if (!/^\d+$/.test(String(ctx.hsContactId))) return null;
+    return `${HUBSPOT_URL_PREFIX}contacts/40063500/record/0-1/${ctx.hsContactId}`;
+  }
+
+  function renderReceipt(animate) {
+    const booked = state.booked;
+    clear(bookedEl);
+    bookedEl.classList.remove("won-in");
+    if (!booked) {
+      bookedEl.hidden = true;
+      return;
+    }
+    bookedEl.hidden = false;
+
+    const body = document.createElement("div");
+    body.className = "bk-won";
+    const label = document.createElement("span");
+    label.className = "won-label";
+    label.textContent = "Meeting booked";
+    body.appendChild(label);
+
+    const who = whoText();
+    if (who) {
+      const whoLine = document.createElement("span");
+      whoLine.className = "won-who";
+      whoLine.textContent = who; // scraped/stored input — textContent only
+      body.appendChild(whoLine);
+    }
+
+    const url = hubspotUrl();
+    if (url) {
+      const link = document.createElement("a");
+      link.className = "won-link";
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Open in HubSpot";
+      body.appendChild(link);
+    }
+    bookedEl.appendChild(body);
+
+    // The day's count, when we have one worth stating.
+    const count = state.tally && state.tally.day === localDay(booked.bookedAt) ? state.tally.count : 0;
+    if (count > 0) {
+      const tallyEl = document.createElement("span");
+      tallyEl.className = "won-tally";
+      tallyEl.textContent = `${ordinal(count)} today`;
+      bookedEl.appendChild(tallyEl);
+    }
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "won-dismiss";
+    dismiss.title = "Dismiss";
+    dismiss.setAttribute("aria-label", "Dismiss the booked-meeting notice");
+    dismiss.appendChild(dismissIcon());
+    dismiss.addEventListener("click", () => {
+      state.booked = null;
+      renderReceipt(false);
+    });
+    bookedEl.appendChild(dismiss);
+
+    if (animate) {
+      // Restart the entrance even if the class was already there.
+      void bookedEl.offsetWidth;
+      bookedEl.classList.add("won-in");
+    }
+  }
+
+  // --- The confetti --------------------------------------------------------
+  // Hand-rolled: MV3's CSP forbids a remote library, and a bundled one would be
+  // orders of magnitude more code than 40 rectangles need. Two cannons in the
+  // bottom corners firing up and inward — the shape that reads best in a column
+  // 320px wide — with gravity, drag, and spin.
+  const CONFETTI = {
+    // Decoration comes from the purple scale. The one positive-tone piece is a
+    // nod to the receipt beside it, not a second signal.
+    COLORS: ["#7e43ff", "#9371f0", "#b5aeff", "#e4d8fd", "#4c24a3", "#1e7f5c"],
+    TIERS: {
+      small: { count: 26, ms: 1100, speed: 780 },
+      mid: { count: 40, ms: 1450, speed: 880 },
+      big: { count: 56, ms: 1800, speed: 980 },
+    },
+    GRAVITY: 1500, // px/s²
+    DRAG: 0.86, // per second, applied to horizontal travel
+    FADE_MS: 320,
+  };
+
+  let running = null; // { canvas, raf } — at most one burst at a time
+
+  function stopBurst() {
+    if (!running) return;
+    cancelAnimationFrame(running.raf);
+    if (running.canvas && running.canvas.parentNode) {
+      running.canvas.parentNode.removeChild(running.canvas);
+    }
+    running = null;
+  }
+
+  function celebrate(tier) {
+    if (!state.celebrate) return;
+    // A rep who has asked their OS for less motion is not asking for confetti.
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return;
+    if (typeof document.createElement !== "function" || !window.requestAnimationFrame) return;
+
+    const canvas = document.createElement("canvas");
+    canvas.id = "celebrate-canvas";
+    canvas.setAttribute("aria-hidden", "true");
+    const ctx2d = typeof canvas.getContext === "function" ? canvas.getContext("2d") : null;
+    if (!ctx2d) return;
+
+    stopBurst(); // at most one burst on screen, ever
+    document.body.appendChild(canvas);
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth || window.innerWidth || 360;
+    const h = canvas.clientHeight || window.innerHeight || 700;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx2d.scale(dpr, dpr);
+
+    const spec = CONFETTI.TIERS[tier] || CONFETTI.TIERS.small;
+    const pieces = [];
+    for (let i = 0; i < spec.count; i++) {
+      // Alternate cannons so both corners fill evenly.
+      const fromLeft = i % 2 === 0;
+      // Up and inward: 40°–75° above horizontal (negative = up in canvas
+      // coordinates), mirrored for the right-hand cannon by `dir`.
+      const angle = -(40 + Math.random() * 35) * (Math.PI / 180);
+      const dir = fromLeft ? 1 : -1;
+      const speed = spec.speed * (0.72 + Math.random() * 0.5);
+      pieces.push({
+        x: fromLeft ? w * 0.06 : w * 0.94,
+        y: h * 0.98,
+        vx: Math.cos(angle) * speed * dir,
+        vy: Math.sin(angle) * speed,
+        w: 4 + Math.random() * 4,
+        h: 6 + Math.random() * 5,
+        rot: Math.random() * Math.PI,
+        spin: (Math.random() - 0.5) * 12,
+        color: CONFETTI.COLORS[i % CONFETTI.COLORS.length],
+      });
+    }
+
+    const started = performance.now();
+    let last = started;
+    const frame = (now) => {
+      const elapsed = now - started;
+      const dt = Math.min((now - last) / 1000, 0.05); // clamp: a backgrounded tab must not teleport
+      last = now;
+      ctx2d.clearRect(0, 0, w, h);
+
+      const fadeIn = spec.ms - CONFETTI.FADE_MS;
+      const alpha = elapsed <= fadeIn ? 1 : Math.max(0, 1 - (elapsed - fadeIn) / CONFETTI.FADE_MS);
+      ctx2d.globalAlpha = alpha;
+
+      for (const p of pieces) {
+        p.vy += CONFETTI.GRAVITY * dt;
+        p.vx *= Math.pow(CONFETTI.DRAG, dt);
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rot += p.spin * dt;
+        ctx2d.save();
+        ctx2d.translate(p.x, p.y);
+        ctx2d.rotate(p.rot);
+        ctx2d.fillStyle = p.color;
+        ctx2d.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx2d.restore();
+      }
+
+      // Stop when the animation is spent, when every piece has fallen past the
+      // bottom, or the moment the panel is hidden — a loop nobody can see is
+      // pure cost.
+      const allGone = pieces.every((p) => p.y - p.h > h && p.vy > 0);
+      if (elapsed >= spec.ms || allGone || document.hidden) {
+        stopBurst();
+        return;
+      }
+      running.raf = requestAnimationFrame(frame);
+    };
+    running = { canvas, raf: requestAnimationFrame(frame) };
+  }
+
+  // --- The tally -----------------------------------------------------------
+  // Local only, and only ever a count: how many meetings this rep booked today,
+  // used for the chip and the burst size. Ids are kept so a repeated storage
+  // event can never inflate the number.
+  function readTally(raw) {
+    const today = localDay();
+    const t = raw && typeof raw === "object" ? raw : {};
+    if (t.day !== today) return { day: today, count: 0, ids: [] };
+    return {
+      day: today,
+      count: Number(t.count) || 0,
+      ids: Array.isArray(t.ids) ? t.ids.slice(-50) : [],
+    };
+  }
+
+  async function countBooking(booked) {
+    const tally = readTally(state.tally);
+    if (booked.id && tally.ids.indexOf(booked.id) !== -1) return tally; // already counted
+    const next = {
+      day: tally.day,
+      count: tally.count + 1,
+      ids: tally.ids.concat(booked.id || `${booked.bookedAt}`).slice(-50),
+    };
+    state.tally = next;
+    try {
+      await chrome.storage.local.set({ [TALLY_KEY]: next });
+    } catch (e) {
+      // A tally that can't be stored is not worth failing the celebration over.
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] booked: could not store today's tally:", (e && e.message) || e);
+    }
+    return next;
+  }
+
+  // --- The event -----------------------------------------------------------
+  async function applyBooked(payload, opts) {
+    const fresh = !!(opts && opts.fresh);
+    if (!payload || !payload.id) return;
+    if (state.handledId === payload.id) return;
+    state.handledId = payload.id;
+
+    const age = payload.bookedAt ? Date.now() - payload.bookedAt : 0;
+    if (age > MAX_AGE_MS) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] booked: signal is older than the news window; not celebrating");
+      return;
+    }
+
+    state.booked = payload;
+    const tally = await countBooking(payload);
+    renderReceipt(true);
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[EasyBooking] meeting booked:",
+      payload.email || "(no email)",
+      `${ordinal(tally.count)} today`,
+      `via ${payload.source || "?"}`
+    );
+
+    if (!fresh) return; // a booking read from storage on open is news, not a moment
+    const tier = tierFor(tally.count);
+    if (document.hidden) {
+      // The rep is looking at the dialer. Hold the burst for their return
+      // rather than firing it into a panel nobody is watching.
+      state.pendingBurst = { tier, at: Date.now() };
+      return;
+    }
+    celebrate(tier);
+  }
+
+  function applyContext(next) {
+    const prevEmail = state.ctx && state.ctx.email;
+    state.ctx = next || null;
+    const nextEmail = next && next.email;
+    // A different prospect means the last call is over: the receipt goes with
+    // it. The tally is the thing that persists across prospects, not the card.
+    if (state.booked && nextEmail && lower(nextEmail) !== lower(prevEmail)) {
+      if (lower(nextEmail) !== lower(state.booked.email)) {
+        state.booked = null;
+        renderReceipt(false);
+        return;
+      }
+    }
+    // Same prospect: the name or record id may have just arrived, which is
+    // exactly what the receipt wants to show.
+    if (state.booked) renderReceipt(false);
+  }
+
+  // --- Settings ------------------------------------------------------------
+  function readCelebrate(stored) {
+    const raw = stored && typeof stored === "object" ? stored : {};
+    return raw.celebrate !== false; // default on
+  }
+
+  function renderSetting() {
+    if (celebrateEl) celebrateEl.checked = !!state.celebrate;
+  }
+
+  async function setCelebrate(on) {
+    state.celebrate = !!on;
+    renderSetting();
+    if (!state.celebrate) stopBurst();
+    try {
+      const res = (await chrome.storage.local.get(SETTINGS_KEY)) || {};
+      // Merge: the notes module owns autoSyncNotes in this same object.
+      const merged = { ...(res[SETTINGS_KEY] || {}), celebrate: !!on };
+      await chrome.storage.local.set({ [SETTINGS_KEY]: merged });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] booked: could not save the celebrate setting:", (e && e.message) || e);
+    }
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] booked: celebrations are", on ? "on" : "off");
+  }
+
+  // --- Wiring --------------------------------------------------------------
+  if (celebrateEl) {
+    celebrateEl.addEventListener("change", () => setCelebrate(celebrateEl.checked));
+  }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[BOOKED_KEY]) applyBooked(changes[BOOKED_KEY].newValue, { fresh: true });
+    if (changes[CONTEXT_KEY]) applyContext(changes[CONTEXT_KEY].newValue);
+    if (changes[TALLY_KEY]) state.tally = readTally(changes[TALLY_KEY].newValue);
+    if (changes[SETTINGS_KEY]) {
+      state.celebrate = readCelebrate(changes[SETTINGS_KEY].newValue);
+      renderSetting();
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopBurst(); // never animate into a panel nobody is looking at
+      return;
+    }
+    const pending = state.pendingBurst;
+    if (!pending) return;
+    state.pendingBurst = null;
+    if (Date.now() - pending.at <= DEFER_MS) celebrate(pending.tier);
+  });
+
+  (async () => {
+    const res = (await chrome.storage.local.get([BOOKED_KEY, CONTEXT_KEY, TALLY_KEY, SETTINGS_KEY])) || {};
+    state.tally = readTally(res[TALLY_KEY]);
+    state.ctx = res[CONTEXT_KEY] || null;
+    state.celebrate = readCelebrate(res[SETTINGS_KEY]);
+    renderSetting();
+    // A booking that happened while the panel was closed gets its receipt (if
+    // it is still recent) but not the confetti: the moment has passed, and
+    // confetti on open would be celebrating the panel opening.
+    applyBooked(res[BOOKED_KEY], { fresh: false });
+  })();
+
+  // Console/harness seam. Isolated document, so nothing on the web can reach it.
+  const EB = (window.EB = window.EB || {});
+  EB.celebration = {
+    CONFETTI,
+    ordinal,
+    tierFor,
+    localDay,
+    readTally,
+    celebrate,
+    stopBurst,
+    applyBooked,
+    state,
+  };
 })();

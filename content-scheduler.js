@@ -567,7 +567,254 @@
       tzSelected = false;
       tzLabel = null;
       panelDismissed = false;
+      bookingReset();
     }
     apply();
   });
+
+  // ===========================================================================
+  // Booking confirmation — the "meeting booked" signal (Phase 13)
+  //
+  // The side panel celebrates a booked meeting, so this has to be a fact. A
+  // filled form is NOT a booking: the rep can fill it and the prospect can
+  // still walk, and a celebration for a meeting that never happened is the
+  // same broken promise as a false red flag. So the signal is published only
+  // when a submission is followed by evidence it landed — the same two-step,
+  // fail-silent shape the dialer's note-save detection uses:
+  //
+  //   1. ARM     — a click inside this page lands on a control whose label
+  //                classifies as "submit the booking", and we had already
+  //                filled this form for a known prospect (so the click belongs
+  //                to a booking we recognize, not some unrelated Confirm).
+  //                The visible confirmation-ish phrases on screen are snapshot
+  //                at that instant.
+  //   2. CONFIRM — within CONFIRM_WINDOW_MS, one of:
+  //                  a) the URL takes on a confirmation shape (?confirmed,
+  //                     /booked, /success …), which Next.js booking flows do;
+  //                  b) a confirmation phrase appears that was NOT on screen
+  //                     when the click happened (the page's own static copy
+  //                     mentions "booked" in its description, so only a NEW
+  //                     phrase counts, never one that was always there);
+  //                  c) the email field we filled is gone and the form did not
+  //                     come back — the flow moved on past the form it was on.
+  //
+  // No evidence, no signal: an armed booking expires silently. Everything here
+  // is scoped to its own storage key ("eb:booked") and never touches
+  // "eb:currentProspect", whose write cadence resets the fill state above.
+  //
+  // UNVERIFIED (2026-08-06): the real confirmation markup has not been captured
+  // — see docs/diagnostics/booking-disposition-probe.js, which prints exactly
+  // what to paste back here. Both the phrase list and the URL hints are
+  // deliberately broad and only ever used as *new* evidence after a click.
+  // ===========================================================================
+  const BOOKED_KEY = "eb:booked";
+
+  const BOOKING = {
+    // Matched against a control's whole trimmed label, case-insensitive — never
+    // as a substring, so "Cancel booking" can never read as "book".
+    SUBMIT_TEXTS: [
+      "schedule",
+      "schedule event",
+      "schedule meeting",
+      "confirm",
+      "confirm booking",
+      "confirm meeting",
+      "book",
+      "book it",
+      "book meeting",
+      "book the meeting",
+      "submit",
+      "finish",
+      "confirm & book",
+      "confirm and book",
+    ],
+    // A control that must never arm a booking, however it is styled.
+    CANCEL_TEXTS: ["cancel", "back", "close", "reschedule", "cancel booking"],
+    // Confirmation copy, matched against a visible leaf's whole trimmed text
+    // (prefix match, ≤120 chars). Only counts when it appears AFTER the click.
+    CONFIRM_PHRASES: [
+      "you're booked",
+      "you are booked",
+      "you're all set",
+      "you are all set",
+      "booking confirmed",
+      "meeting confirmed",
+      "meeting scheduled",
+      "confirmed",
+      "invitation sent",
+      "invite sent",
+      "thanks for booking",
+      "thank you for booking",
+      "this meeting is scheduled",
+    ],
+    CONFIRM_URL_HINTS: ["confirmed", "confirmation", "booked", "success", "thank-you", "thankyou"],
+    CONFIRM_WINDOW_MS: 25000,
+    // How long the form has to stay gone before its absence counts as evidence
+    // (a React re-render blanks the tree for a frame or two).
+    FORM_GONE_MS: 1800,
+    POLL_MS: 400,
+  };
+
+  let pendingBooking = null; // { email, armedAt, phrasesBefore:Set, urlBefore, goneSince }
+  let bookingSeq = 0;
+  let bookingPoll = null;
+
+  function bookingReset() {
+    pendingBooking = null;
+    if (bookingPoll) {
+      clearInterval(bookingPoll);
+      bookingPoll = null;
+    }
+  }
+
+  const collapseText = (s) => String(s || "").replace(/\s+/g, " ").trim();
+
+  // Visible leaf elements only, so a phrase buried in the page's inline JSON
+  // (this is a Next.js app — its bootstrap payload contains "booked") can never
+  // be read as a confirmation.
+  function visibleConfirmPhrases() {
+    const found = new Set();
+    const leaves = document.querySelectorAll("h1, h2, h3, h4, p, span, div, strong, li");
+    for (const el of leaves) {
+      if (el.children.length) continue;
+      const text = collapseText(el.textContent).toLowerCase();
+      if (!text || text.length > 120) continue;
+      if (!isVisible(el)) continue;
+      for (const phrase of BOOKING.CONFIRM_PHRASES) {
+        if (text.indexOf(phrase) === 0 || text === phrase) found.add(phrase);
+      }
+    }
+    return found;
+  }
+
+  function urlLooksConfirmed(href) {
+    const url = String(href || "").toLowerCase();
+    return BOOKING.CONFIRM_URL_HINTS.some((hint) => url.indexOf(hint) !== -1);
+  }
+
+  // The clickable ancestor of whatever the rep actually hit (the label is often
+  // a <span> inside the button).
+  function clickedControl(target) {
+    for (let n = target; n && n.nodeType === 1; n = n.parentElement) {
+      const tag = String(n.tagName || "").toUpperCase();
+      if (tag === "BUTTON" || tag === "A" || n.getAttribute("role") === "button") return n;
+      if (tag === "FORM" || tag === "BODY") return null;
+    }
+    return null;
+  }
+
+  function classifyBookingControl(el) {
+    if (!el) return null;
+    const labels = [collapseText(el.textContent), collapseText(el.getAttribute("aria-label"))];
+    const matches = (list) =>
+      labels.some((label) => !!label && list.some((want) => want === label.toLowerCase()));
+    if (matches(BOOKING.CANCEL_TEXTS)) return "cancel";
+    if (matches(BOOKING.SUBMIT_TEXTS)) return "submit";
+    return null;
+  }
+
+  function publishBooked(email, how) {
+    bookingSeq += 1;
+    const payload = {
+      id: `booked-${Date.now()}-${bookingSeq}`,
+      email: email || null,
+      bookedAt: Date.now(),
+      source: "scheduler",
+      how,
+      url: location.href,
+    };
+    bookingReset();
+    chrome.storage.local.set({ [BOOKED_KEY]: payload }, () => {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] meeting booked:", payload.email || "(no email)", `(${how})`);
+    });
+  }
+
+  function settleBooking() {
+    if (!pendingBooking) return;
+    const p = pendingBooking;
+    if (Date.now() - p.armedAt > BOOKING.CONFIRM_WINDOW_MS) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] a booking submit was never confirmed on the page; ignoring it");
+      bookingReset();
+      return;
+    }
+    if (location.href !== p.urlBefore && urlLooksConfirmed(location.href)) {
+      publishBooked(p.email, "confirmation url");
+      return;
+    }
+    for (const phrase of visibleConfirmPhrases()) {
+      if (!p.phrasesBefore.has(phrase)) {
+        publishBooked(p.email, `page said "${phrase}"`);
+        return;
+      }
+    }
+    // The form we filled is gone and has stayed gone: the flow moved on.
+    if (!findEmailInput()) {
+      if (p.goneSince == null) p.goneSince = Date.now();
+      else if (Date.now() - p.goneSince >= BOOKING.FORM_GONE_MS) {
+        publishBooked(p.email, "booking form completed and closed");
+      }
+    } else {
+      p.goneSince = null;
+    }
+  }
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      try {
+        const kind = classifyBookingControl(clickedControl(event && event.target));
+        if (kind === "cancel") {
+          bookingReset();
+          return;
+        }
+        if (kind !== "submit") return;
+        // Only a form this extension recognized and filled for a known prospect
+        // can arm a booking — otherwise an unrelated "Confirm" elsewhere on the
+        // site could take credit for a meeting.
+        if (!emailFilled || !currentPayload || !currentPayload.email) return;
+        pendingBooking = {
+          email: currentPayload.email,
+          armedAt: Date.now(),
+          phrasesBefore: visibleConfirmPhrases(),
+          urlBefore: location.href,
+          goneSince: null,
+        };
+        if (bookingPoll) clearInterval(bookingPoll);
+        bookingPoll = setInterval(settleBooking, BOOKING.POLL_MS);
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] booking submitted; watching for the confirmation");
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] booking detection failed:", (e && e.message) || e);
+      }
+    },
+    true
+  );
+
+  // Exposed for the fixture harness and console debugging (isolated world, so
+  // the page's own JS cannot see it).
+  const EB = (window.EB = window.EB || {});
+  EB.schedulerBooking = {
+    CONFIG: BOOKING,
+    STORAGE_KEY: BOOKED_KEY,
+    classifyBookingControl,
+    visibleConfirmPhrases,
+    urlLooksConfirmed,
+    settleBooking,
+    pendingBookingState: () => pendingBooking,
+    reset: bookingReset,
+    // Test seam: arm without a real click (the click path needs a live document).
+    armBooking: (email) => {
+      pendingBooking = {
+        email,
+        armedAt: Date.now(),
+        phrasesBefore: visibleConfirmPhrases(),
+        urlBefore: location.href,
+        goneSince: null,
+      };
+      return pendingBooking;
+    },
+  };
 })();

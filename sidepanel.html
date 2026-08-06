@@ -96,9 +96,10 @@
         --dot-idle: var(--tertiary); /* nothing captured yet */
         --dot-live: var(--tone-positive); /* a prospect is loaded — a status */
 
-        /* ---- The two places a colour needs an alpha channel ------------- */
+        /* ---- The three places a colour needs an alpha channel ----------- */
         --dot-live-halo: rgba(30, 127, 92, 0.18); /* --tone-positive, 18% */
         --pop-shadow: rgba(38, 17, 74, 0.16); /* --ink, 16% */
+        --won-sweep: rgba(126, 67, 255, 0.16); /* --accent, 16% — the won-meeting sweep */
 
         /* Light, always. Not var(--something): there is no other value it
            could take, and the OS being dark must not change it. */
@@ -1697,6 +1698,212 @@
         color: var(--tone-neutral-fg);
         border: 1px solid var(--line);
       }
+
+      /* ===== The won-meeting moment (Phase 13) =====================
+         The panel's one authored piece of motion. Everything else here is
+         feedback measured in a couple of hundred milliseconds; this is the
+         single place the tool is allowed to be pleased. It fires when the rep
+         books the meeting — the whole point of the call — and never for
+         anything routine.
+
+         Division of colour follows the Meaning-Only rule exactly: the receipt
+         is a FACT with positive valence, so it takes the positive tone; the
+         confetti is DECORATION, so it comes from the purple scale (with a
+         single positive-tone piece as a nod, not as a signal). No emoji, no
+         audio — the rep is on a live call and a sound would go down the line.
+
+         The canvas is created by JS only while a burst is playing, sits above
+         the page but never takes a pointer event, and is removed the moment it
+         finishes. It is aria-hidden: the receipt below carries the news. */
+      #celebrate-canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 40; /* over content, under the settings popover (z-index 20 + its own stack) */
+      }
+      /* The receipt. A tone card, not a modal: it states what happened, stays
+         until the prospect changes or the rep dismisses it, and never blocks
+         the panel underneath. */
+      #booked {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0 0 12px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: var(--tone-positive-bg);
+        border: 1px solid var(--tone-positive);
+        color: var(--tone-positive-fg);
+      }
+      #booked[hidden] { display: none; }
+      #booked .bk-won { flex: 1 1 auto; min-width: 0; }
+      /* Label over value, like every other datapoint in the panel. */
+      #booked .won-label {
+        display: block;
+        font-size: 10px;
+        font-weight: var(--fw-head);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--tone-positive-fg);
+      }
+      #booked .won-who {
+        display: block;
+        font-size: 12px;
+        font-weight: var(--fw-value);
+        color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+      /* The day's count. An SDR's own scoreboard, so it gets the one chip. */
+      #booked .won-tally {
+        flex: 0 0 auto;
+        font-size: 10px;
+        font-weight: var(--fw-head);
+        letter-spacing: 0.04em;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: var(--bg);
+        border: 1px solid var(--tone-positive);
+        color: var(--tone-positive-fg);
+        white-space: nowrap;
+      }
+      #booked .won-link {
+        display: inline-block;
+        margin-top: 2px;
+        font-size: 10px;
+        font-weight: var(--fw-value);
+        color: var(--accent-ink);
+      }
+      /* The panel's base `button` rule is a full-width primary control
+         (width: 100%, margin-top: 12px), which is right for "Fill form" and
+         wrong for a 20px icon: every part of it has to be overridden here or
+         this button eats the row and squeezes the receipt to nothing. */
+      #booked .won-dismiss {
+        flex: 0 0 auto;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 6px;
+        padding: 4px;
+        cursor: pointer;
+        color: var(--tone-positive-fg);
+        line-height: 0;
+      }
+      #booked .won-dismiss svg { width: 12px; height: 12px; display: block; }
+      #booked .won-dismiss:hover { background: var(--bg); }
+      /* The receipt arrives with weight: a short rise plus a violet sweep that
+         crosses it once. The sweep is the flourish; the rise is the feedback. */
+      #booked.won-in { animation: won-rise 320ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+      #booked.won-in::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        pointer-events: none;
+        background: linear-gradient(100deg, transparent 20%, var(--won-sweep) 50%, transparent 80%);
+        animation: won-sweep 620ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both;
+      }
+      #booked { position: relative; overflow: hidden; }
+      @keyframes won-rise {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes won-sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(100%); }
+      }
+
+      /* ===== Motion: feedback, state, continuity ====================
+         Four small pieces, each explaining something the panel already
+         says in words. All of them are additive to an already-visible
+         default, so a blocked animation never hides content. */
+
+      /* 1. The signature sparkline draws itself as the usage data lands, left
+            to right — the direction it is read in. pathLength="1" (set in
+            sidepanel.js) makes the dash geometry independent of the real path
+            length, so one keyframe works for every series. */
+      .spark .spark-line {
+        stroke-dasharray: 1;
+        stroke-dashoffset: 0;
+      }
+      .spark.spark-draw .spark-line {
+        animation: spark-draw 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      .spark.spark-draw .spark-area {
+        animation: spark-area 300ms ease-out 220ms both;
+      }
+      @keyframes spark-draw {
+        from { stroke-dashoffset: 1; }
+        to { stroke-dashoffset: 0; }
+      }
+      @keyframes spark-area {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      /* 2. A prospect's sections arrive as one set, in reading order. The
+            stagger is capped (6 × 26ms) so the last card is never late enough
+            to feel like latency mid-call. */
+      /* Every section carries an index (set in sidepanel.js as the sections are
+         rendered); it is declared here so the token always exists. */
+      main > section { --arrive-i: 0; }
+      main.crm-arrive > section {
+        animation: card-arrive 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        animation-delay: calc(min(var(--arrive-i), 6) * 26ms);
+      }
+      @keyframes card-arrive {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: none; }
+      }
+
+      /* 3. A synced note's check lands with certainty — a 160ms settle, not a
+            celebration. Routine writes should feel sure of themselves. */
+      #notes-result .tick {
+        display: inline-block;
+        animation: tick-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      @keyframes tick-in {
+        from { opacity: 0; transform: scale(0.7); }
+        to { opacity: 1; transform: none; }
+      }
+
+      /* 4. While a prospect is loaded, the capture dot sends a slow ring
+            outward: the panel saying "I'm watching, you're covered". It is the
+            existing live state, not a new one, so it borrows the same tone. */
+      header.live .dot { position: relative; }
+      header.live .dot::after {
+        content: "";
+        position: absolute;
+        inset: -2px;
+        border-radius: 50%;
+        border: 1px solid var(--dot-live);
+        opacity: 0;
+        animation: dot-breathe 2600ms ease-out infinite;
+      }
+      @keyframes dot-breathe {
+        0% { transform: scale(0.85); opacity: 0.45; }
+        70%, 100% { transform: scale(2.1); opacity: 0; }
+      }
+
+      /* Motion is a nicety; none of it is load-bearing. Reduced motion keeps
+         every final state and drops every animation, confetti included (the
+         panel skips the canvas entirely — see celebrate() in sidepanel.js). */
+      @media (prefers-reduced-motion: reduce) {
+        #booked.won-in,
+        #booked.won-in::after,
+        .spark.spark-draw .spark-line,
+        .spark.spark-draw .spark-area,
+        main.crm-arrive > section,
+        #notes-result .tick,
+        header.live .dot::after {
+          animation: none;
+        }
+        header.live .dot::after { display: none; }
+      }
     </style>
   </head>
   <body>
@@ -1788,6 +1995,24 @@
           </p>
         </div>
 
+        <!-- Wins. The celebration is the one flourish in the panel, so it gets
+             the one switch that turns it off — nobody should have to put up
+             with a flourish they've stopped enjoying. Behavior belongs to the
+             celebration IIFE in sidepanel.js. -->
+        <div class="pop-sec">
+          <div class="pop-sec-head">
+            <span class="pop-label">Wins</span>
+          </div>
+          <label class="pop-check" for="setting-celebrate">
+            <input type="checkbox" id="setting-celebrate" checked />
+            <span>Celebrate booked meetings</span>
+          </label>
+          <p class="pop-note" id="setting-celebrate-note">
+            Confetti and a receipt when a booking is confirmed on the booking
+            form. Turn this off to keep the receipt without the confetti.
+          </p>
+        </div>
+
         <!-- HubSpot. With the header's connection dot gone this is the panel's
              one explicit statement of connection state, so the pill is a
              full-size tone badge with its own dot (see .pill.conn) rather than a
@@ -1812,6 +2037,14 @@
     </header>
 
     <main>
+      <!-- The won-meeting receipt. First thing in the column because it is the
+           best news the panel will ever have; hidden until a booking is
+           actually confirmed on the booking form (see the booking detection in
+           content-scheduler.js — a filled form is never enough). role="status"
+           so it is announced once, politely, without stealing focus mid-call:
+           the rep is talking, and a focus jump would cost them their place. -->
+      <div id="booked" role="status" aria-live="polite" hidden></div>
+
       <!-- What the booking form will be filled with: the captured email, then
            the prospect's zone and clock next to the fill action. The capture
            age and the full zone name live in the block's title, and the
