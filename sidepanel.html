@@ -617,7 +617,7 @@
          There is no separator glyph anywhere in the panel: discrete facts are
          separated by the row's own column gap — wide enough to read as a break,
          and nothing lands in the accessibility tree or a copied selection that
-         isn't a value. Every other fact row (.ident-seq, .own-more, .peer-meta,
+         isn't a value. Every other fact row (.ident-seq, .peer-meta,
          .act-detail, .deal-outcome, .ident-facts) follows the same rule. */
       .fact-line {
         display: flex;
@@ -754,30 +754,14 @@
       }
       .own-row { font-size: 12px; }
       .own-row .own-label { margin-right: 5px; }
-      /* Meaning, not decoration: this owner is a named someone-else. */
-      .own-alert {
-        color: var(--tone-negative-fg);
-        background: var(--tone-negative-bg);
-        border-radius: 4px;
-        padding: 0 4px;
-        font-weight: var(--fw-value);
-      }
       .own-unset { color: var(--muted); }
-      /* A colleague owned by a named someone-else: outline + tint. Meaning,
-         not decoration, so it draws from the negative tone. */
-      .peer.peer-alert {
-        outline: 1px solid var(--tone-negative);
-        outline-offset: -1px;
-        background: var(--tone-negative-bg);
-        border-radius: 6px;
-        padding: 4px 6px;
-      }
-      .peer.peer-alert + .peer { border-top: 0; }
-      /* On the negative tint the accent violet is 4.27:1 — under AA for a 12px
-         name — so the link takes the darker accent text tint, which is 8.4:1.
-         Same rule as everywhere else: --accent-ink is accent TEXT on a tinted
-         ground. (Pre-existing; caught by the contrast pass on painted pixels.) */
-      .peer.peer-alert a.peer-name { color: var(--accent-ink); }
+      /* Ownership tone fix (P1, design critique): red is retired from
+         ownership entirely. Another rep's name is a routine, benign state on
+         a shared account, not an error — negative tone stays reserved for
+         actual negatives (section errors, lost deals, .crm-note.bad). The
+         "not you" / "all roles" facts are quiet suffix text, once per card —
+         see the flagRole/sharedOwnerName logic in renderIdentitySection. */
+      .own-suffix { margin-left: 4px; color: var(--muted); font-weight: var(--fw-body); }
 
       /* ---- Record tiles -------------------------------------------------
          A 20px tile in front of a company or a person: the company's favicon
@@ -1057,24 +1041,10 @@
       /* Ownership is the block a rep reads before dialing, so it gets its own
          labelled rows instead of one anonymous name in .ident-meta. Outbound
          owner is the prominent one — it is the field HubSpot itself says to use
-         for outbound ownership. Everything wraps; nothing is fixed-width. */
-      /* One name usually owns all three roles on these records, so the common
-         case is a single line here — see ownershipBlock in sidepanel.js. */
-      .own {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-        margin-top: 3px;
-        padding-top: 4px;
-        border-top: 1px solid var(--rule);
-      }
-      .own-primary {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 0 6px;
-      }
-      .own-primary[title] { cursor: help; }
+         for outbound ownership. Everything wraps; nothing is fixed-width.
+         Outbound, company and contact owner collapse to one shared "Owner"
+         row when all three resolve to the same name (renderIdentitySection);
+         a divergent, missing or unresolved trio keeps the split rows below. */
       .own-label {
         font-size: 10px;
         font-weight: var(--fw-head);
@@ -1084,15 +1054,6 @@
         flex: 0 0 auto;
       }
       .own-name { font-size: 12px; font-weight: var(--fw-head); overflow-wrap: anywhere; }
-      .own-more {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0 10px;
-        font-size: 11px;
-        line-height: 1.35;
-        color: var(--muted);
-      }
-      .own-more .own-who { font-weight: var(--fw-value); color: var(--ink); }
       /* Compact one-click LinkedIn row: kills the tab-out to search for them. */
       .ident-links {
         display: flex;
@@ -1219,7 +1180,10 @@
       }
       .peer-title { color: var(--ink); min-width: 0; }
       .peer-when { margin-left: auto; cursor: help; white-space: nowrap; }
-      .peer-owner .peer-who { font-weight: var(--fw-value); color: var(--ink); }
+      /* Ownership tone fix (P1): no per-row alert outline/tint (the section
+         head's shared-owner note carries that fact once); a mixed-owner row
+         states its owner quietly, in the "Owned by {name}" idiom, no bolder
+         than the rest of line two. */
 
       /* ---- Wiza section ------------------------------------------------- */
       .wiza-sub + .wiza-sub {
