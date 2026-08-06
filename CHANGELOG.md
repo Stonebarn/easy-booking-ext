@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — the type scale is three sizes, and empty states get a headline
+
+Six font sizes (9–14px, adjacent steps as small as 8%) collapse to three:
+**10px** captions (ALL-CAPS labels and sentence-case metadata, told apart by
+case and weight as the chip idiom always did), **12px** body/values, **14px**
+the record name — the panel's one biggest fact. Every 9px, 11px and 13px use
+merges into its neighbor; no role lost its distinction because size was never
+what carried it — weight, case and tone were. The panel gets ~26px *shorter*
+at 320px.
+
+The empty-state headline ("No prospect captured yet") becomes the scale's one
+**20px display moment** — and drops its negative-tone red for plain ink: a
+waiting panel is an invitation, not an error. Empty states are the only
+screens with room for display type, so it costs no mid-call height.
+
 ## [0.5.0] - 2026-08-06
 
 ### Added — Wiza custom objects: richer usage data, and two sparklines
