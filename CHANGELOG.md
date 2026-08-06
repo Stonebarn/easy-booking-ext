@@ -6,6 +6,68 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — tap targets under 24x24 CSS px
+
+`button.wn-open` ("Wrong number?"), `button.prose-more` ("More"), the activity
+type tabs, `#fill`, `summary.sec-toggle` (Others at this account), `a.li-glyph`
+and `a.peer-li` all measured under the 24px floor a thumb needs. Each now
+carries a `.hit24` class: a shared, invisible `::after` overlay expands the
+*hit area* past 24x24 in whichever axis was short, while the control's own
+visible box — the pixels a rep actually sees — is untouched.
+
+### Fixed — hover-title-only content promoted to accessible/visible text
+
+Three facts a rep (or a screen reader) needed mid-call lived only in a
+`title`, which a keyboard or screen-reader user never reaches:
+
+- Activity rows now carry a screen-reader-only "\<Type\>, outbound/inbound"
+  companion to the direction arrow (which stays decorative/aria-hidden). Past
+  a 500px panel width there is room to spare, so the same text becomes a
+  small visible caption instead of staying sr-only — nothing changes at the
+  320px floor.
+- The booking cluster's capture age ("captured 2m ago") was genuinely
+  title-only whenever the capture wasn't stale — the visible meta line is
+  deliberately silent for that common case. It's now always mirrored into a
+  screen-reader-only node so that fact is reachable without a mouse hover.
+- The colleague "In sequence" pill's name and enrolment date ("In sequence:
+  UK Outbound Q3 since Jul 26, 2026") lived only in its title; it's now also
+  the pill's `aria-label`. The visible pill text is unchanged ("In sequence")
+  — there's no room to spend on a name at 320px next to four other rows.
+
+### Fixed — captured email wraps mid-word at the 320px floor
+
+`aaron.moloney@powtoon.com` could render as `aaron.moloney@p` / `owtoon.com`.
+The email is now built with a `<wbr>` immediately after the `@` (via
+`createTextNode`/`createElement`, never innerHTML — it's scraped data), so the
+browser breaks there first; `.bk-email`'s `overflow-wrap: anywhere` stays as
+the last-resort fallback for a pathological local part.
+
+### Added — click-to-copy for the captured email and the contact's phone
+
+A small button (authored inline SVG, 2px stroke, matching the panel's
+section-head icon style) beside the booking cluster's email and beside the
+contact's primary phone number. `navigator.clipboard.writeText`, with the
+panel's existing "swap in place, then revert" confirmation idiom translated
+into an icon swap (copy → check, tone-positive) since there's no room for a
+text label; a rejected write swaps to an X (tone-negative) instead of failing
+silently. Both buttons reach the 24px tap floor via `.hit24` without growing
+past their 14-16px visible box. The email button *floats* rather than sitting
+in a flex row beside the text — inside the Contact column the email needs its
+full width to fit in two lines, and a flex sibling was costing a whole third
+line; a float only narrows the single line box beside it.
+
+### Changed — Fill focuses the booking tab instead of asking the rep to
+
+Clicking **Fill form** while the scheduler tab was open but not the active tab
+used to reject with "Open the booking tab first, then click again." It now
+finds that tab wherever it is (`chrome.tabs.query` against the same
+`scheduler.default.com` pattern already in `host_permissions` — no new
+permission needed), brings it to the front (`chrome.tabs.update` +
+`chrome.windows.update`), and proceeds with the same storage nudge in one
+action. The "no booking tab open at all" case still shows the original
+message; the stale-capture re-stamp and the "Fill triggered." result notice
+are unchanged.
+
 ## [0.4.0] - 2026-08-06
 
 ### Changed — the live capture lives in the Contact column

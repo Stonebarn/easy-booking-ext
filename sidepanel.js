@@ -42,6 +42,8 @@
   const prospectSectionEl = document.getElementById("prospect");
   const bookingDividerEl = document.getElementById("booking-divider");
   const emailEl = document.getElementById("email");
+  const emailRowEl = document.getElementById("email-row");
+  const ageSrEl = document.getElementById("age-sr");
   const tzEl = document.getElementById("tz");
   const metaEl = document.getElementById("meta");
   const fillBtn = document.getElementById("fill");
@@ -118,11 +120,12 @@
     headerEl.classList.toggle("live", view === "live");
     if (!hasProspect) {
       capturedEl.removeAttribute("title");
+      if (ageSrEl) ageSrEl.textContent = "";
       syncProspectShell();
       return;
     }
 
-    emailEl.textContent = payload.email;
+    renderEmail(emailEl, payload.email);
 
     // The zone: its abbreviation, the UTC offset, then the prospect's own clock
     // — the number a dialer actually acts on. Three discrete facts, so three
@@ -151,6 +154,11 @@
     metaEl.classList.toggle("stale", !s.notice && stale);
     metaEl.hidden = !(s.notice || stale);
     metaEl.textContent = s.notice || (stale ? ageText(payload) : "");
+    // Always current, not just in the title: the visible meta line above is
+    // silent for the common "live" case (see the comment on it), so a screen
+    // reader landing on the booking cluster would otherwise never learn how
+    // fresh the capture is unless it happened to read a hover-only title.
+    if (ageSrEl) ageSrEl.textContent = ageText(payload);
     syncProspectShell();
   }
 
@@ -194,12 +202,33 @@
   // 3) Keep the age line (and the stale flip) honest without any interaction.
   setInterval(() => render(state), TICK_MS);
 
-  // 4) Manual fill: nudge storage so the scheduler content script re-applies.
+  // 4) Manual fill: find the booking tab WHEREVER it is — it used to have to
+  // be the active tab in the current window, which meant a rep who had
+  // switched away from it saw "open the booking tab first, then click again"
+  // even though it was open the whole time, one tab or one window over. The
+  // scheduler.default.com pattern below is the exact host_permissions entry
+  // in manifest.json, so querying and focusing a tab that matches it needs no
+  // permission beyond what the extension already has.
+  //
+  // Focusing before the nudge isn't load-bearing for the fill itself —
+  // content-scheduler.js reacts to the chrome.storage.onChanged write whether
+  // or not its tab is on screen — but a rep who clicks Fill wants to SEE it
+  // happen, not take it on faith, so this brings the tab forward as the same
+  // action rather than a second step.
+  const SCHEDULER_MATCH_PATTERN = "https://scheduler.default.com/*";
   fillBtn.addEventListener("click", async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !SCHEDULER_URL_RE.test(tab.url || "")) {
+    const tabs = await chrome.tabs.query({ url: SCHEDULER_MATCH_PATTERN });
+    const tab = tabs.find((t) => SCHEDULER_URL_RE.test(t.url || "")) || tabs[0];
+    if (!tab) {
       setNotice("Open the booking tab first, then click again.");
       return;
+    }
+    if (!tab.active) await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+    if (tab.windowId != null) {
+      const current = await chrome.windows.getCurrent().catch(() => null);
+      if (!current || current.id !== tab.windowId) {
+        await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      }
     }
     const res = await chrome.storage.local.get(STORAGE_KEY);
     const payload = res[STORAGE_KEY];
@@ -627,6 +656,80 @@
     return svg;
   }
 
+  // --- copy-to-clipboard affordance -----------------------------------------
+  // A small icon button beside a captured value the rep needs to paste
+  // somewhere else (the dialer's own dial box, a doc) — no auth, no host
+  // permission, purely local. Confirmation borrows the panel's existing
+  // "swap in place, then revert" idiom (the tz/notes pills flip their own
+  // text to "Set ✓" / "Auto-synced ✓" for a beat) — translated to an icon
+  // swap here because there is no room beside a captured value for a text
+  // label. Success turns the glyph the positive tone; a rejected clipboard
+  // write (permissions, an insecure context) turns it the negative tone
+  // rather than failing silently — both revert to the plain copy glyph.
+  const COPY_ICON = [
+    "M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z",
+    "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
+  ];
+  const COPY_OK_ICON = ["M5 12.5 10 17.5 19 6.5"];
+  const COPY_ERR_ICON = ["M6 6l12 12", "M18 6 6 18"];
+  const COPY_RESET_MS = 1500;
+
+  // `getValue` is read at click time (not at button-build time), so one
+  // button can be built once and still copy whatever the record holds when
+  // the rep actually clicks — no rebuild needed when a render swaps the data.
+  function copyButton(getValue, label) {
+    const btn = el("button", "copy-btn hit24");
+    btn.type = "button";
+    btn.setAttribute("aria-label", label);
+    btn.title = label;
+    let icon = svgIcon(COPY_ICON);
+    btn.appendChild(icon);
+    let resetTimer = null;
+
+    function setIcon(paths, tone, srLabel) {
+      btn.removeChild(icon);
+      icon = svgIcon(paths);
+      btn.appendChild(icon);
+      btn.classList.remove("copy-ok", "copy-err");
+      if (tone) btn.classList.add(tone);
+      btn.setAttribute("aria-label", srLabel);
+    }
+
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const value = getValue();
+      if (!value) return;
+      clearTimeout(resetTimer);
+      try {
+        await navigator.clipboard.writeText(value);
+        setIcon(COPY_OK_ICON, "copy-ok", `${label} — copied`);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] clipboard write failed:", e);
+        setIcon(COPY_ERR_ICON, "copy-err", `${label} — couldn't copy`);
+      }
+      resetTimer = setTimeout(() => setIcon(COPY_ICON, null, label), COPY_RESET_MS);
+    });
+    return btn;
+  }
+
+  // The copy affordance beside the captured email. Built once, here (after
+  // copyButton and the icon paths above it, which are `const` and therefore
+  // NOT hoisted the way el/svgIcon's function declarations are) — mounting it
+  // any earlier in the file would read COPY_ICON before its own declaration
+  // ran. getValue reads state.payload at CLICK time, so this one button stays
+  // correct across every render without ever being rebuilt.
+  //
+  // Inserted BEFORE #email, not appended after it: the button floats (see
+  // .bk-email-row in sidepanel.html) and a float only affects content that
+  // comes after it in source order.
+  if (emailRowEl) {
+    emailRowEl.insertBefore(
+      copyButton(() => state.payload && state.payload.email, "Copy email"),
+      emailEl
+    );
+  }
+
   // --- tiny DOM builders ---------------------------------------------------
   function clearNode(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
@@ -637,6 +740,27 @@
     if (className) node.className = className;
     if (text != null && text !== "") node.textContent = String(text);
     return node;
+  }
+
+  // The captured email is the one value in the panel long enough to wrap
+  // mid-word at the 320px floor — ".bk-email"'s `overflow-wrap: anywhere` in
+  // sidepanel.html is a last-resort fallback for a pathological local part,
+  // not the preferred break point. A <wbr> right after the @ gives the
+  // browser the boundary a human would pick first, so the common case breaks
+  // "name@" / "domain.com" instead of splitting a word in half. Built node by
+  // node rather than a template string: the email is scraped/API data, so
+  // textContent (and a real <wbr> element) is the only thing that touches it.
+  function renderEmail(container, email) {
+    clearNode(container);
+    const text = String(email == null ? "" : email);
+    const at = text.indexOf("@");
+    if (at === -1) {
+      container.textContent = text;
+      return;
+    }
+    container.appendChild(document.createTextNode(text.slice(0, at + 1)));
+    container.appendChild(document.createElement("wbr"));
+    container.appendChild(document.createTextNode(text.slice(at + 1)));
   }
 
   // A HubSpot deep link when we have an ID to link to, plain text otherwise.
@@ -784,7 +908,7 @@
   function linkedInGlyphLink(url, label) {
     const href = httpsUrl(url);
     if (!href) return null;
-    const a = el("a", "li-glyph");
+    const a = el("a", "li-glyph hit24");
     a.href = href;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
@@ -861,7 +985,7 @@
     const wrap = el("div");
     const p = el("p", className ? `prose ${className}` : "prose", value);
     wrap.appendChild(p);
-    const btn = el("button", "prose-more", "More");
+    const btn = el("button", "prose-more hit24", "More");
     btn.type = "button";
     btn.setAttribute("aria-expanded", "false");
     btn.setAttribute("aria-label", `Show all of ${label}`);
@@ -1356,7 +1480,7 @@
     if (!contact || !writeApi()) return null;
     if (wn.open && wn.contactId === contact.id) return null;
     const has = !!(contact.phone || contact.mobilePhone || contact.phone2);
-    const btn = el("button", "wn-open", has ? "Wrong number?" : "Add a number");
+    const btn = el("button", "wn-open hit24", has ? "Wrong number?" : "Add a number");
     btn.type = "button";
     btn.title = has
       ? "Correct this number in HubSpot — it syncs on to Outreach and the dialer."
@@ -1683,9 +1807,23 @@
 
     // Phase 10 phone row + wrong-number editor, unchanged behavior.
     const meta = el("div", "ident-meta");
-    const hasAnyPhone = !!(c && (c.phone || c.mobilePhone || c.phone2));
+    // Same priority order phoneSpans itself resolves duplicates by, so this is
+    // always the number the row's FIRST span is actually showing — never the
+    // label text ("Mobile: ...") that span might carry.
+    const primaryPhone = (c && (c.phone || c.mobilePhone || c.phone2)) || null;
+    const hasAnyPhone = !!primaryPhone;
+    const phoneRows = phoneSpans(c);
+    if (phoneRows.length) {
+      // One copy affordance, on the number a rep would actually dial — not
+      // one per field, which would be three copy buttons for what is usually
+      // the same number written twice.
+      const wrap = el("span", "phone-value");
+      wrap.appendChild(phoneRows[0]);
+      wrap.appendChild(copyButton(() => primaryPhone, "Copy phone"));
+      phoneRows[0] = wrap;
+    }
     appendAll(meta, [
-      ...phoneSpans(c),
+      ...phoneRows,
       c && !hasAnyPhone ? el("span", null, "No phone number") : null,
       c && c.leadStatus ? el("span", null, c.leadStatus) : null,
       wnOpenButton(c),
@@ -1842,7 +1980,7 @@
 
       if (stack.hiddenCount > 0) {
         let expanded = false;
-        const toggle = el("button", "prose-more", `More (${stack.hiddenCount})`);
+        const toggle = el("button", "prose-more hit24", `More (${stack.hiddenCount})`);
         toggle.type = "button";
         toggle.setAttribute("aria-expanded", "false");
         toggle.setAttribute("aria-label", `Show ${stack.hiddenCount} more technologies`);
@@ -1953,7 +2091,16 @@
       ]
         .filter(Boolean)
         .join(" ");
-      if (which) badge.title = which;
+      // The sequence name is real, decision-relevant text ("which sequence"),
+      // not trivia like the enrolment date — a title alone leaves a keyboard
+      // or screen-reader rep with just "In sequence" and no name at all.
+      // aria-label promotes it without adding a visible word to a pill that
+      // already has to fit beside a name at 320px; the title stays too, for
+      // a mouse hover.
+      if (which) {
+        badge.title = which;
+        badge.setAttribute("aria-label", which);
+      }
       top.appendChild(badge);
     } else if (row.inSequence === false) {
       top.appendChild(el("span", "pill tone-neutral tiny", "Not sequenced"));
@@ -1962,7 +2109,7 @@
     // One-click LinkedIn per colleague: this is the tab-out the section exists to
     // kill, so it belongs on the row and not behind a hover.
     if (row.linkedinUrl) {
-      const li = el("a", "peer-li", "in");
+      const li = el("a", "peer-li hit24", "in");
       li.href = row.linkedinUrl;
       li.target = "_blank";
       li.rel = "noopener noreferrer";
@@ -2304,8 +2451,20 @@
     const top = el("div", "act-top");
     const summary = el("span", "act-summary", item.summary || item.label);
     if (item.direction) {
-      const arrow = el("span", null, item.direction === "out" ? " ↑" : " ↓");
-      arrow.title = item.direction === "out" ? "Outbound" : "Inbound";
+      // The glyph is decoration (aria-hidden, same as the type disc); the
+      // schema it carries — "Call, outbound" — lives in a companion node so a
+      // screen reader gets it even though the arrow's own title never would.
+      // .act-dir-word is sr-only at the 320px floor and becomes a small
+      // visible caption once the panel is wide enough to spare the room (see
+      // its rule in sidepanel.html) — no visible bulk added at the floor.
+      const isOut = item.direction === "out";
+      const dirWord = isOut ? "Outbound" : "Inbound";
+      const arrow = el("span", "act-dir");
+      const glyph = el("span", null, isOut ? " ↑" : " ↓");
+      glyph.setAttribute("aria-hidden", "true");
+      arrow.title = dirWord;
+      arrow.appendChild(glyph);
+      arrow.appendChild(el("span", "sr-only act-dir-word", `${item.label}, ${dirWord.toLowerCase()}`));
       summary.appendChild(arrow);
     }
     top.appendChild(summary);
@@ -2351,7 +2510,7 @@
     clearNode(bar);
     bar.style.display = "";
     for (const tab of tabs) {
-      const btn = el("button", "tab");
+      const btn = el("button", "tab hit24");
       btn.type = "button";
       btn.id = `crm-tab-${tab.key}`;
       btn.dataset.tab = tab.key;

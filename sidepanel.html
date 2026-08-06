@@ -328,6 +328,43 @@
          box here and a future display rule on it would silently beat it. */
       main section[hidden] { display: none; }
 
+      /* ---- Accessibility utilities --------------------------------------
+         Standard clip-based sr-only: present in the accessibility tree and to
+         in-page find, invisible and zero-footprint on screen. Used to promote
+         a fact that today lives only in a `title` (hover-only, so a keyboard
+         or screen-reader rep never gets it) into something always readable,
+         without adding a visible line or changing any layout. */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* ---- Tap-target expansion ------------------------------------------
+         Several controls are sized to their text/glyph (a hover-precision
+         choice from the density pass) and land under the 24x24 CSS-px floor a
+         thumb needs. Rather than growing the control itself — which would
+         change the density the rest of the panel was tuned for — an
+         absolutely-positioned, invisible ::after overlaps the control and
+         extends past its edges: the hit area grows, the pixels don't. This is
+         the ONE ruleset all of them share; each control still needs
+         `position: relative` (added alongside its own rule) so the overlay is
+         anchored to it and not to some ancestor. */
+      .hit24 {
+        position: relative;
+      }
+      .hit24::after {
+        content: "";
+        position: absolute;
+        pointer-events: auto;
+      }
+
       /* Section chrome is pure overhead, so it is as short as it can be while
          staying scannable: 10px caps on one 14px line, the count/grade pill
          inline on that same line, and 3px to the card below. */
@@ -445,6 +482,21 @@
       }
       #prospect > .bk { padding: 7px 9px; }
       #prospect > .bk .bk-email { font-size: 13px; }
+      /* The copy button FLOATS rather than sitting beside the email in a flex
+         row, on purpose: inside the Contact column the email already needs
+         its full ~115px to fit in two lines (see the note above .bk-email).
+         A flex sibling permanently narrows that width for BOTH lines and
+         measurably pushed the address onto a third line; a float only
+         narrows the single line box beside it, so the wrap point the density
+         pass already tuned for stays intact. Two things keep it to exactly
+         that one line: no vertical margin (the float's margin box has to
+         stay within one text line's height, ~16-17px here, or it bleeds into
+         narrowing the line below it too), and the button itself sized under
+         that same line height (see .copy-btn's 14px below). The button has
+         to come BEFORE #email in source order for text to flow round it —
+         see the JS that inserts it. */
+      .bk-email-row .copy-btn { float: right; margin: 0 0 0 4px; }
+      .bk-email-row::after { content: ""; display: block; clear: both; }
       .bk-row {
         display: flex;
         flex-wrap: wrap;
@@ -477,6 +529,38 @@
         font-size: 12px;
         border-radius: 6px;
       }
+      /* 67.3x22 rendered — 2px short on height only. */
+      .bk-fill.hit24::after { inset: -2px 0; }
+
+      /* ---- Copy affordance (email + phone) ------------------------------
+         Sized to sit beside a value without changing that value's own line
+         height — 16px, matching the 320px-floor row it drops into — and
+         reaching the 24px tap floor through the shared .hit24 overlay rather
+         than by growing on screen. Decoration until it has something to say
+         (copy-ok/copy-err are STATE, so they draw from the tone scale). */
+      .copy-btn {
+        flex: 0 0 auto;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        box-shadow: none;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .copy-btn svg { width: 10px; height: 10px; display: block; pointer-events: none; }
+      .copy-btn:hover { background: var(--accent-wash); color: var(--accent-ink); }
+      .copy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .copy-btn.hit24::after { inset: -5px; }
+      .copy-btn.copy-ok { color: var(--tone-positive-fg); }
+      .copy-btn.copy-err { color: var(--tone-negative-fg); }
       /* Only ever rendered for something the rep has to know: a stale capture,
          or the result of clicking Fill. Silent otherwise. */
       .bk-meta {
@@ -513,7 +597,7 @@
          every "Disconnect"-style link violet, and turned the gear's own stroke
          invisible against it. `.armed` is excluded because its fill is a warning
          and must not flip to the accent under the pointer. */
-      button:hover:not(:disabled):not(.gear):not(.tab):not(.linkish):not(.prose-more):not(.wn-open):not(.wn-cancel):not(.armed) {
+      button:hover:not(:disabled):not(.gear):not(.tab):not(.linkish):not(.prose-more):not(.wn-open):not(.wn-cancel):not(.armed):not(.copy-btn) {
         background: var(--accent-ink);
       }
       /* Ink rather than the accent: on a filled button an accent-coloured ring
@@ -709,6 +793,9 @@
       }
       .prose-more:hover { color: var(--accent); }
       .prose-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      /* 31.6x11 rendered on both the standalone and the inline (tech-line)
+         variant — the overlay grows the box past 24px on both axes. */
+      .prose-more.hit24::after { inset: -7px -4px; }
 
       /* Tech stack: competitor names get the accent treatment. Decoration, so
          it draws from the purple scale (accent-ink is the AA-safe text tint),
@@ -865,6 +952,9 @@
       a.li-glyph svg { width: 14px; height: 14px; display: block; }
       a.li-glyph:hover { background: var(--accent-wash); color: var(--accent-ink); }
       a.li-glyph:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      /* 20x20 rendered — the 24px hit floor without growing the glyph's own
+         20px box, which is sized to sit beside a name at 320px. */
+      a.li-glyph.hit24::after { inset: -3px; }
 
       /* Record title line: a link plus any number of pills, wrapping. */
       .rec-head {
@@ -943,6 +1033,13 @@
         font-size: 11px;
         color: var(--muted);
       }
+      /* Groups the phone value with its copy button at the row's own 4px, not
+         the row's 10px fact gap — reads as one control, not two facts. */
+      .phone-value {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+      }
 
       /* ---- Wrong-number editor (Phase 10) ------------------------------- */
       /* The one place the panel writes to a customer record, so it looks like a
@@ -962,6 +1059,9 @@
         cursor: pointer;
         flex: 0 0 auto;
       }
+      /* 84.7x12 rendered — plenty wide, not tall enough. Only the vertical
+         edges need the overlay; the label is already well past 24px wide. */
+      .wn-open.hit24::after { inset: -7px 0; }
       .wn-open:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 1px;
@@ -1146,6 +1246,8 @@
       .sec-toggle { cursor: pointer; list-style: none; }
       .sec-toggle::-webkit-details-marker { display: none; }
       .sec-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      /* 556x15 rendered — full width already, 9px short on height. */
+      .sec-toggle.hit24::after { inset: -5px 0; }
       .sec-caret {
         font-size: 9px;
         color: var(--muted);
@@ -1202,6 +1304,8 @@
       }
       a.peer-li:hover { background: var(--accent-wash); }
       a.peer-li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      /* 19.4x17 rendered. */
+      a.peer-li.hit24::after { inset: -4px -3px; }
       /* Line two of a colleague row: the title on the leading edge, the
          relative time pushed to the trailing edge, and the owner (only when
          owners are mixed) between them. A column of right-aligned times is what
@@ -1309,6 +1413,10 @@
         white-space: nowrap;
       }
       .tab:hover:not([aria-disabled="true"]) { background: var(--accent-wash); color: var(--accent-ink); }
+      /* ~51-62x18 rendered — wide enough already; only the vertical edges need
+         the overlay. Horizontal is left alone: the bar's 3px gap between tabs
+         means growing sideways would overlap the neighbour's hit area. */
+      .tab.hit24::after { inset: -4px 0; }
       /* Decoration, not state: the selected tab is the purple scale. An
          OUTLINED pill — page white inside an accent edge — rather than a tinted
          slab: it reads as the one selected control on a row of plain words, and
@@ -1398,6 +1506,28 @@
         overflow-wrap: anywhere;
       }
       .act-detail .act-owner { font-weight: var(--fw-value); }
+      .act-dir { cursor: help; }
+      /* .act-dir-word starts as the .sr-only clip (a screen reader still gets
+         "Call, outbound" even at the 320px floor, where there is no room to
+         spend on a visible word next to a summary that's already tight for
+         space). Past the panel's own colleague-grid breakpoint there is room
+         to spare, so it becomes a small caption instead — the direction is no
+         longer arrow-plus-hover-title only. */
+      @media (min-width: 500px) {
+        .act-dir-word {
+          position: static;
+          width: auto;
+          height: auto;
+          margin: 0 0 0 3px;
+          padding: 0;
+          overflow: visible;
+          clip: auto;
+          white-space: nowrap;
+          font-size: 10px;
+          font-weight: var(--fw-body);
+          color: var(--muted);
+        }
+      }
 
       /* Loading skeletons — per section, so a slow Activity fetch doesn't hide
          a Contact card that already arrived. */
@@ -1650,10 +1780,20 @@
            are hidden while the block lives in the column. -->
       <section id="prospect">
         <div id="captured" class="bk">
-          <div id="email" class="bk-email"></div>
+          <div class="bk-email-row" id="email-row">
+            <div id="email" class="bk-email"></div>
+            <!-- The copy button itself is built in JS (sidepanel.js mounts it
+                 once at load) so it shares the one copyButton() helper the
+                 phone row's copy affordance also uses. -->
+          </div>
+          <!-- Always current, never just a hover title: how stale the capture
+               is changes whether a rep trusts it mid-call. Clipped off-screen
+               at every width — this is a fact for anyone who reads by screen
+               reader, not a line the whole panel has room to spend on. -->
+          <span id="age-sr" class="sr-only"></span>
           <div class="bk-row">
             <div id="tz" class="bk-tz"></div>
-            <button id="fill" class="bk-fill" title="Fill the booking form on the scheduler tab">
+            <button id="fill" class="bk-fill hit24" title="Fill the booking form on the scheduler tab">
               Fill form
             </button>
           </div>
@@ -1729,7 +1869,7 @@
            to be "others at", and no request is made either. -->
       <section id="crm-colleagues-section">
         <details id="crm-colleagues-details" open>
-          <summary class="section-head sec-toggle">
+          <summary class="section-head sec-toggle hit24">
             <span class="sec-head-main">
               <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                 <circle cx="9" cy="8" r="3" />
