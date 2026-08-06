@@ -6,7 +6,127 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+### Changed — density pass on the side panel (no data lost)
+
+Behaviour-preserving layout work: nothing about fetching, auth, sync or scraping
+changed, and every value the panel showed before is still readable — on screen or
+in a hover title. Measured against a live prospect fixture (13 activities, 4
+colleagues, no deals, no Wiza user, a zeroed Wiza account), the panel went from
+**2,246px to 1,210px at the 320px floor (−46%)** and **1,898px to 1,093px at
+580px (−42%)**. Section order is unchanged.
+
+- **Booking block: ~181px → 44px.** Two lines — the captured email, then
+  `BST · UTC+1 · 5:40 AM their time` with a right-aligned, no-longer-full-width
+  **Fill form** button. Dropped: both "Captured" pills (the header dot already
+  says a prospect is live), the `EMAIL` / `TIMEZONE` ALL-CAPS labels, and the
+  standing "captured Nm ago" line, which is now the block's hover title along
+  with the full timezone name. A **stale** capture still shows its amber warning
+  line, and the Fill result messages are unchanged (that line is now an
+  `aria-live` region, so the result is announced).
+- **A section with nothing to say renders nothing.** Deals now hides itself when
+  there are no deals (was a 55px "No open deals" card), Wiza hides when there is
+  no user *and* no surviving account data, and "Others at this account" hides
+  when there are no other contacts. Activity keeps **"No activity found"** —
+  absence is the answer there — and Notes always renders because it is an input.
+  Error states always keep their section visible.
+- **Wiza is no longer self-contradictory.** Zero metrics are suppressed
+  individually — a `0` credit balance, `0 of 1` subscribed, `0` credits used and
+  `0×` purchases told a rep nothing across five labelled cells — and what is
+  left folds into one line (*"Not a Wiza user · Account 163547 · Saas tech ·
+  Software"*). ~150px → ~30px. The `User` / `Account` sub-labels only appear when
+  both halves are on screen. Non-zero metrics are untouched.
+- **Activity rows: three lines → two.** Line 1 is the type glyph, the title and
+  the relative time pushed to the trailing edge; line 2 is the
+  disposition/status/outcome, and only appears when it has something to add. The
+  ALL-CAPS type word moved onto the glyph's (and the timestamp's) title.
+  **Attribution is run-length suppressed**: the owner shows on the first row and
+  then only when it changes, so "Jasper Guilaran" appears three times instead of
+  thirteen — and a genuine change of owner is now visible rather than buried.
+  Absolute timestamps stay in the hover title.
+- **Zero-count activity tabs are gone.** `Emails 0 · Meetings 0 · Notes 0` used
+  ~40% of the bar to report three absences. Only tabs with rows render, and if
+  only one type has rows the bar is hidden entirely.
+- **"Others at this account" states a shared owner once.** When every colleague
+  has the same owner the section head reads *"Others at this account (4) · all
+  Jasper Guilaran"* and the rows drop it; mixed owners still show per-row. Rows
+  read `contacted 4d ago` with the absolute stamp on hover. At panel widths
+  ≥500px the list goes two-up instead of costing a second screen.
+- **The phone row no longer prints the same number twice.** `phone` and
+  `mobilephone` frequently hold identical values; numbers are compared on digits
+  only and a repeat renders once, with the fields it sits on in its hover title.
+  The **Wrong number?** editor and its field picker are unchanged — it still
+  offers all three writable fields and shows what is on each.
+- **Ownership collapses by name.** One person usually holds the outbound,
+  company and contact owner roles, which was the same name on three lines. Now a
+  single `Owner <name>` line whose title lists the roles it covers; genuinely
+  different names still get their own labelled line.
+- **Running prose is clamped to two lines with a MORE / LESS toggle** (the
+  company blurb and the ICP rationale). The *full* text is in the DOM and the
+  clamp is CSS, so expanding shows all of it and the collapsed state never ends
+  mid-sentence in a hard-truncated "…". The toggle only renders when the text is
+  actually being clipped.
+- **Account context lost its labelled grid.** Eight `LABEL / value` cells became
+  two `·`-joined lines (`Cool down · Strong ICP fit` and `Sales team 8 · AE 3 ·
+  Outbound 4 · Leadership 1`), with each label kept as the item's hover title.
+  464px → 219px at 320px.
+- **Section chrome is shorter** — smaller pill line-height so a pill never makes
+  a head taller than its title, 3px from head to card, 8px between sections, a
+  12px main gutter (which is also 8px more content width at 320px, worth a line
+  on several rows), and tighter card padding.
+- **Notes**: the hint line only renders when it has direction to give (no
+  prospect matched, nothing captured yet) rather than restating the textarea's
+  own placeholder, and the textarea starts at 66px.
+- **Explicit `data-theme="dark"` / `data-theme="light"` support** on the root,
+  alongside the existing `prefers-color-scheme` rules, so the theme can be forced
+  (by a harness, or a future in-panel toggle) and wins over the OS preference.
+- Removed the now-unused `.kv` / `.kv-grid` label-above-value styles and their
+  `kv()` builder.
+
+### Added — "Others at this account"
+
+- **A new collapsible CRM section listing the other contacts on the prospect's
+  company**, placed after Account context. Two SDR asks, one section: *"who else
+  has been sequenced from that account"* — visible today only on the full dialer
+  tab filtered by account, i.e. never during a live call — and the *"wrong person"*
+  pivot, which reps currently handle by opening the company's LinkedIn page and
+  reading employee names off it mid-dial.
+- Each row: the colleague's **name** (linked to their HubSpot contact record,
+  `0-1/{id}`), an **In sequence** badge (hover names the sequence and its start
+  date) or a muted **Not sequenced** when the portal says either way — and *no*
+  badge when it doesn't say, because "not in a sequence" is a claim; their **job
+  title**; **Last contacted 3d ago** with the exact time on hover; the **owner**,
+  shown as *"Owner: You"* when it's the connected rep's own contact and as the
+  teammate's name otherwise; and a compact **in** link to their LinkedIn profile
+  when `hs_linkedin_url` is set. The list scrolls inside a fixed height, like
+  Activity, so the panel's footprint doesn't depend on how big the account is.
+- Ordering is a pure, unit-tested view-model (`EB.hubspotData.view.accountContacts`):
+  **currently in a sequence first**, then **most recently contacted**, then name
+  and id purely for determinism. Job-title seniority is deliberately not a sort
+  key — it needs a title taxonomy to beat guessing, and a wrong guess about who
+  matters at an account is worse than alphabetical. The prospect the rep is already
+  looking at is excluded, by record ID *and* by email.
+- **Request budget: exactly two added requests per prospect** — one
+  `GET /crm/v4/objects/companies/{id}/associations/contacts?limit=25` and one
+  `POST /crm/v3/objects/contacts/batch/read`. Both are on the general pool
+  (110 req/10s); **no CRM Search call is made**, ever — that pool is 5 req/s for
+  the whole portal. Zero requests when the prospect has no company, one when the
+  company has no associated contacts. The page size *is* the row cap, so paging
+  isn't a code path. The result rides in the existing per-email bundle, so the
+  5-minute cache and the in-flight dedup already cover it (`CACHE_VERSION` 8 → 9).
+  Owner names come from the same batched, session-cached owner pass the rest of the
+  bundle uses, with a new `ACCOUNT_OWNER_LOOKUP_MAX` (10) ceiling on *first-time*
+  lookups so an account whose 25 contacts each have a different owner can't turn a
+  2-request section into 27.
+- Owner IDs are never shown: an ID that can't be resolved to a name renders with no
+  owner at all. "Yours vs a teammate's" is decided by comparing IDs against the
+  stored connection, which costs no request — and when the connection has no owner
+  ID resolved yet, the row makes neither claim.
+- States match the rest of the panel: no company → the section is hidden outright;
+  no colleagues → *"No other contacts on this account"*; signed out → the shared
+  **Connect** prompt; a rate limit → the countdown. A **403 does not claim the
+  sign-in expired** (it says the rep's permissions don't cover it), a genuine 401
+  does, and an empty result always renders as empty rather than as an error.
+
 ### Added — fix a wrong number from the panel (write path)
 
 - **Reps can now correct a contact's phone number in HubSpot from the side
@@ -65,52 +185,6 @@ adheres to [Semantic Versioning](https://semver.org/).
   set. README's Privacy & permissions section now spells out that the extension
   can **write contact phone numbers** — a meaningful capability change from
   "notes only" for anyone reviewing it — with a table of every write it can make.
-=======
-### Added — "Others at this account"
-
-- **A new collapsible CRM section listing the other contacts on the prospect's
-  company**, placed after Account context. Two SDR asks, one section: *"who else
-  has been sequenced from that account"* — visible today only on the full dialer
-  tab filtered by account, i.e. never during a live call — and the *"wrong person"*
-  pivot, which reps currently handle by opening the company's LinkedIn page and
-  reading employee names off it mid-dial.
-- Each row: the colleague's **name** (linked to their HubSpot contact record,
-  `0-1/{id}`), an **In sequence** badge (hover names the sequence and its start
-  date) or a muted **Not sequenced** when the portal says either way — and *no*
-  badge when it doesn't say, because "not in a sequence" is a claim; their **job
-  title**; **Last contacted 3d ago** with the exact time on hover; the **owner**,
-  shown as *"Owner: You"* when it's the connected rep's own contact and as the
-  teammate's name otherwise; and a compact **in** link to their LinkedIn profile
-  when `hs_linkedin_url` is set. The list scrolls inside a fixed height, like
-  Activity, so the panel's footprint doesn't depend on how big the account is.
-- Ordering is a pure, unit-tested view-model (`EB.hubspotData.view.accountContacts`):
-  **currently in a sequence first**, then **most recently contacted**, then name
-  and id purely for determinism. Job-title seniority is deliberately not a sort
-  key — it needs a title taxonomy to beat guessing, and a wrong guess about who
-  matters at an account is worse than alphabetical. The prospect the rep is already
-  looking at is excluded, by record ID *and* by email.
-- **Request budget: exactly two added requests per prospect** — one
-  `GET /crm/v4/objects/companies/{id}/associations/contacts?limit=25` and one
-  `POST /crm/v3/objects/contacts/batch/read`. Both are on the general pool
-  (110 req/10s); **no CRM Search call is made**, ever — that pool is 5 req/s for
-  the whole portal. Zero requests when the prospect has no company, one when the
-  company has no associated contacts. The page size *is* the row cap, so paging
-  isn't a code path. The result rides in the existing per-email bundle, so the
-  5-minute cache and the in-flight dedup already cover it (`CACHE_VERSION` 8 → 9).
-  Owner names come from the same batched, session-cached owner pass the rest of the
-  bundle uses, with a new `ACCOUNT_OWNER_LOOKUP_MAX` (10) ceiling on *first-time*
-  lookups so an account whose 25 contacts each have a different owner can't turn a
-  2-request section into 27.
-- Owner IDs are never shown: an ID that can't be resolved to a name renders with no
-  owner at all. "Yours vs a teammate's" is decided by comparing IDs against the
-  stored connection, which costs no request — and when the connection has no owner
-  ID resolved yet, the row makes neither claim.
-- States match the rest of the panel: no company → the section is hidden outright;
-  no colleagues → *"No other contacts on this account"*; signed out → the shared
-  **Connect** prompt; a rate limit → the countdown. A **403 does not claim the
-  sign-in expired** (it says the rep's permissions don't cover it), a genuine 401
-  does, and an empty result always renders as empty rather than as an error.
->>>>>>> phase9-account-contacts
 
 ### Fixed — note attribution was blank
 

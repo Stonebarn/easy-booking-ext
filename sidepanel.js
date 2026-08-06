@@ -38,9 +38,7 @@
   const capturedEl = document.getElementById("captured");
   const emptyEl = document.getElementById("empty");
   const emailEl = document.getElementById("email");
-  const tzFieldEl = document.getElementById("tz-field");
   const tzEl = document.getElementById("tz");
-  const tzSubEl = document.getElementById("tz-sub");
   const metaEl = document.getElementById("meta");
   const fillBtn = document.getElementById("fill");
 
@@ -83,25 +81,43 @@
     // the button stays live whenever there is a prospect at all.
     fillBtn.disabled = !hasProspect;
     headerEl.classList.toggle("live", view === "live");
-    if (!hasProspect) return;
+    if (!hasProspect) {
+      capturedEl.removeAttribute("title");
+      return;
+    }
 
     emailEl.textContent = payload.email;
 
-    // Timezone: prefer a clear abbreviation + offset; show the prospect's local
-    // clock as a secondary line. The scheduler resolves this to Default's zone.
-    const hasTz = payload.tzAbbr || payload.timezone || payload.tzOffsetMin != null;
-    tzFieldEl.style.display = hasTz ? "" : "none";
-    if (hasTz) {
-      const off = fmtOffset(payload.tzOffsetMin);
-      const main = [payload.tzAbbr || payload.timezone, off].filter(Boolean).join(" · ");
-      tzEl.textContent = main || "—";
-      const localTime = payload.timezoneRaw && (payload.timezoneRaw.match(/\(([^)]+)\)/) || [])[1];
-      tzSubEl.textContent = localTime ? `${localTime} their time` : "";
-      tzSubEl.style.display = localTime ? "" : "none";
+    // One line for the zone: the abbreviation, then the prospect's own clock —
+    // the number a dialer actually acts on. The full zone name and the capture
+    // age are the block's hover detail, because neither changes a decision.
+    const localTime = payload.timezoneRaw && (payload.timezoneRaw.match(/\(([^)]+)\)/) || [])[1];
+    const zone = [payload.tzAbbr || payload.timezone, fmtOffset(payload.tzOffsetMin)]
+      .filter(Boolean)
+      .join(" · ");
+    // clearNode/el are the shared builders declared further down this IIFE
+    // (hoisted function declarations), so the same textContent-only rule that
+    // covers every CRM value covers the captured payload too.
+    clearNode(tzEl);
+    if (zone) tzEl.appendChild(el("span", null, zone));
+    if (localTime) {
+      if (zone) tzEl.appendChild(el("span", null, " · "));
+      tzEl.appendChild(el("span", "bk-local", `${localTime} their time`));
     }
+    if (!zone && !localTime) tzEl.textContent = "Timezone unknown";
 
-    metaEl.classList.toggle("stale", !s.notice && view === "stale");
-    metaEl.textContent = s.notice || ageText(payload);
+    // The standing "captured Nm ago" line is hover detail; it only comes back
+    // as a line when it is a warning (a stale capture) or a fill result.
+    const stale = view === "stale";
+    capturedEl.title = [
+      payload.timezone && payload.timezone !== payload.tzAbbr ? payload.timezone : null,
+      ageText(payload),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    metaEl.classList.toggle("stale", !s.notice && stale);
+    metaEl.hidden = !(s.notice || stale);
+    metaEl.textContent = s.notice || (stale ? ageText(payload) : "");
   }
 
   function setNotice(text) {
@@ -493,9 +509,15 @@
     // account (4)" is the whole headline.
     colleaguesSection: document.getElementById("crm-colleagues-section"),
     colleaguesTitle: document.getElementById("crm-colleagues-title"),
+    colleaguesOwner: document.getElementById("crm-colleagues-owner"),
     colleagues: document.getElementById("crm-colleagues"),
+    // Wiza and Deals join Account context and Others-at-this-account in hiding
+    // outright when they have nothing to say (the density pass): a "No
+    // open deals" card is 55px of the panel spent on a non-answer.
+    wizaSection: document.getElementById("crm-wiza-section"),
     wiza: document.getElementById("crm-wiza"),
     wizaPill: document.getElementById("crm-wiza-pill"),
+    dealsSection: document.getElementById("crm-deals-section"),
     deals: document.getElementById("crm-deals"),
     dealsPill: document.getElementById("crm-deals-pill"),
     activity: document.getElementById("crm-activity"),
@@ -555,19 +577,6 @@
     return a;
   }
 
-  // Returns null for an empty value so callers can skip the row entirely
-  // rather than rendering a label with a dash under it. This is the whole
-  // null-safety strategy for the Wiza section: build every possible row, let the
-  // empty ones evaporate.
-  function kv(label, value, hoverTitle) {
-    if (value == null || value === "") return null;
-    const row = el("div", "kv");
-    row.appendChild(el("span", "kv-label", label));
-    row.appendChild(el("span", "kv-value", value));
-    if (hoverTitle) row.title = hoverTitle;
-    return row;
-  }
-
   // An external link built from a CRM URL property. hubspot-data.js has already
   // rejected anything that isn't http(s), so href can never be a javascript:
   // URL — but the value is still only ever set through .href, never markup.
@@ -578,6 +587,74 @@
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     return a;
+  }
+
+  // One wrapping line of `·`-joined facts, in place of a labelled grid. Each
+  // entry is { text, label?, title? } — `label` is for the values that don't
+  // name themselves ("Sales team 8"), and is omitted for the ones that do
+  // ("Cool down"). Empty entries evaporate, and the whole line returns null
+  // when nothing survived so the caller can skip it.
+  //
+  // The separators are aria-hidden: they are punctuation between values, and a
+  // screen reader announcing "middle dot" six times is noise.
+  function factLine(entries, className) {
+    const kept = (entries || []).filter((e) => e && e.text != null && e.text !== "");
+    if (!kept.length) return null;
+    const row = el("div", className ? `fact-line ${className}` : "fact-line");
+    kept.forEach((entry, i) => {
+      if (i > 0) {
+        const sep = el("span", "fact-sep", "·");
+        sep.setAttribute("aria-hidden", "true");
+        row.appendChild(sep);
+      }
+      const span = el("span", null, entry.label ? `${entry.label} ` : null);
+      if (entry.label) {
+        span.appendChild(el("span", "fact-n", entry.text));
+      } else {
+        span.textContent = entry.text;
+      }
+      if (entry.title) span.title = entry.title;
+      row.appendChild(span);
+    });
+    return row;
+  }
+
+  // Running prose, clamped to two lines with a toggle for the rest. The full
+  // text is always in the DOM — the clamp is CSS — so nothing truncates
+  // mid-sentence on screen and nothing is lost to a rep who wants it all.
+  //
+  // `label` names what is being expanded, for the button's accessible name.
+  function proseBlock(fullText, className, label) {
+    const value = String(fullText == null ? "" : fullText).trim();
+    if (!value) return null;
+    const wrap = el("div");
+    const p = el("p", className ? `prose ${className}` : "prose", value);
+    wrap.appendChild(p);
+    const btn = el("button", "prose-more", "More");
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-label", `Show all of ${label}`);
+    btn.addEventListener("click", () => {
+      const open = p.classList.toggle("open");
+      btn.textContent = open ? "Less" : "More";
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? `Show less of ${label}` : `Show all of ${label}`);
+    });
+    // The button is only worth a row when the text is actually being clipped.
+    // scrollHeight/clientHeight is only meaningful once the node is laid out, so
+    // this runs after the caller has appended it (see attachProseToggles).
+    wrap.__ebProseToggle = () => {
+      if (p.scrollHeight - p.clientHeight > 1) wrap.appendChild(btn);
+    };
+    return wrap;
+  }
+
+  // Second pass over the prose blocks a section just appended: a clamp is only
+  // measurable after layout, and a "More" button on unclipped text is a lie.
+  function attachProseToggles(root) {
+    for (const node of root.children) {
+      if (typeof node.__ebProseToggle === "function") node.__ebProseToggle();
+    }
   }
 
   function appendAll(parent, nodes) {
@@ -683,8 +760,8 @@
 
   // --- section renderers ---------------------------------------------------
 
-  // Ownership (Phase 8). Four separately-labelled names, each rendered only when
-  // the record has it, with the *outbound* owner prominent: HubSpot's own
+  // Ownership (Phase 8). Separately-labelled names, each rendered only when the
+  // record has it, with the *outbound* owner prominent: HubSpot's own
   // description of `sdr_company_owner` says to use it for outbound ownership
   // rather than `hubspot_owner_id`, and "who owns prospecting here" is the
   // question this block exists to answer before a rep dials.
@@ -692,62 +769,94 @@
   // Every name arrives already resolved from hubspot-data.js (ID-shaped values
   // are looked up, unresolvable ones dropped), so nothing here can print a bare
   // owner ID.
+  //
+  // Density: on these records one person usually holds every role, so the block
+  // was the same name on three lines. Roles are grouped by name now — one name
+  // for everything collapses to a single "Owner <name>" line whose title spells
+  // out the roles it covers, and only genuinely different names get a line.
+  const OWN_ROLES = [
+    ["outbound", "Outbound owner"],
+    ["csm", "CSM"],
+    ["companyOwner", "Company owner"],
+    ["contactOwner", "Contact owner"],
+  ];
+
   function ownershipBlock(own) {
     if (!own || !own.hasData) return null;
     const block = el("div", "own");
 
-    if (own.outbound) {
-      const primary = el("div", "own-primary");
-      primary.appendChild(el("span", "own-label", "Outbound owner"));
-      primary.appendChild(el("span", "own-name", own.outbound));
-      // When ownership last moved is context for "why haven't they been called",
-      // not a headline — hover detail on the row it belongs to.
-      if (own.changedAt) {
-        primary.title = `Outbound ownership changed ${fmt.date(own.changedAt)}`;
-      }
-      block.appendChild(primary);
+    // name -> the roles that name holds, in OWN_ROLES order.
+    const groups = [];
+    for (const [key, label] of OWN_ROLES) {
+      const name = own[key];
+      if (!name) continue;
+      const hit = groups.find((g) => g.name === name);
+      if (hit) hit.roles.push(label);
+      else groups.push({ name, roles: [label] });
     }
+    if (!groups.length) return null;
 
-    // The supporting names, one dense wrapping line. Each is labelled, because
-    // an unlabelled name next to a phone number is exactly the ambiguity this
+    // When ownership last moved is context for "why haven't they been called",
+    // not a headline — hover detail on the row it belongs to.
+    const changed = own.changedAt ? `Outbound ownership changed ${fmt.date(own.changedAt)}` : null;
+    const rolesTitle = (roles) => roles.join(", ");
+
+    const primary = el("div", "own-primary");
+    const lead = groups[0];
+    // "Owner" once the one name covers more than one role; the specific role
+    // when it is the only thing that name is.
+    primary.appendChild(el("span", "own-label", lead.roles.length > 1 ? "Owner" : lead.roles[0]));
+    primary.appendChild(el("span", "own-name", lead.name));
+    primary.title = [lead.roles.length > 1 ? rolesTitle(lead.roles) : null, changed]
+      .filter(Boolean)
+      .join(" · ");
+    if (!primary.title) primary.removeAttribute("title");
+    block.appendChild(primary);
+
+    // Anyone else, one dense wrapping line. Each is labelled, because an
+    // unlabelled name next to a phone number is exactly the ambiguity this
     // block replaces.
     const more = el("div", "own-more");
-    const pair = (label, name) => {
-      if (!name) return null;
-      const span = el("span", null, `${label}: `);
-      span.appendChild(el("span", "own-who", name));
-      return span;
-    };
-    appendAll(more, [
-      pair("CSM", own.csm),
-      pair("Company owner", own.companyOwner),
-      pair("Contact owner", own.contactOwner),
-    ]);
+    for (const group of groups.slice(1)) {
+      const span = el("span", null, `${group.roles[0]}: `);
+      span.appendChild(el("span", "own-who", group.name));
+      if (group.roles.length > 1) span.title = rolesTitle(group.roles);
+      more.appendChild(span);
+    }
     if (more.childElementCount) block.appendChild(more);
 
-    return block.childElementCount ? block : null;
+    return block;
   }
 
   // Sequence context (Phase 8): whether this contact is already being worked,
   // and when anyone last touched them. `line` is null when the portal doesn't
   // say — no line is better than a guess.
+  //
+  // Density note: the enrolment date used to run on the end of the line ("since
+  // Jul 27, 2026") and pushed the whole thing onto a second row at 320px. It is
+  // hover detail now — "are they being worked, and when did anyone last touch
+  // them" is answered by the name and the relative time alone.
   function sequenceLine(seq) {
     if (!seq || !seq.hasData) return null;
     const row = el("div", "ident-seq");
     if (seq.line) {
-      const span = el("span", seq.enrolled === true ? "seq-on" : null, seq.line);
+      // seq.line already carries "since <date>" when the portal has one; strip
+      // it back to the state and keep the date in the title.
+      const enrolled = seq.enrolled === true;
+      const label = enrolled ? (seq.name ? `In sequence: ${seq.name}` : "In sequence") : seq.line;
+      const span = el("span", enrolled ? "seq-on" : null, label);
+      if (enrolled && seq.enrolledAt) span.title = `Enrolled ${fmt.date(seq.enrolledAt)}`;
       row.appendChild(span);
     }
     if (seq.lastSequence) {
-      const text = seq.lastSequenceAt
-        ? `Last sequence: ${seq.lastSequence} (${fmt.date(seq.lastSequenceAt)})`
-        : `Last sequence: ${seq.lastSequence}`;
-      row.appendChild(el("span", null, text));
+      const span = el("span", null, `Last sequence: ${seq.lastSequence}`);
+      if (seq.lastSequenceAt) span.title = fmt.date(seq.lastSequenceAt);
+      row.appendChild(span);
     }
     if (seq.lastContactedAt) {
-      const when = el("span", null, `Last contacted ${fmt.relativeTime(seq.lastContactedAt)}`);
+      const when = el("span", null, `contacted ${fmt.relativeTime(seq.lastContactedAt)}`);
       const exact = fmt.dateTime(seq.lastContactedAt);
-      if (exact) when.title = exact;
+      if (exact) when.title = `Last contacted ${exact}`;
       row.appendChild(when);
     }
     return row.childElementCount ? row : null;
@@ -1216,6 +1325,47 @@
   }
   // ==== end wrong-number workflow ==========================================
 
+  // The phone row. `phone` and `mobilephone` very often hold the *same* number
+  // — an import wrote both — and the row used to print it twice
+  // ("+447445522695   Mobile: +447445522695"), which reads as two numbers and
+  // wraps onto a second line at 320px. Numbers are compared on digits only
+  // (formatting differs between the two fields all the time) and a repeat is
+  // rendered once, with the fields it appears on in its hover title.
+  //
+  // Nothing here touches the wrong-number editor's field picker: hubspot-write's
+  // allowlist still offers all three fields, and the editor still shows what is
+  // on each one. This is display only.
+  const phoneDigits = (v) => String(v == null ? "" : v).replace(/\D+/g, "");
+
+  function phoneSpans(contact) {
+    if (!contact) return [];
+    const fields = [
+      { label: null, value: contact.phone, name: "Phone" },
+      { label: "Mobile", value: contact.mobilePhone, name: "Mobile phone" },
+      { label: "Phone 2", value: contact.phone2, name: "Phone 2" },
+    ];
+    const rows = [];
+    for (const f of fields) {
+      if (!f.value) continue;
+      const digits = phoneDigits(f.value);
+      // No digits at all (a stray "n/a") can't be compared, so it stands alone.
+      const dup = digits ? rows.find((r) => r.digits === digits) : null;
+      if (dup) {
+        dup.names.push(f.name);
+        continue;
+      }
+      rows.push({ digits, value: f.value, label: f.label, names: [f.name] });
+    }
+    return rows.map((r) => {
+      const span = el("span", null, r.label ? `${r.label}: ${r.value}` : r.value);
+      // Always say which field(s) this number is on when it isn't just "Phone" —
+      // the duplicate that used to be a second visible row is preserved here.
+      if (r.names.length > 1) span.title = `On ${r.names.join(" and ")}`;
+      else if (!r.label) span.title = r.names[0];
+      return span;
+    });
+  }
+
   // One block for both records, three lines deep:
   //   1  Name · lifecycle stage
   //   2  Title @ Company        (both linked to their HubSpot records)
@@ -1276,9 +1426,7 @@
     const meta = el("div", "ident-meta");
     const hasAnyPhone = !!(c && (c.phone || c.mobilePhone || c.phone2));
     appendAll(meta, [
-      c && c.phone ? el("span", null, c.phone) : null,
-      c && c.mobilePhone ? el("span", null, `Mobile: ${c.mobilePhone}`) : null,
-      c && c.phone2 ? el("span", null, `Phone 2: ${c.phone2}`) : null,
+      ...phoneSpans(c),
       c && !hasAnyPhone ? el("span", null, "No phone number") : null,
       c && c.leadStatus ? el("span", null, c.leadStatus) : null,
       wnOpenButton(c),
@@ -1329,63 +1477,77 @@
     setPill(crmEls.accountPill, ctx.grade ? `Grade ${ctx.grade}` : null);
     clearNode(body);
 
-    if (ctx.snippet) {
-      const p = el("p", "ctx-snippet", ctx.snippet);
-      if (ctx.snippetTruncated && ctx.snippetFull) p.title = ctx.snippetFull;
-      body.appendChild(p);
-    }
-
     // The Wiza section already shows ICP and industry for companies that have
     // Wiza account data; don't print them twice in the same panel.
     const wizaAccount = (bundle.wiza && bundle.wiza.account) || {};
     const dupWiza = !!wizaAccount.hasData;
 
-    const grid = el("div", "kv-grid");
-    appendAll(grid, [
-      kv("Company status", ctx.status),
-      kv("ICP fit", ctx.icpFit),
-      dupWiza ? null : kv("ICP", ctx.icp),
-      dupWiza ? null : kv("Industry", ctx.industry),
-      // Label straight from the property's own description: this is the size of
-      // the customer's sales team using Wiza data, not their headcount.
-      kv(
-        "Sales team using Wiza",
-        ctx.salesTeamSize != null ? fmt.number(ctx.salesTeamSize) : null,
-        "Size of the sales team using Wiza data"
-      ),
-      kv("AE team", ctx.aeTeamSize != null ? fmt.number(ctx.aeTeamSize) : null),
-      kv("Outbound team", ctx.obTeamSize != null ? fmt.number(ctx.obTeamSize) : null),
-      kv(
-        "Sales leadership",
-        ctx.leadershipTeamSize != null ? fmt.number(ctx.leadershipTeamSize) : null
-      ),
+    // Eight labelled cells became two lines. These values name themselves —
+    // "Cool down", "Strong ICP fit", "Saas tech" — so a stack of ALL-CAPS
+    // labels above them was spending five lines on nothing a rep hadn't read.
+    // Each label survives as the item's hover title.
+    const classify = factLine([
+      { text: ctx.status, title: ctx.status ? "Company status" : null },
+      // "Strong" on its own could be anything; two words make it self-evident.
+      { text: ctx.icpFit ? `${ctx.icpFit} ICP fit` : null, title: "ICP fit" },
+      dupWiza ? null : { text: ctx.icp, title: ctx.icp ? "ICP" : null },
+      dupWiza ? null : { text: ctx.industry, title: ctx.industry ? "Industry" : null },
     ]);
-    if (grid.childElementCount) body.appendChild(grid);
+    if (classify) body.appendChild(classify);
+
+    // The team sizes, one line. The Wiza-data caveat on the first number is
+    // straight from the property's own description, and stays as its hover.
+    const teams = factLine([
+      {
+        label: "Sales team",
+        text: ctx.salesTeamSize != null ? fmt.number(ctx.salesTeamSize) : null,
+        title: "Size of the sales team using Wiza data",
+      },
+      { label: "AE", text: ctx.aeTeamSize != null ? fmt.number(ctx.aeTeamSize) : null, title: "AE team" },
+      {
+        label: "Outbound",
+        text: ctx.obTeamSize != null ? fmt.number(ctx.obTeamSize) : null,
+        title: "Outbound team",
+      },
+      {
+        label: "Leadership",
+        text: ctx.leadershipTeamSize != null ? fmt.number(ctx.leadershipTeamSize) : null,
+        title: "Sales leadership team",
+      },
+    ]);
+    if (teams) body.appendChild(teams);
+
+    // The company's own blurb: two lines, then a toggle. The full text (not the
+    // 200-char snippet) goes in, so expanding shows all of it and the collapsed
+    // state never ends in a mid-sentence "…".
+    const blurb = proseBlock(ctx.snippetFull || ctx.snippet, null, "the company description");
+    if (blurb) body.appendChild(blurb);
 
     // Tech stack: a delimited property parsed into a capped, de-duplicated list
-    // in hubspot-data.js. The row shows the first few and "+N more"; the hover
-    // carries all of them.
+    // in hubspot-data.js. One line — the label is the only thing that makes a
+    // list of product names legible, so it stays, inline.
     if (ctx.tech) {
-      const row = el("div", "kv");
-      row.appendChild(el("span", "kv-label", "Tech stack"));
-      const value = el("span", "kv-value", ctx.tech.items.join(" · "));
+      const row = el("div", "fact-line");
+      const value = el("span", null, `Tech: ${ctx.tech.items.join(" · ")}`);
       if (ctx.tech.more > 0) {
         value.appendChild(el("span", "ctx-more", ` +${ctx.tech.more} more`));
+        value.title = ctx.tech.all.join(" · ");
       }
       row.appendChild(value);
-      if (ctx.tech.more > 0) row.title = ctx.tech.all.join(" · ");
       body.appendChild(row);
     }
 
-    // Why the ICP call was made. Long, model-written, and secondary: one muted
-    // line with the rest on hover.
-    if (ctx.icpReasoning) {
-      const why = el("p", "ctx-why", `Why: ${ctx.icpReasoning}`);
-      if (ctx.icpReasoningFull && ctx.icpReasoningFull.length > ctx.icpReasoning.length) {
-        why.title = ctx.icpReasoningFull;
-      }
-      body.appendChild(why);
-    }
+    // Why the ICP call was made. Model-written, runs to paragraphs, and the
+    // least scannable thing in the panel: two muted lines and a toggle.
+    const reasoning = ctx.icpReasoningFull || ctx.icpReasoning;
+    const why = proseBlock(
+      reasoning ? `Why: ${reasoning}` : null,
+      "why",
+      "why this account is graded this way"
+    );
+    if (why) body.appendChild(why);
+
+    attachProseToggles(body);
   }
 
   // --- Others at this account (Phase 9) -------------------------------------
@@ -1409,7 +1571,29 @@
       typeof n === "number" && n > 0 ? `${COLLEAGUES_TITLE} (${n})` : COLLEAGUES_TITLE;
   }
 
-  function colleagueRow(row) {
+  // The shared-owner note in the section head ("· all Jasper Guilaran"). Every
+  // row on an account is usually owned by the same rep, and four rows each
+  // reading "Owner: Jasper Guilaran" is four lines saying one thing.
+  function setColleaguesOwnerNote(text) {
+    if (!crmEls.colleaguesOwner) return;
+    crmEls.colleaguesOwner.textContent = text ? `· ${text}` : "";
+  }
+
+  // What a row would display as its owner: "You" for the connected rep, the
+  // teammate's name when we resolved one, null when the portal didn't say.
+  const colleagueOwnerLabel = (row) =>
+    row.isMine === true ? "You" : row.ownerName || null;
+
+  // The one owner every row shares, or null when they differ (or any row's owner
+  // is unknown — an unknown can't be folded into a claim about all of them).
+  function sharedColleagueOwner(rows) {
+    if (!rows || rows.length < 2) return null;
+    const first = colleagueOwnerLabel(rows[0]);
+    if (!first) return null;
+    return rows.every((r) => colleagueOwnerLabel(r) === first) ? first : null;
+  }
+
+  function colleagueRow(row, hideOwner) {
     const node = el("div", "peer");
 
     const top = el("div", "peer-top");
@@ -1450,17 +1634,25 @@
     // Owner: "You" when the ID matches the connected rep (that comparison is on
     // IDs, so it holds even when the name didn't resolve), a teammate's name when
     // we have it, and nothing at all otherwise. Never a bare owner ID.
+    //
+    // Suppressed entirely when the section head has already said every row is
+    // this person's — then it is only ever the exceptions that carry a name.
+    const ownerLabel = colleagueOwnerLabel(row);
     let owner = null;
-    if (row.isMine === true || row.ownerName) {
+    if (!hideOwner && ownerLabel) {
       owner = el("span", "peer-owner", "Owner: ");
-      owner.appendChild(el("span", "peer-who", row.isMine === true ? "You" : row.ownerName));
+      owner.appendChild(el("span", "peer-who", ownerLabel));
     }
+    // "contacted 4d ago" rather than "Last contacted 4d ago": in a list of
+    // colleagues there is nothing else the time could be about, and the two
+    // dropped words are what kept this row on one line at 320px. The absolute
+    // stamp — and the word — stay in the title.
     const contacted = row.lastContactedAt
-      ? el("span", "peer-when", `Last contacted ${fmt.relativeTime(row.lastContactedAt)}`)
+      ? el("span", "peer-when", `contacted ${fmt.relativeTime(row.lastContactedAt)}`)
       : null;
     if (contacted) {
       const exact = fmt.dateTime(row.lastContactedAt);
-      if (exact) contacted.title = exact;
+      contacted.title = exact ? `Last contacted ${exact}` : "Last contacted";
     }
     appendAll(meta, [
       row.title ? el("span", "peer-title", row.title) : null,
@@ -1492,6 +1684,7 @@
     // "something's broken".
     if (errors.colleagues && !rows.length) {
       setColleaguesCount(null);
+      crmEls.colleaguesSection.hidden = false;
       setNote(
         body,
         sectionErrorText(errors.colleagues, errors.colleaguesRetryAfterMs, "other contacts on this account"),
@@ -1501,13 +1694,21 @@
       console.debug("[EasyBooking] account contacts unavailable:", errors.colleagues);
       return;
     }
-    setColleaguesCount(rows.length);
+    // Nobody else on the account is not news a rep needs a card for. The old
+    // "No other contacts on this account" line cost a section head plus a card
+    // to say nothing actionable, so the section goes away instead.
     if (!rows.length) {
-      setNote(body, "No other contacts on this account");
+      setColleaguesCount(null);
+      crmEls.colleaguesSection.hidden = true;
+      clearNode(body);
       return;
     }
+    crmEls.colleaguesSection.hidden = false;
+    setColleaguesCount(rows.length);
+    const shared = sharedColleagueOwner(rows);
+    setColleaguesOwnerNote(shared ? `all ${shared}` : null);
     clearNode(body);
-    for (const row of rows) body.appendChild(colleagueRow(row));
+    for (const row of rows) body.appendChild(colleagueRow(row, !!shared));
   }
 
   // active → green (the default pill), closed → muted outline, anything else a
@@ -1518,29 +1719,85 @@
     return "info";
   }
 
+  // A metric worth a row. Zero is not: an account with 0 API credits, 0 credits
+  // used and 0 purchases has told a rep nothing, and it used to tell them so
+  // across five labelled cells. Null and 0 are treated the same here on
+  // purpose — "no credits" and "we don't know" lead to the same call.
+  const metric = (n) => (n != null && Number(n) > 0 ? fmt.number(n) : null);
+
   // Wiza product data. Absence is the normal case — most prospects have never
-  // signed up — so the empty path is a single muted line, and inside each
-  // subsection every row that has no value is simply not built.
+  // signed up — so a prospect with no user and no account data gets no section
+  // at all, and inside each subsection every row with no value (or a zero) is
+  // simply not built.
   function renderWizaSection(bundle) {
     const body = crmEls.wiza;
     const wiza = bundle.wiza || {};
     const user = wiza.user || {};
     const account = wiza.account || {};
 
-    if (!user.isUser && !account.hasData) {
-      setPill(crmEls.wizaPill, null);
-      setNote(body, "Not a Wiza user yet");
-      return;
-    }
     // Status at section level so it's readable without opening anything.
     const variant = wizaStatusVariant(user.status);
+
+    // --- Account: the metrics that survive zero-suppression, then the
+    // classification fields, which are identity rather than measurement.
+    const accountMetrics = account.hasData
+      ? [
+          {
+            label: "Subscribed",
+            // "0 of 1" is a zero; only a real subscription is worth the words.
+            text:
+              metric(account.subscribedAccounts) && account.associatedAccounts != null
+                ? `${fmt.number(account.subscribedAccounts)} of ${fmt.number(account.associatedAccounts)}`
+                : metric(account.subscribedAccounts),
+            title: "Subscribed accounts of associated accounts",
+          },
+          { label: "API credits", text: metric(account.apiCreditBalance), title: "API credit balance" },
+          {
+            label: "Credits 30d",
+            text: metric(account.creditsUsed30d),
+            title: "API credits used in the last 30 days",
+          },
+          {
+            label: "Purchases",
+            text: metric(account.timesPurchased) ? `${fmt.number(account.timesPurchased)}×` : null,
+            title: "Times API credits purchased",
+          },
+          {
+            text: account.lastPurchaseAt ? `bought ${fmt.relativeTime(account.lastPurchaseAt)}` : null,
+            title: account.lastPurchaseAt ? `Last purchase ${fmt.date(account.lastPurchaseAt)}` : null,
+          },
+        ].filter((e) => e.text)
+      : [];
+    // An account ID and an ICP are not a grid — they are one line.
+    const accountFacts = account.hasData
+      ? [
+          { label: "Account", text: account.accountId || account.primaryAccountId, title: "Wiza account ID" },
+          { text: account.icp, title: account.icp ? "ICP" : null },
+          { text: account.industry, title: account.industry ? "Industry" : null },
+          { text: account.useCase, title: account.useCase ? "Use case" : null },
+        ].filter((e) => e.text)
+      : [];
+    const hasAccount = !!(accountMetrics.length || accountFacts.length || account.isTargetAccount);
+
+    // Nothing to say, or nothing left after the zeros went: no section.
+    if (!user.isUser && !hasAccount) {
+      setPill(crmEls.wizaPill, null);
+      crmEls.wizaSection.hidden = true;
+      clearNode(body);
+      return;
+    }
+    crmEls.wizaSection.hidden = false;
     setPill(crmEls.wizaPill, user.statusLabel, variant);
     clearNode(body);
+
+    // The "User"/"Account" sub-labels only earn their line when both halves are
+    // on screen and a reader could otherwise mix them up.
+    const labelSubs = user.isUser && hasAccount;
 
     if (user.isUser) {
       const sub = el("div", "wiza-sub");
       const head = el("div", "wiza-head");
-      head.appendChild(el("span", "wiza-label", "User"));
+      if (labelSubs) head.appendChild(el("span", "wiza-label", "User"));
       if (user.statusLabel) {
         head.appendChild(el("span", ("pill tiny " + variant).trim(), user.statusLabel));
       }
@@ -1549,7 +1806,7 @@
       if (user.emailConfirmed === false) {
         head.appendChild(el("span", "pill info tiny", "Email unconfirmed"));
       }
-      sub.appendChild(head);
+      if (head.childElementCount) sub.appendChild(head);
 
       const plan = [
         user.planStatus,
@@ -1559,19 +1816,24 @@
         .filter(Boolean)
         .join(" · ");
 
-      const grid = el("div", "kv-grid");
-      appendAll(grid, [
-        kv("Signed up", user.signedUpAt ? fmt.date(user.signedUpAt) : null),
-        kv("Plan", plan),
-        kv("Credits (30d)", user.creditsUsed30d != null ? fmt.number(user.creditsUsed30d) : null),
-        kv(
-          "Last used",
-          user.lastUsageAt ? fmt.relativeTime(user.lastUsageAt) : null,
-          user.lastUsageAt ? fmt.dateTime(user.lastUsageAt) : null
-        ),
-        kv("Wiza ID", user.wizaId),
+      const line = factLine([
+        { text: plan, title: plan ? "Plan" : null },
+        {
+          label: "Credits 30d",
+          text: metric(user.creditsUsed30d),
+          title: "Credits used in the last 30 days",
+        },
+        {
+          text: user.lastUsageAt ? `used ${fmt.relativeTime(user.lastUsageAt)}` : null,
+          title: user.lastUsageAt ? `Last used ${fmt.dateTime(user.lastUsageAt)}` : null,
+        },
+        {
+          text: user.signedUpAt ? `signed up ${fmt.date(user.signedUpAt)}` : null,
+          title: user.signedUpAt ? "Signed up" : null,
+        },
+        { label: "Wiza ID", text: user.wizaId, title: "Wiza user ID" },
       ]);
-      if (grid.childElementCount) sub.appendChild(grid);
+      if (line) sub.appendChild(line);
 
       // Both links come from URL properties and are only rendered when set.
       const links = el("div", "wiza-links");
@@ -1581,51 +1843,27 @@
       ]);
       if (links.childElementCount) sub.appendChild(links);
 
-      body.appendChild(sub);
-    } else if (account.hasData) {
-      // Account data but nobody signed up: the company is known to us, this
-      // person isn't.
-      body.appendChild(el("p", "crm-note", "Not a Wiza user yet"));
+      if (sub.childElementCount) body.appendChild(sub);
     }
 
-    if (account.hasData) {
+    if (hasAccount) {
       const sub = el("div", "wiza-sub");
-      const head = el("div", "wiza-head");
-      head.appendChild(el("span", "wiza-label", "Account"));
-      if (account.isTargetAccount) {
-        head.appendChild(el("span", "pill stage tiny", "Target account"));
+      if (account.isTargetAccount || labelSubs) {
+        const head = el("div", "wiza-head");
+        if (labelSubs) head.appendChild(el("span", "wiza-label", "Account"));
+        if (account.isTargetAccount) {
+          head.appendChild(el("span", "pill stage tiny", "Target account"));
+        }
+        sub.appendChild(head);
       }
-      sub.appendChild(head);
-
-      const accounts =
-        account.subscribedAccounts != null && account.associatedAccounts != null
-          ? `${fmt.number(account.subscribedAccounts)} of ${fmt.number(account.associatedAccounts)}`
-          : account.subscribedAccounts != null
-            ? fmt.number(account.subscribedAccounts)
-            : null;
-      const purchase = [
-        account.lastPurchaseAt ? fmt.date(account.lastPurchaseAt) : null,
-        account.timesPurchased != null ? `${fmt.number(account.timesPurchased)}×` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-
-      const grid = el("div", "kv-grid");
-      appendAll(grid, [
-        kv("Account ID", account.accountId || account.primaryAccountId),
-        kv("Subscribed", accounts),
-        kv(
-          "API credits",
-          account.apiCreditBalance != null ? fmt.number(account.apiCreditBalance) : null
-        ),
-        kv("Credits (30d)", account.creditsUsed30d != null ? fmt.number(account.creditsUsed30d) : null),
-        kv("Last purchase", purchase),
-        kv("ICP", account.icp),
-        kv("Industry", account.industry),
-        kv("Use case", account.useCase),
-      ]);
-      if (grid.childElementCount) sub.appendChild(grid);
-      body.appendChild(sub);
+      // Account data but nobody signed up: the company is known to us, this
+      // person isn't — stated on the front of the facts line rather than as a
+      // paragraph of its own above a grid of zeros.
+      const facts = factLine(
+        (user.isUser ? [] : [{ text: "Not a Wiza user" }]).concat(accountMetrics, accountFacts)
+      );
+      if (facts) sub.appendChild(facts);
+      if (sub.childElementCount) body.appendChild(sub);
     }
   }
 
@@ -1636,6 +1874,7 @@
     // line, so "no deals" never reads as "something's broken".
     if (errors.deals && !(bundle.deals || []).length) {
       setPill(crmEls.dealsPill, null);
+      crmEls.dealsSection.hidden = false;
       setNote(body, sectionErrorText(errors.deals, errors.dealsRetryAfterMs, "deals"), true);
       // eslint-disable-next-line no-console
       console.debug("[EasyBooking] deals section unavailable:", errors.deals);
@@ -1643,10 +1882,14 @@
     }
     const deals = bundle.deals || [];
     setPill(crmEls.dealsPill, deals.length ? String(deals.length) : null);
+    // "No open deals" is not a thing a rep does anything with, and it cost a
+    // section head plus a card to say. No deals, no section.
     if (!deals.length) {
-      setNote(body, "No open deals");
+      crmEls.dealsSection.hidden = true;
+      clearNode(body);
       return;
     }
+    crmEls.dealsSection.hidden = false;
     clearNode(body);
     for (const d of deals) {
       const row = el("div", "deal");
@@ -1680,35 +1923,54 @@
     }
   }
 
-  // One activity row. Everything type-specific (disposition · duration, meeting
-  // outcome, task status, note preview) arrives pre-composed in item.detail from
-  // hubspot-data.js; this is layout plus attribution.
-  function activityRow(item) {
+  // One activity row, two lines instead of three:
+  //   1  glyph · title · relative time (pushed to the trailing edge)
+  //   2  outcome/status/disposition, and the owner only when it just changed
+  //
+  // The type word ("TASK") is gone from line 1: the glyph carries it, with the
+  // word itself on the glyph's title. Everything type-specific (disposition ·
+  // duration, meeting outcome, task status, note preview) still arrives
+  // pre-composed in item.detail from hubspot-data.js.
+  //
+  // `prevOwner` is the previous rendered row's owner name. Attribution is
+  // run-length suppressed: on a list where one rep made every touch, the name
+  // appeared on all 13 rows and told a rep nothing after the first. It is shown
+  // on the first row and then only when it changes — which makes a change
+  // genuinely visible instead of hiding it in a column of identical names.
+  function activityRow(item, prevOwner) {
     const row = el("div", "act");
-    row.appendChild(el("span", "act-icon", ACT_ICON[item.type] || "·"));
+    const icon = el("span", "act-icon", ACT_ICON[item.type] || "·");
+    icon.title = item.label;
+    icon.setAttribute("aria-hidden", "true");
+    row.appendChild(icon);
 
     const main = el("div", "act-main");
     const top = el("div", "act-top");
-    top.appendChild(el("span", "act-type", item.label));
+    const summary = el("span", "act-summary", item.summary || item.label);
     if (item.direction) {
-      const arrow = el("span", null, item.direction === "out" ? "↑" : "↓");
+      const arrow = el("span", null, item.direction === "out" ? " ↑" : " ↓");
       arrow.title = item.direction === "out" ? "Outbound" : "Inbound";
-      top.appendChild(arrow);
+      summary.appendChild(arrow);
     }
-    // Only ever a resolved name. An engagement whose owner (or creator) we
-    // couldn't resolve renders with no attribution rather than a raw ID.
-    if (item.ownerName) top.appendChild(el("span", "act-owner", `by ${item.ownerName}`));
+    top.appendChild(summary);
     const when = fmt.relativeTime(item.timestamp);
     if (when) {
       const stamp = el("span", "act-when", when);
       const exact = fmt.dateTime(item.timestamp);
-      if (exact) stamp.title = exact; // relative in the row, absolute on hover
+      // The row's own type is in the stamp's title too, so a screen-reader user
+      // who lands on it gets what the glyph was carrying.
+      stamp.title = [item.label, exact].filter(Boolean).join(" · ");
       top.appendChild(stamp);
     }
     main.appendChild(top);
 
-    main.appendChild(el("div", "act-summary", item.summary || item.label));
-    if (item.detail) main.appendChild(el("div", "act-detail", item.detail));
+    // Line 2 is built only when it has something to add.
+    const detail = el("div", "act-detail");
+    if (item.detail) detail.appendChild(el("span", null, item.detail));
+    if (item.ownerName && item.ownerName !== prevOwner) {
+      detail.appendChild(el("span", "act-owner", `by ${item.ownerName}`));
+    }
+    if (detail.childElementCount) main.appendChild(detail);
 
     row.appendChild(main);
     return row;
@@ -1716,11 +1978,23 @@
 
   // The tab bar. Rebuilt on every render because the counts are per prospect;
   // the click/keyboard handlers are bound once to the container below.
+  //
+  // Only tabs that have rows are rendered. A dimmed "Emails 0 · Meetings 0 ·
+  // Notes 0" used to take ~40% of the bar to report three absences, and if only
+  // one type has rows the bar is hidden entirely — a tab bar with one real
+  // choice in it is not a choice.
   function renderActivityTabs(items) {
     const bar = crmEls.activityTabs;
+    const tabs = data.activity.tabs(items).filter((t) => !t.disabled);
+    // "All" plus exactly one type means both tabs show the same list.
+    if (tabs.length < 3) {
+      crm.activeTab = "all";
+      hideActivityTabs();
+      return;
+    }
     clearNode(bar);
     bar.style.display = "";
-    for (const tab of data.activity.tabs(items)) {
+    for (const tab of tabs) {
       const btn = el("button", "tab");
       btn.type = "button";
       btn.id = `crm-tab-${tab.key}`;
@@ -1728,10 +2002,6 @@
       btn.setAttribute("role", "tab");
       btn.setAttribute("aria-controls", "crm-activity");
       btn.setAttribute("aria-selected", tab.key === crm.activeTab ? "true" : "false");
-      // aria-disabled rather than the disabled attribute: an empty tab stays
-      // discoverable to a screen reader (it reports "Meetings 0, dimmed")
-      // instead of vanishing from the bar. Clicks and arrow keys skip it.
-      if (tab.disabled) btn.setAttribute("aria-disabled", "true");
       // Roving tabindex: one stop for the whole bar, arrows move within it.
       btn.tabIndex = tab.key === crm.activeTab ? 0 : -1;
       btn.appendChild(el("span", null, tab.label));
@@ -1771,12 +2041,18 @@
       return;
     }
     // Keep the rep's tab if it still has rows for this prospect, else "All".
+    // renderActivityTabs may force it back to "all" when there is no real
+    // choice to make, so it runs before the list is filtered.
     crm.activeTab = data.activity.resolveTab(items, crm.activeTab);
     renderActivityTabs(items);
 
     clearNode(body);
+    let prevOwner = null;
     for (const item of data.activity.filter(items, crm.activeTab)) {
-      body.appendChild(activityRow(item));
+      body.appendChild(activityRow(item, prevOwner));
+      // Only a row that *had* an owner moves the run along; an unattributed row
+      // in the middle must not make the next identical name look like a change.
+      if (item.ownerName) prevOwner = item.ownerName;
     }
   }
 
@@ -1846,12 +2122,17 @@
     setPill(crmEls.wizaPill, null);
     setPill(crmEls.dealsPill, null);
     setPill(crmEls.activityPill, null);
-    // Account context hides itself when a company has none; every other state
-    // (loading, error, signed out) has something to say, so it comes back. Same
-    // for "Others at this account", whose count is only ever a rendered list's.
+    // Four sections hide themselves when the record has nothing for them
+    // (Account context, Others at this account, Wiza, Deals); every other state
+    // — loading, error, signed out — has something to say, so they all come
+    // back here. The colleagues count and its shared-owner note are only ever a
+    // rendered list's.
     crmEls.accountSection.hidden = false;
     crmEls.colleaguesSection.hidden = false;
+    crmEls.wizaSection.hidden = false;
+    crmEls.dealsSection.hidden = false;
     setColleaguesCount(null);
+    setColleaguesOwnerNote(null);
     // Nothing below this point shows tabs unless a bundle is actually rendered.
     hideActivityTabs();
 
@@ -2255,14 +2536,19 @@
       sourceEl.textContent = "";
     }
 
-    // Hint: the most useful thing to say about the current state.
+    // Hint: only rendered when it has direction to give. In the normal state —
+    // a note is here and the prospect is matched — it restated the textarea's
+    // own placeholder, so it is hidden rather than spending two lines at 320px.
     if (!state.ctx) {
+      hintEl.hidden = false;
       hintEl.textContent =
         "Prospect not matched yet — open the prospect in the dialer so Dialer Helper Pro can read its HubSpot records.";
     } else if (!capture && !trimmed) {
+      hintEl.hidden = false;
       hintEl.textContent = "No note captured yet — write one in the dialer, or type it here.";
     } else {
-      hintEl.textContent = "Call notes from the dialer, ready to sync to HubSpot.";
+      hintEl.hidden = true;
+      hintEl.textContent = "";
     }
 
     renderSaved();

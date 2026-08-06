@@ -22,6 +22,11 @@
         --disabled-fg: #6b7280;
         --danger-fg: #b91c1c;
       }
+      /* Dark tokens, applied two ways: the OS preference, and an explicit
+         data-theme="dark" on the root (which a harness or a future in-panel
+         toggle can set, and which must win over a light OS preference). CSS has
+         no way to share a declaration block between selectors, so the three
+         blocks below are duplicates by necessity — change one, change all. */
       @media (prefers-color-scheme: dark) {
         :root {
           --ink: #e9e9f0;
@@ -39,6 +44,38 @@
           --disabled-fg: #7b7b88;
           --danger-fg: #f87171;
         }
+      }
+      :root[data-theme="dark"] {
+        --ink: #e9e9f0;
+        --muted: #9ca3af;
+        --line: #2c2c36;
+        --purple: #a48bf3;
+        --green-bg: #14351f;
+        --green-fg: #4ade80;
+        --amber-fg: #fbbf24;
+        --bg: #17171d;
+        --surface: #1e1e26;
+        --header-bg: #0d0d12;
+        --header-fg: #f4f4f8;
+        --disabled-bg: #34343f;
+        --disabled-fg: #7b7b88;
+        --danger-fg: #f87171;
+      }
+      :root[data-theme="light"] {
+        --ink: #0d0d12;
+        --muted: #6b7280;
+        --line: #ececf1;
+        --purple: #9371f0;
+        --green-bg: #e7f8ee;
+        --green-fg: #16a34a;
+        --amber-fg: #b45309;
+        --bg: #fff;
+        --surface: #fafafc;
+        --header-bg: var(--ink);
+        --header-fg: #fff;
+        --disabled-bg: #d1d5db;
+        --disabled-fg: #6b7280;
+        --danger-fg: #b91c1c;
       }
 
       * { box-sizing: border-box; }
@@ -211,52 +248,67 @@
         outline-offset: 1px;
       }
 
-      /* The panel is full-height; only this region scrolls. */
+      /* The panel is full-height; only this region scrolls. The 12px gutter is
+         also 8px more content width at the 320px floor, which is the difference
+         between one line and two for several of the dense rows below. */
       main {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
-        padding: 14px;
+        padding: 12px;
       }
 
-      section { margin-bottom: 14px; }
+      section { margin-bottom: 8px; }
       section:last-child { margin-bottom: 0; }
+      /* A section with nothing to say renders nothing. Explicit rather than
+         leaning on the UA rule for [hidden], because `section` carries its own
+         box here and a future display rule on it would silently beat it. */
+      main section[hidden] { display: none; }
 
+      /* Section chrome is pure overhead, so it is as short as it can be while
+         staying scannable: 10px caps on one 14px line, the count/grade pill
+         inline on that same line, and 3px to the card below. */
       .section-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        margin-bottom: 6px;
+        min-height: 14px;
+        margin-bottom: 3px;
       }
       .section-title {
         font-size: 10px;
+        line-height: 14px;
         font-weight: 700;
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
+      }
+      /* Left group of a section head: the title plus any inline qualifier (see
+         .sec-note). Keeps `space-between` pushing only the caret/pill right. */
+      .sec-head-main {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 6px;
+        min-width: 0;
+        margin-right: auto;
+      }
+      /* Sentence-case, not a label: a fact about the whole list, stated once so
+         every row below doesn't have to repeat it. */
+      .sec-note {
+        font-size: 11px;
+        line-height: 14px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
       }
 
-      .field { margin-bottom: 12px; }
-      .field:last-of-type { margin-bottom: 0; }
-      .field-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 3px;
-      }
-      .field-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        color: var(--muted);
-      }
       .pill {
         font-size: 10px;
+        /* Locked so a pill never makes a section head taller than its title. */
+        line-height: 12px;
         font-weight: 700;
-        padding: 2px 7px;
+        padding: 1px 7px;
         border-radius: 999px;
         background: var(--green-bg);
         color: var(--green-fg);
@@ -270,30 +322,56 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
-      .value {
-        font-size: 14px;
+      /* ---- Booking block ------------------------------------------------ */
+      /* What the scheduler will be filled with, in two lines: the captured
+         email, then the prospect's clock and the fill action. No ALL-CAPS
+         labels — an email looks like an email, and "their time" says the rest.
+         The capture age and the UTC offset ride along in the block's title;
+         the header's dot is the "we have a prospect" signal. */
+      .bk[title] { cursor: help; }
+      .bk-email {
+        font-size: 13px;
         font-weight: 600;
+        line-height: 1.3;
         overflow-wrap: anywhere;
       }
-      .value.sub {
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--muted);
-        margin-top: 1px;
+      .bk-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px 8px;
+        margin-top: 3px;
       }
+      .bk-tz {
+        font-size: 12px;
+        color: var(--muted);
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .bk-tz .bk-local { color: var(--ink); font-weight: 600; }
+      /* Not full-width: filling the form is one action among several on this
+         screen, and a 292px purple slab said otherwise. */
+      .bk-fill {
+        margin: 0;
+        width: auto;
+        flex: 0 0 auto;
+        padding: 5px 11px;
+        font-size: 12px;
+        border-radius: 6px;
+      }
+      /* Only ever rendered for something the rep has to know: a stale capture,
+         or the result of clicking Fill. Silent otherwise. */
+      .bk-meta {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .bk-meta.stale { color: var(--amber-fg); font-weight: 600; }
 
       .empty { text-align: center; padding: 8px 4px 4px; }
       .empty .big { font-size: 13px; font-weight: 600; color: var(--danger-fg); }
       .empty .small { font-size: 12px; color: var(--muted); margin-top: 4px; }
-
-      .meta {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 12px;
-        padding-top: 10px;
-        border-top: 1px solid var(--line);
-      }
-      .meta.stale { color: var(--amber-fg); font-weight: 600; }
 
       button {
         margin-top: 12px;
@@ -330,7 +408,7 @@
       .divider {
         border: 0;
         border-top: 1px solid var(--line);
-        margin: 16px 0;
+        margin: 10px 0;
       }
 
       /* Live content — a solid border, unlike the dashed "coming soon"
@@ -339,7 +417,7 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--surface);
-        padding: 10px 12px;
+        padding: 7px 9px;
       }
       .card .hint { font-size: 12px; color: var(--muted); margin: 0; }
       .pill.off {
@@ -387,9 +465,75 @@
       /* ---- CRM sections (Phase 3) -------------------------------------- */
       /* Everything below has to survive a 320px-wide panel, so: no fixed
          widths, no multi-column grids, and every long value wraps. */
-      .crm-body { display: flex; flex-direction: column; gap: 8px; }
+      .crm-body { display: flex; flex-direction: column; gap: 6px; }
       .crm-note { font-size: 12px; color: var(--muted); margin: 0; }
       .crm-note.bad { color: var(--danger-fg); }
+
+      /* One dense, wrapping line of `·`-joined facts, in place of a grid of
+         labelled cells. Used where the values name themselves ("Cool down",
+         "Grade B") or carry their own short label ("Sales team 8"): four of
+         those cost one line here and six lines as a .kv-grid. */
+      .fact-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 6px;
+        font-size: 11px;
+        line-height: 1.35;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .fact-line > span[title] { cursor: help; }
+      .fact-line .fact-n { color: var(--ink); font-weight: 700; }
+      /* The separator is decoration, not content: it must never be read out or
+         land in a copied selection as a word. */
+      .fact-sep { color: var(--line); }
+      /* Same separator for the other `·`-joined chip lines, where the items are
+         built as plain spans. Generated content, so it is punctuation only. */
+      .ident-seq > *:not(:first-child)::before,
+      .own-more > *:not(:first-child)::before,
+      .peer-meta > *:not(:first-child)::before,
+      .act-detail > *:not(:first-child)::before {
+        content: "·";
+        color: var(--line);
+        margin-right: 6px;
+      }
+
+      /* Running prose (the company blurb, the ICP rationale) is the least
+         scannable thing in the panel, so it shows two lines and hands the rest
+         to an explicit toggle. The DOM holds the full text either way, so
+         nothing is lost and nothing truncates mid-sentence on screen. */
+      .prose {
+        font-size: 12px;
+        line-height: 1.4;
+        margin: 0;
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+      }
+      .prose.open {
+        display: block;
+        -webkit-line-clamp: unset;
+      }
+      .prose.why { font-size: 11px; color: var(--muted); }
+      .prose-more {
+        margin: 1px 0 0;
+        width: auto;
+        padding: 0;
+        background: none;
+        border: 0;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      .prose-more:hover { color: var(--purple); }
+      .prose-more:focus-visible { outline: 2px solid var(--purple); outline-offset: 1px; }
 
       /* Record title line: a link plus any number of pills, wrapping. */
       .rec-head {
@@ -401,24 +545,6 @@
       .rec-name { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
       a.rec-name, a.link { color: var(--purple); text-decoration: none; }
       a.rec-name:hover, a.link:hover { text-decoration: underline; }
-
-      /* Label→value rows. Label above value keeps long values readable at the
-         panel's minimum width instead of squeezing them into a side column. */
-      .kv { display: flex; flex-direction: column; gap: 1px; }
-      .kv-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        color: var(--muted);
-      }
-      .kv-value { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
-      /* Two per row when there is room; one when there isn't. */
-      .kv-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-        gap: 8px;
-      }
 
       .pill.info {
         background: transparent;
@@ -565,20 +691,23 @@
          labelled rows instead of one anonymous name in .ident-meta. Outbound
          owner is the prominent one — it is the field HubSpot itself says to use
          for outbound ownership. Everything wraps; nothing is fixed-width. */
+      /* One name usually owns all three roles on these records, so the common
+         case is a single line here — see ownershipBlock in sidepanel.js. */
       .own {
         display: flex;
         flex-direction: column;
-        gap: 2px;
-        margin-top: 4px;
-        padding-top: 5px;
+        gap: 1px;
+        margin-top: 3px;
+        padding-top: 4px;
         border-top: 1px solid var(--line);
       }
       .own-primary {
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: 2px 6px;
+        gap: 0 6px;
       }
+      .own-primary[title] { cursor: help; }
       .own-label {
         font-size: 10px;
         font-weight: 700;
@@ -587,12 +716,13 @@
         color: var(--muted);
         flex: 0 0 auto;
       }
-      .own-name { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+      .own-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
       .own-more {
         display: flex;
         flex-wrap: wrap;
-        gap: 1px 10px;
+        gap: 0 10px;
         font-size: 11px;
+        line-height: 1.35;
         color: var(--muted);
       }
       .own-more .own-who { font-weight: 600; color: var(--ink); }
@@ -600,48 +730,30 @@
       .ident-links {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px 12px;
-        margin-top: 4px;
+        gap: 0 12px;
+        margin-top: 3px;
         font-size: 12px;
+        line-height: 1.35;
         font-weight: 600;
       }
-      /* "In sequence: Outbound Q3 since Jul 2, 2026 · last contacted 3d ago" */
+      /* "In sequence: Outbound Q3 · contacted 3d ago" — the enrolment date is
+         hover detail, not a second line. */
       .ident-seq {
         display: flex;
         flex-wrap: wrap;
-        gap: 2px 8px;
-        margin-top: 4px;
-        font-size: 11px;
-        color: var(--muted);
-      }
-      .ident-seq .seq-on { color: var(--purple); font-weight: 600; }
-
-      /* ---- Account context (Phase 8) ----------------------------------- */
-      /* Explicit rather than leaning on the UA rule for [hidden]: this section
-         is hidden from JS whenever the company has nothing to put in it. */
-      #crm-account-section[hidden] { display: none; }
-      /* The blurb is the one place in the panel with running prose; cap it at a
-         few lines and hand the rest to the hover title. */
-      .ctx-snippet {
-        font-size: 12px;
-        line-height: 1.4;
-        margin: 0;
-        overflow-wrap: anywhere;
-      }
-      .ctx-snippet[title], .ctx-why[title] { cursor: help; }
-      .ctx-why {
+        gap: 0 6px;
+        margin-top: 3px;
         font-size: 11px;
         line-height: 1.35;
         color: var(--muted);
-        margin: 0;
-        overflow-wrap: anywhere;
       }
+      .ident-seq .seq-on { color: var(--purple); font-weight: 600; }
+      .ident-seq [title] { cursor: help; }
+
+      /* ---- Account context (Phase 8) ----------------------------------- */
       .ctx-more { color: var(--muted); font-weight: 600; }
 
       /* ---- Others at this account (Phase 9) ----------------------------- */
-      /* Same reason as the account-context section: JS hides this one whenever
-         the prospect has no company. */
-      #crm-colleagues-section[hidden] { display: none; }
       /* The section head doubles as the <details> toggle. It keeps the exact
          .section-head layout so the collapsible section doesn't read as a
          different kind of thing to the four fixed ones. */
@@ -663,17 +775,30 @@
       .peer-list {
         display: flex;
         flex-direction: column;
-        max-height: max(180px, 34vh);
+        max-height: max(150px, 26vh);
         overflow-y: auto;
       }
-      .peer + .peer { margin-top: 7px; border-top: 1px solid var(--line); padding-top: 7px; }
+      .peer + .peer { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 5px; }
+      /* Wide panel: colleagues are the one list where reading order doesn't
+         matter much, so they take the horizontal space the panel gained instead
+         of a second screen of vertical space. The row separators go with the
+         single column — in a grid they would draw a line under half a row. */
+      @media (min-width: 500px) {
+        .peer-list {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 7px 16px;
+          align-content: start;
+        }
+        .peer + .peer { margin-top: 0; border-top: 0; padding-top: 0; }
+      }
       .peer-top {
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: 3px 6px;
+        gap: 0 6px;
       }
-      .peer-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+      .peer-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
       a.peer-name { color: var(--purple); text-decoration: none; }
       a.peer-name:hover { text-decoration: underline; }
       /* Icon-link, not a word: at 320px the row is already carrying a name, a
@@ -693,9 +818,9 @@
       .peer-meta {
         display: flex;
         flex-wrap: wrap;
-        gap: 1px 8px;
-        margin-top: 1px;
+        gap: 0 6px;
         font-size: 11px;
+        line-height: 1.35;
         color: var(--muted);
         overflow-wrap: anywhere;
       }
@@ -705,16 +830,16 @@
 
       /* ---- Wiza section ------------------------------------------------- */
       .wiza-sub + .wiza-sub {
-        margin-top: 8px;
+        margin-top: 6px;
         border-top: 1px solid var(--line);
-        padding-top: 8px;
+        padding-top: 6px;
       }
       .wiza-head {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 6px;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
       }
       .wiza-label {
         font-size: 10px;
@@ -726,9 +851,10 @@
       .wiza-links {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px 12px;
-        margin-top: 6px;
+        gap: 0 12px;
+        margin-top: 4px;
         font-size: 12px;
+        line-height: 1.35;
         font-weight: 600;
       }
 
@@ -757,12 +883,14 @@
       /* ---- Activity tabs + scroller ------------------------------------- */
       /* The bar scrolls sideways instead of wrapping: at 320px six tabs don't
          fit, and a wrapping bar changes height as counts change. */
+      /* Only tabs with rows are rendered (see renderActivityTabs), so the bar
+         holds at most three at a time and never shows a dimmed "Notes 0". */
       .tabs {
         display: flex;
         gap: 3px;
         overflow-x: auto;
         scrollbar-width: none;
-        padding-bottom: 6px;
+        padding-bottom: 4px;
         border-bottom: 1px solid var(--line);
       }
       .tabs::-webkit-scrollbar { display: none; }
@@ -791,45 +919,65 @@
       }
 
       /* Holds up to 25 rows per type without the section taking over the panel:
-         a ceiling at ~40% of the viewport (never below 200px) and its own
-         scrollbar. */
+         a ceiling at ~26% of the viewport (never below 180px) and its own
+         scrollbar. The ceiling came down from 40vh with the row height: a
+         two-line row is ~30px against the old three-line ~57px, so this shows
+         MORE of the timeline than the taller box did, in a smaller panel. */
       .act-list {
         display: flex;
         flex-direction: column;
-        max-height: max(200px, 40vh);
+        max-height: max(180px, 26vh);
         overflow-y: auto;
       }
 
-      /* Activity rows: fixed-width type gutter, everything else fluid. */
-      .act { display: flex; gap: 8px; }
-      .act + .act { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+      /* Activity rows: fixed-width type gutter, everything else fluid.
+         Line 1 = glyph · title · relative time (right-aligned).
+         Line 2 = outcome/status, plus the owner only when it just changed. */
+      .act { display: flex; gap: 6px; }
+      .act + .act { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 5px; }
       .act-icon {
         flex: 0 0 auto;
-        width: 20px;
+        width: 14px;
         text-align: center;
-        font-size: 13px;
-        line-height: 18px;
+        font-size: 12px;
+        line-height: 17px;
+        color: var(--muted);
       }
+      .act-icon[title] { cursor: help; }
       .act-main { min-width: 0; flex: 1 1 auto; }
       .act-top {
         display: flex;
-        flex-wrap: wrap;
         align-items: baseline;
         gap: 6px;
-        font-size: 11px;
-        color: var(--muted);
       }
-      .act-type { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-      .act-owner { font-weight: 600; }
-      /* The relative time carries a title= with the absolute stamp. */
-      .act-when { cursor: help; }
       .act-summary {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 500;
-        margin-top: 1px;
+        line-height: 1.35;
+        min-width: 0;
         overflow-wrap: anywhere;
       }
-      .act-detail { font-size: 11px; color: var(--muted); margin-top: 1px; }
+      /* Pushed to the trailing edge, and never wrapped: a column of times is
+         what makes the list scannable. The absolute stamp is on its title. */
+      .act-when {
+        flex: 0 0 auto;
+        margin-left: auto;
+        font-size: 11px;
+        line-height: 1.35;
+        color: var(--muted);
+        white-space: nowrap;
+        cursor: help;
+      }
+      .act-detail {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 6px;
+        font-size: 11px;
+        line-height: 1.3;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .act-detail .act-owner { font-weight: 600; }
 
       /* Loading skeletons — per section, so a slow Activity fetch doesn't hide
          a Contact card that already arrived. */
@@ -851,10 +999,14 @@
         .skel { animation: none; }
       }
       /* ===== Notes → HubSpot sync (Phase 4) ===== */
-      #notes-hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+      /* The hint only renders when it has direction to give (no prospect
+         matched, nothing captured yet); the textarea's placeholder covers the
+         normal case, so the line is hidden rather than restating it. */
+      #notes-hint { font-size: 12px; color: var(--muted); margin: 0 0 5px; }
+      #notes-hint[hidden] { display: none; }
       #notes-text {
         width: 100%;
-        min-height: 92px;
+        min-height: 66px;
         resize: vertical;
         padding: 8px 9px;
         border: 1px solid var(--line);
@@ -876,7 +1028,8 @@
         color: var(--muted);
       }
       .notes-meta .over { color: var(--danger-fg); font-weight: 700; }
-      #notes-saved { margin-top: 8px; font-size: 12px; }
+      #notes-sync { margin-top: 7px; padding: 7px; }
+      #notes-saved { margin-top: 6px; font-size: 12px; }
       #notes-saved summary { color: var(--muted); cursor: pointer; }
       #notes-saved-body {
         margin-top: 6px;
@@ -898,8 +1051,9 @@
         margin-bottom: 2px;
       }
       #notes-saved-body .saved-block + .saved-block { margin-top: 8px; }
-      #notes-blockers { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
-      #notes-result { font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }
+      #notes-blockers { font-size: 11px; color: var(--muted); margin: 5px 0 0; }
+      #notes-blockers:empty { display: none; }
+      #notes-result { font-size: 12px; margin: 6px 0 0; overflow-wrap: anywhere; }
       #notes-result.ok { color: var(--green-fg); font-weight: 600; }
       #notes-result.err { color: var(--danger-fg); font-weight: 600; }
       #notes-result a { color: inherit; }
@@ -992,25 +1146,22 @@
     </header>
 
     <main>
+      <!-- What the booking form will be filled with. Two lines: the captured
+           email, then the prospect's zone and clock next to the fill action.
+           The capture age and the UTC offset live in the block's title, and the
+           #captured "Captured" pills are gone — the header's green dot already
+           says a live prospect is loaded. -->
       <section id="prospect">
-        <div id="captured">
-          <div class="field">
-            <div class="field-head">
-              <span class="field-label">Email</span>
-              <span class="pill">Captured</span>
-            </div>
-            <div id="email" class="value"></div>
+        <div id="captured" class="bk">
+          <div id="email" class="bk-email"></div>
+          <div class="bk-row">
+            <div id="tz" class="bk-tz"></div>
+            <button id="fill" class="bk-fill" title="Fill the booking form on the scheduler tab">
+              Fill form
+            </button>
           </div>
-          <div class="field" id="tz-field">
-            <div class="field-head">
-              <span class="field-label">Timezone</span>
-              <span class="pill">Captured</span>
-            </div>
-            <div id="tz" class="value"></div>
-            <div id="tz-sub" class="value sub"></div>
-          </div>
-          <div id="meta" class="meta"></div>
-          <button id="fill">Fill booking form now</button>
+          <!-- Stale captures and the result of clicking Fill; empty otherwise. -->
+          <div id="meta" class="bk-meta" role="status" aria-live="polite" hidden></div>
         </div>
         <div id="empty" class="empty" style="display: none">
           <div class="big">No prospect captured yet</div>
@@ -1060,7 +1211,12 @@
       <section id="crm-colleagues-section">
         <details id="crm-colleagues-details" open>
           <summary class="section-head sec-toggle">
-            <span class="section-title" id="crm-colleagues-title">Others at this account</span>
+            <span class="sec-head-main">
+              <span class="section-title" id="crm-colleagues-title">Others at this account</span>
+              <!-- "all Jasper Guilaran" when every colleague shares one owner,
+                   so no row has to repeat it. Empty when owners are mixed. -->
+              <span class="sec-note" id="crm-colleagues-owner"></span>
+            </span>
             <span class="sec-caret" aria-hidden="true">▾</span>
           </summary>
           <div class="card crm-body">
