@@ -12,7 +12,7 @@
 
          Every colour value in this file is declared EXACTLY ONCE, here. Every
          rule past this block references a token — so a colour is one edit, in
-         one place. Tokens whose value is another token (--on-accent, --sep,
+         one place. Tokens whose value is another token (--on-accent,
          --field-line, the neutral tone) exist so the ROLE has a name without
          restating the hex.
 
@@ -60,7 +60,7 @@
         /* ---- Purple scale. All decoration comes from here. ------------- */
         --accent: #7e43ff; /* primary: fills, focus rings, key metrics */
         --accent-ink: #4c24a3; /* series 3, and accent TEXT on tinted ground */
-        --accent-2: #9371f0; /* series 2, and the "·" between facts */
+        --accent-2: #9371f0; /* series 2 */
         --accent-soft: #b5aeff; /* soft accents */
         --accent-tint: #e4d8fd; /* highlight tints: selected tab, stage pill */
         --accent-wash: #f5f0ff; /* faint washes and hovers */
@@ -90,7 +90,6 @@
         --tone-info-fg: var(--tone-info); /* passes AA on its own tint as-is */
         --tone-neutral-fg: var(--muted); /* "no state", not a colour of its own */
         --tone-neutral-bg: transparent;
-        --sep: var(--accent-2); /* the "·" is decoration → purple scale */
         --field-line: var(--tertiary); /* input / select / textarea edges, 3:1 */
         --disabled-bg: var(--rule);
         --disabled-fg: var(--muted);
@@ -137,6 +136,18 @@
            edge and has to paint over the scrolling body below it. */
         position: relative;
         z-index: 20;
+      }
+      /* The Wiza mark, at the far left of the header — the same place the
+         product's own extension puts it. A local PNG (icons/wizainc_logo.png):
+         MV3's CSP allows it, it is never inlined as a data URI, and it is
+         decorative because the wordmark next to it already names the panel. */
+      header .brand {
+        flex: 0 0 auto;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        display: block;
+        object-fit: contain;
       }
       /* Capture status: idle grey until a prospect is loaded, then the positive
          tone with a halo. A state, so it is a semantic colour, not decoration. */
@@ -325,8 +336,20 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        min-height: 14px;
+        min-height: 15px;
         margin-bottom: 3px;
+      }
+      /* One monochrome outline glyph per section, ahead of its title: six
+         ALL-CAPS grey labels in a column are hard to tell apart at a glance, and
+         a person / building / people / W / tag / bolt / pencil is instant. Static
+         markup (see the heads below), 2px stroke, currentColor — so it is the
+         same grey as the label it belongs to and carries no colour of its own.
+         Decorative: the title is the accessible name. */
+      .sec-icon {
+        flex: 0 0 auto;
+        width: 15px;
+        height: 15px;
+        color: var(--muted);
       }
       .section-title {
         font-size: 10px;
@@ -336,12 +359,13 @@
         text-transform: uppercase;
         color: var(--muted);
       }
-      /* Left group of a section head: the title plus any inline qualifier (see
-         .sec-note). Keeps `space-between` pushing only the caret/pill right. */
+      /* Left group of a section head: the icon and title plus any inline
+         qualifier (see .sec-note). Keeps `space-between` pushing only the
+         caret/pill right — with three flex items it would centre the middle one. */
       .sec-head-main {
         display: flex;
         flex-wrap: wrap;
-        align-items: baseline;
+        align-items: center;
         gap: 0 6px;
         min-width: 0;
         margin-right: auto;
@@ -389,29 +413,55 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
-      /* ---- Booking block ------------------------------------------------ */
-      /* What the scheduler will be filled with, in two lines: the captured
-         email, then the prospect's clock and the fill action. No ALL-CAPS
-         labels — an email looks like an email, and "their time" says the rest.
-         The capture age and the UTC offset ride along in the block's title;
-         the header's dot is the "we have a prospect" signal. */
+      /* ---- Booking cluster ---------------------------------------------- */
+      /* What the scheduler will be filled with: the captured email, then the
+         prospect's clock and the fill action. No ALL-CAPS labels — an email
+         looks like an email, and "their time" says the rest. The capture age
+         and the full zone name ride along in the block's title; the header's
+         dot is the "we have a prospect" signal.
+
+         The ONE decorated surface in the panel, and deliberately so: a faint
+         purple wash inside a rounded edge from the accent scale marks "this is
+         the live capture" without spending a label line on saying it. It is
+         also the only block that MOVES — it lives in the Contact column of
+         Contact & company when there is a matched record to sit inside, and in
+         its own section above the sections otherwise (no match, signed out,
+         loading, error). Same node either way; see mountBooking in
+         sidepanel.js. */
+      .bk {
+        border: 1px solid var(--accent-tint);
+        border-radius: 9px;
+        background: var(--accent-wash);
+        padding: 6px 8px;
+      }
       .bk[title] { cursor: help; }
+      /* Inside the Contact column the block is ~115px wide at the 320px floor,
+         so the email is 12px and wraps; standalone it has the whole panel. */
       .bk-email {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: var(--fw-value);
-        line-height: 1.3;
+        line-height: 1.35;
         overflow-wrap: anywhere;
       }
+      #prospect > .bk { padding: 7px 9px; }
+      #prospect > .bk .bk-email { font-size: 13px; }
       .bk-row {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: 4px 8px;
-        margin-top: 3px;
+        margin-top: 4px;
       }
+      /* Zone abbreviation, UTC offset and the prospect's own clock are three
+         discrete facts, spaced by the row's gap — never joined by a glyph. */
       .bk-tz {
-        font-size: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 8px;
+        font-size: 11px;
+        line-height: 1.4;
         color: var(--muted);
         min-width: 0;
         overflow-wrap: anywhere;
@@ -423,7 +473,7 @@
         margin: 0;
         width: auto;
         flex: 0 0 auto;
-        padding: 5px 11px;
+        padding: 4px 10px;
         font-size: 12px;
         border-radius: 6px;
       }
@@ -502,9 +552,11 @@
 
       /* Live content — a solid border, unlike the dashed "coming soon"
          placeholder treatment above. */
+      /* Generous rounding, tight padding: the corner radius is what makes a
+         stack of cards read as one system, and it costs no vertical space. */
       .card {
         border: 1px solid var(--line);
-        border-radius: 8px;
+        border-radius: 10px;
         background: var(--surface);
         padding: 7px 9px;
       }
@@ -559,34 +611,66 @@
       .crm-note { font-size: 12px; color: var(--muted); margin: 0; }
       .crm-note.bad { color: var(--tone-negative-fg); }
 
-      /* One dense, wrapping line of `·`-joined facts, in place of a grid of
-         labelled cells. Used where the values name themselves ("Cool down",
-         "Grade B") or carry their own short label ("Sales team 8"): four of
-         those cost one line here and six lines as a .kv-grid. */
+      /* One dense, wrapping line of facts. The labelled datapoints that used to
+         live here are stat chips now (see below); what is left is the Tech row,
+         where the value is one long comma-separated list with its own toggle.
+         There is no separator glyph anywhere in the panel: discrete facts are
+         separated by the row's own column gap — wide enough to read as a break,
+         and nothing lands in the accessibility tree or a copied selection that
+         isn't a value. Every other fact row (.ident-seq, .own-more, .peer-meta,
+         .act-detail, .deal-outcome, .ident-facts) follows the same rule. */
       .fact-line {
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: 0 6px;
+        gap: 0 10px;
         font-size: 11px;
         line-height: 1.35;
         color: var(--muted);
         overflow-wrap: anywhere;
       }
       .fact-line > span[title] { cursor: help; }
-      .fact-line .fact-n { color: var(--ink); font-weight: var(--fw-head); }
-      /* The separator is decoration, not content: it must never be read out or
-         land in a copied selection as a word. */
-      .fact-sep { color: var(--sep); }
-      /* Same separator for the other `·`-joined chip lines, where the items are
-         built as plain spans. Generated content, so it is punctuation only. */
-      .ident-seq > *:not(:first-child)::before,
-      .own-more > *:not(:first-child)::before,
-      .peer-meta > *:not(:first-child)::before,
-      .act-detail > *:not(:first-child)::before {
-        content: "·";
-        color: var(--sep);
-        margin-right: 6px;
+
+      /* ---- Stat chips ---------------------------------------------------
+         The panel's one labelled-datapoint idiom: a muted ALL-CAPS caption over
+         a bold value, in a rounded box of page white on the card's grey fill.
+         It replaces every label-left inline pattern, so "ASM SALES TEAM / 8"
+         reads the same wherever it appears (Account context, Wiza).
+
+         Chips size to content and wrap; the label never wraps (it is what sets
+         the chip's width), the value does. A datapoint with no value is NOT
+         rendered — an empty box is worse than a missing one. */
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .chip {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        max-width: 100%;
+        padding: 1px 6px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+      }
+      .chip[title] { cursor: help; }
+      .chip-label {
+        font-size: 10px;
+        line-height: 12px;
+        font-weight: var(--fw-caption);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .chip-value {
+        font-size: 12px;
+        line-height: 14px;
+        font-weight: var(--fw-value);
+        color: var(--ink);
+        overflow-wrap: anywhere;
       }
 
       /* Running prose (the company blurb, the ICP rationale) is the least
@@ -689,6 +773,98 @@
         padding: 4px 6px;
       }
       .peer.peer-alert + .peer { border-top: 0; }
+      /* On the negative tint the accent violet is 4.27:1 — under AA for a 12px
+         name — so the link takes the darker accent text tint, which is 8.4:1.
+         Same rule as everywhere else: --accent-ink is accent TEXT on a tinted
+         ground. (Pre-existing; caught by the contrast pass on painted pixels.) */
+      .peer.peer-alert a.peer-name { color: var(--accent-ink); }
+
+      /* ---- Record tiles -------------------------------------------------
+         A 20px tile in front of a company or a person: the company's favicon
+         when we have a domain to ask for one, deterministic initials otherwise
+         (and initials again if the image fails to load — a broken-image glyph
+         must never appear). It is the cheapest way to break up a column of
+         names, and it is what makes four colleague rows scannable.
+
+         Decoration, so the fill comes from the purple scale and never a tone.
+         Three variants, each paired with a label colour that passes AA at 9px:
+         --accent 5.08:1 and --accent-ink 9.42:1 carry white, --accent-2 carries
+         --ink at 4.90:1 (white on it is 3.39:1, which fails). --accent-soft is
+         not in the rotation at all: 1.71:1 with white, 7.7:1 with ink but so
+         pale that the tile stops reading as a tile. */
+      .tile {
+        flex: 0 0 auto;
+        align-self: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        overflow: hidden;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        line-height: 1;
+        font-weight: var(--fw-head);
+        text-transform: uppercase;
+      }
+      /* Two bigger sizes, for the two record headers. The contact's photo is the
+         largest thing in the card on purpose — it is the person the rep is about
+         to talk to — and it is a circle, because a headshot in a rounded square
+         reads as a logo. */
+      .tile-lg {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .tile-md {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        font-size: 11px;
+      }
+      .tile-round { border-radius: 50%; }
+      /* Header row: the tile in its own column, everything else wrapping in what
+         is left. At the 320px floor the Contact column is ~129px, so a name beside
+         a 36px photo wraps to two lines rather than pushing the photo onto a line
+         of its own. */
+      .ident-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .ident-head > .ident-line { min-width: 0; flex: 1 1 auto; }
+
+      .tile-a { background: var(--accent); color: var(--on-accent); }
+      .tile-b { background: var(--accent-ink); color: var(--on-accent); }
+      .tile-c { background: var(--accent-2); color: var(--ink); }
+      /* A favicon is a picture on its own ground: page white behind it and a
+         hairline round it, so a white-on-white logo still reads as a tile. */
+      .tile-logo { background: var(--bg); border: 1px solid var(--line); }
+      .tile-logo img { width: 100%; height: 100%; display: block; object-fit: contain; }
+      /* A headshot fills its circle; a logo is letterboxed inside its square. */
+      .tile-round.tile-logo img { object-fit: cover; }
+
+      /* The LinkedIn glyph beside the contact's name: the profile the dialer
+         captured, one click away. Outline style at the panel's usual 2px stroke
+         (the brand lockup is unreadable at 14px), accent-coloured because it is a
+         link, and a real 20px hit box even though the mark is 14px. */
+      a.li-glyph {
+        flex: 0 0 auto;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a.li-glyph svg { width: 14px; height: 14px; display: block; }
+      a.li-glyph:hover { background: var(--accent-wash); color: var(--accent-ink); }
+      a.li-glyph:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
       /* Record title line: a link plus any number of pills, wrapping. */
       .rec-head {
@@ -726,15 +902,19 @@
       .pill.tiny { font-size: 9px; padding: 1px 6px; }
 
       /* ---- Identity block ---------------------------------------------- */
-      /* Three lines, tight leading: name · stage / title @ company /
-         owner · phone. Each line wraps rather than truncating — at 320px a
-         long company name is still worth reading. */
+      /* Tight leading, one fact per line: name + stage, then the booking
+         cluster, the title, the phone row and the owner rows. Each line wraps
+         rather than truncating — at 320px a long company name is still worth
+         reading. */
       .ident { display: flex; flex-direction: column; gap: 3px; }
+      /* 5px, not 6: with a record tile in front of it, "Aaron Moloney" plus its
+         tile is exactly the width of the Contact column at the 320px floor, and
+         one pixel of gap is what keeps the name off a second line. */
       .ident-line {
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
-        gap: 4px 6px;
+        gap: 4px 5px;
       }
       .ident-role {
         font-size: 12px;
@@ -748,6 +928,14 @@
          (It used to be opacity 0.55, which computed to 2.6:1.) */
       .ident-role .at { color: inherit; }
       .ident-role a.link { font-weight: var(--fw-value); }
+      /* The company's own facts (domain, industry, headcount): three discrete
+         values on one wrapping line, spaced by the gap. */
+      .ident-role.ident-facts {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 8px;
+      }
       .ident-meta {
         display: flex;
         flex-wrap: wrap;
@@ -909,18 +1097,37 @@
       .ident-links {
         display: flex;
         flex-wrap: wrap;
-        gap: 0 12px;
-        margin-top: 3px;
+        gap: 4px 6px;
+        margin-top: 4px;
         font-size: 12px;
         line-height: 1.35;
         font-weight: var(--fw-value);
       }
-      /* "In sequence: Outbound Q3 · contacted 3d ago" — the enrolment date is
-         hover detail, not a second line. */
+      /* A bordered, compact affordance rather than a bare underlined word: the
+         same shape as the colleague "in" chip and the product's own "View in
+         HubSpot" button, so every out-link in the panel reads as one control
+         type. Applies to the row links only — inline links inside prose keep
+         being text. */
+      .ident-links a.link,
+      .wiza-links a.link {
+        padding: 1px 7px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+        line-height: 17px;
+      }
+      .ident-links a.link:hover,
+      .wiza-links a.link:hover {
+        background: var(--accent-wash);
+        border-color: var(--accent-soft);
+        text-decoration: none;
+      }
+      /* "In sequence: Outbound Q3" then "contacted 3d ago" — two discrete
+         facts, spaced by the gap; the enrolment date is hover detail. */
       .ident-seq {
         display: flex;
         flex-wrap: wrap;
-        gap: 0 6px;
+        gap: 0 10px;
         margin-top: 3px;
         font-size: 11px;
         line-height: 1.35;
@@ -995,17 +1202,23 @@
       }
       a.peer-li:hover { background: var(--accent-wash); }
       a.peer-li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      /* Line two of a colleague row: the title on the leading edge, the
+         relative time pushed to the trailing edge, and the owner (only when
+         owners are mixed) between them. A column of right-aligned times is what
+         makes the list scannable, and it replaces the separator glyph these
+         three used to be strung together with. */
       .peer-meta {
         display: flex;
         flex-wrap: wrap;
-        gap: 0 6px;
+        align-items: baseline;
+        gap: 0 8px;
         font-size: 11px;
         line-height: 1.35;
         color: var(--muted);
         overflow-wrap: anywhere;
       }
-      .peer-title { color: var(--ink); }
-      .peer-when { cursor: help; }
+      .peer-title { color: var(--ink); min-width: 0; }
+      .peer-when { margin-left: auto; cursor: help; white-space: nowrap; }
       .peer-owner .peer-who { font-weight: var(--fw-value); color: var(--ink); }
 
       /* ---- Wiza section ------------------------------------------------- */
@@ -1031,8 +1244,8 @@
       .wiza-links {
         display: flex;
         flex-wrap: wrap;
-        gap: 0 12px;
-        margin-top: 4px;
+        gap: 4px 6px;
+        margin-top: 5px;
         font-size: 12px;
         line-height: 1.35;
         font-weight: var(--fw-value);
@@ -1051,7 +1264,12 @@
       .deal-amount { font-weight: var(--fw-head); color: var(--ink); }
       /* Why a closed deal ended — the re-approach talk track (Phase 8). Only
          ever rendered on closed rows, and only when the portal says something. */
+      /* The reason and its categories are discrete values, spaced by the gap. */
       .deal-outcome {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 8px;
         margin-top: 2px;
         font-size: 11px;
         color: var(--muted);
@@ -1074,12 +1292,15 @@
         border-bottom: 1px solid var(--rule);
       }
       .tabs::-webkit-scrollbar { display: none; }
+      /* Every tab carries a transparent hairline so the selected one can take a
+         visible edge without the bar changing height. */
       .tab {
         margin: 0;
         width: auto;
         flex: 0 0 auto;
-        padding: 3px 8px;
-        border-radius: 6px;
+        padding: 2px 8px;
+        border: 1px solid transparent;
+        border-radius: 999px;
         background: transparent;
         box-shadow: none;
         color: var(--muted);
@@ -1088,11 +1309,15 @@
         white-space: nowrap;
       }
       .tab:hover:not([aria-disabled="true"]) { background: var(--accent-wash); color: var(--accent-ink); }
-      /* Decoration, not state: the selected tab is the purple scale. The
-         label is --accent-ink, because the accent violet on the tint is 3.76:1
-         and this is 11px text. */
+      /* Decoration, not state: the selected tab is the purple scale. An
+         OUTLINED pill — page white inside an accent edge — rather than a tinted
+         slab: it reads as the one selected control on a row of plain words, and
+         it is the same language as the product's own tab bar. The label is
+         --accent-ink, because the accent violet is 5.08:1 on white but this is
+         11px text and the darker tint has margin to spare. */
       .tab[aria-selected="true"] {
-        background: var(--accent-tint);
+        background: var(--bg);
+        border-color: var(--accent);
         color: var(--accent-ink);
       }
       .tab[aria-disabled="true"] { color: var(--disabled-fg); cursor: default; }
@@ -1115,18 +1340,29 @@
       }
 
       /* Activity rows: fixed-width type gutter, everything else fluid.
-         Line 1 = glyph · title · relative time (right-aligned).
+         Line 1 = type glyph, title, relative time (pushed right).
          Line 2 = outcome/status, plus the owner only when it just changed. */
       .act { display: flex; gap: 6px; }
       .act + .act { margin-top: 5px; border-top: 1px solid var(--rule); padding-top: 5px; }
+      /* One tinted disc per engagement type, in place of the old text glyphs
+         (☎ ✉ ◷ ✎ ✓), which rendered at a different size and weight on every
+         platform. The disc gives the panel's longest list a rhythm down its left
+         edge — which is the whole reason it is a disc and not a bare glyph.
+         Decoration, so the wash and the stroke both come from the purple scale;
+         --accent-ink on --accent-wash is 9.0:1, well past the 3:1 a graphical
+         mark has to make. */
       .act-icon {
         flex: 0 0 auto;
-        width: 14px;
-        text-align: center;
-        font-size: 12px;
-        line-height: 17px;
-        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--accent-wash);
+        color: var(--accent-ink);
       }
+      .act-icon svg { width: 11px; height: 11px; display: block; }
       .act-icon[title] { cursor: help; }
       .act-main { min-width: 0; flex: 1 1 auto; }
       .act-top {
@@ -1155,7 +1391,7 @@
       .act-detail {
         display: flex;
         flex-wrap: wrap;
-        gap: 0 6px;
+        gap: 0 10px;
         font-size: 11px;
         line-height: 1.3;
         color: var(--muted);
@@ -1291,6 +1527,9 @@
   </head>
   <body>
     <header id="header">
+      <!-- The Wiza mark. A local file, never a data URI; alt is empty because
+           the wordmark beside it is the accessible name. -->
+      <img class="brand" src="icons/wizainc_logo.png" alt="" aria-hidden="true" />
       <span class="dot"></span>
       <h1>Dialer Helper Pro</h1>
       <span class="spacer"></span>
@@ -1395,11 +1634,20 @@
     </header>
 
     <main>
-      <!-- What the booking form will be filled with. Two lines: the captured
-           email, then the prospect's zone and clock next to the fill action.
-           The capture age and the UTC offset live in the block's title, and the
+      <!-- What the booking form will be filled with: the captured email, then
+           the prospect's zone and clock next to the fill action. The capture
+           age and the full zone name live in the block's title, and the
            #captured "Captured" pills are gone — the header's green dot already
-           says a live prospect is loaded. -->
+           says a live prospect is loaded.
+
+           #captured is DECLARED here and usually rendered somewhere else: when
+           Contact & company has a matched record, sidepanel.js moves this exact
+           node into its Contact column, because the email IS the contact's
+           identity and the clock is what a rep books against. This section (and
+           the rule under it) is the fallback home for every state where there
+           is no column to sit in — no HubSpot match, signed out, loading, an
+           error — so the v0.2 autofill workflow never depends on the CRM. Both
+           are hidden while the block lives in the column. -->
       <section id="prospect">
         <div id="captured" class="bk">
           <div id="email" class="bk-email"></div>
@@ -1418,31 +1666,53 @@
         </div>
       </section>
 
-      <hr class="divider" />
+      <hr class="divider" id="booking-divider" />
 
       <!-- Live CRM context. Each body is filled from JS with textContent only —
            HubSpot property values are untrusted, so no innerHTML anywhere. -->
 
-      <!-- One dense identity block in place of the old Contact + Company cards:
-           name · stage / title @ company / owner · phone. Its job is context at
-           a glance; the vertical space it gives back goes to Wiza and Activity. -->
+      <!-- One dense identity block in place of the old Contact + Company cards,
+           split into a Contact and a Company column. Its job is context at a
+           glance; the vertical space it gives back goes to Wiza and Activity.
+           The Contact column also hosts the booking cluster (see #prospect). -->
       <section id="crm-identity-section">
         <div class="section-head">
-          <span class="section-title">Contact &amp; company</span>
+          <!-- Section glyphs are static markup, one per head: an inline SVG is
+               not injectable from JS without innerHTML, and these never change.
+               2px stroke, currentColor, aria-hidden — see .sec-icon. -->
+          <span class="sec-head-main">
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="8" r="3.4" />
+              <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+            </svg>
+            <span class="section-title">Contact &amp; company</span>
+          </span>
           <span class="pill info" id="crm-identity-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-identity"></div>
       </section>
 
       <!-- ===== Account context (Phase 8) =====
-           "Is this worth calling, and what do I open with": account grade and
-           team sizes, then the company's own blurb, ICP and tech stack. The
+           "Is this worth calling, and what do I open with": the grade in the
+           head, then every labelled datapoint as a stat chip (status, ICP fit,
+           ICP, industry, the four team sizes), then the company's own blurb,
+           tech stack and the ICP rationale as prose. This section owns ICP and
+           industry outright — they are company data, and the Wiza section (which
+           is Wiza PRODUCT data) no longer shows them at all. The
            whole section is hidden when the company record has none of it —
            which is the normal case for a thin record — so it never costs a
            card's worth of vertical space to say nothing. -->
       <section id="crm-account-section">
         <div class="section-head">
-          <span class="section-title">Account context</span>
+          <span class="sec-head-main">
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M4 20V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v15" />
+              <path d="M15 9h4a1 1 0 0 1 1 1v10" />
+              <path d="M3 20h18" />
+              <path d="M7.5 8h4M7.5 12h4M7.5 16h4" />
+            </svg>
+            <span class="section-title">Account context</span>
+          </span>
           <span class="pill info" id="crm-account-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-account"></div>
@@ -1461,6 +1731,12 @@
         <details id="crm-colleagues-details" open>
           <summary class="section-head sec-toggle">
             <span class="sec-head-main">
+              <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <circle cx="9" cy="8" r="3" />
+                <path d="M3 19a6 6 0 0 1 12 0" />
+                <path d="M16 5.6a3 3 0 0 1 0 6.8" />
+                <path d="M17.5 14.4A6 6 0 0 1 21 19" />
+              </svg>
               <span class="section-title" id="crm-colleagues-title">Others at this account</span>
               <!-- "all Jasper Guilaran" when every colleague shares one owner,
                    so no row has to repeat it. Empty when owners are mixed. -->
@@ -1474,9 +1750,21 @@
         </details>
       </section>
 
+      <!-- ===== Wiza user/account information =====
+           Wiza PRODUCT data only: who this person is to us as a user (status,
+           ID, plan, credits, last usage, the admin links) and what their Wiza
+           account looks like (account ID, subscriptions, API credits,
+           purchases). Company classification — ICP, industry — belongs to
+           Account context above and is never repeated here. -->
       <section id="crm-wiza-section">
         <div class="section-head">
-          <span class="section-title">Wiza</span>
+          <span class="sec-head-main">
+            <!-- The Wiza mark, reduced to one stroke: the W the wordmark is. -->
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M3.5 6 8 18l4-7.5 4 7.5 4.5-12" />
+            </svg>
+            <span class="section-title">Wiza user/account information</span>
+          </span>
           <span class="pill info" id="crm-wiza-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-wiza"></div>
@@ -1484,7 +1772,13 @@
 
       <section id="crm-deals-section">
         <div class="section-head">
-          <span class="section-title">Deals</span>
+          <span class="sec-head-main">
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M3.5 10.8V4.5a1 1 0 0 1 1-1h6.3l9 9-7.8 7.8z" />
+              <circle cx="7.6" cy="7.6" r="1.3" />
+            </svg>
+            <span class="section-title">Deals</span>
+          </span>
           <span class="pill info" id="crm-deals-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-deals"></div>
@@ -1496,7 +1790,12 @@
            prospect); the list is the single tabpanel they all point at. -->
       <section id="crm-activity-section">
         <div class="section-head">
-          <span class="section-title">Activity</span>
+          <span class="sec-head-main">
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M13 3 5 14h6l-1 7 8-11h-6z" />
+            </svg>
+            <span class="section-title">Activity</span>
+          </span>
           <span class="pill info" id="crm-activity-pill" style="display: none"></span>
         </div>
         <div class="card crm-body">
@@ -1516,7 +1815,13 @@
 
       <section id="notes-section">
         <div class="section-head">
-          <span class="section-title">Notes</span>
+          <span class="sec-head-main">
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17z" />
+              <path d="M13.8 5.2 19.3 10.7" />
+            </svg>
+            <span class="section-title">Notes</span>
+          </span>
           <span class="pill synced" id="notes-pill" hidden></span>
         </div>
         <p id="notes-hint">Call notes from the dialer, ready to sync to HubSpot.</p>

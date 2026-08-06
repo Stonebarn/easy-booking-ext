@@ -6,6 +6,118 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
+### Changed — the live capture lives in the Contact column
+
+Email, timezone and **Fill form** are no longer a separate block above the CRM
+sections: the captured email *is* the contact's identity, so the whole cluster now
+sits **inside the Contact column of Contact & company**, directly under the
+contact's name row, on a faint purple wash that marks it as the live capture. The
+fill behaviour, its disabled/stale states, the result messages and the capture-age
+tooltip are unchanged — the same node moved, not a second renderer.
+
+It **moves back** to a block of its own (with the rule under it) in every state
+where there is no Contact column to sit in: no HubSpot match, no prospect matched
+yet, a section error, and — the one that matters most — **signed out of HubSpot
+entirely**. Email/timezone/Fill are the original v0.2 workflow and they now render
+from `eb:currentProspect` independently of the CRM bundle's freshness or presence,
+so a rep who never connects HubSpot gets exactly the panel they had before.
+
+### Changed — "Wiza" is now "Wiza user/account information", and only that
+
+The section carried two company fields (**ICP** and **industry**) that have nothing
+to do with our product relationship, with a suppression rule that hid them from
+Account context whenever Wiza happened to have account data. That rule is
+**inverted**: Account context owns ICP and industry outright, and the Wiza section
+never shows them. What is left is Wiza product data only — the user (status, Wiza
+ID, signed up, plan, credits, last usage, the admin/usage-log links) and the Wiza
+account (account ID, subscriptions, API credits, credits 30d, purchases, last
+purchase, use case). Empty behaviour is unchanged: no Wiza relationship at all and
+the section does not render.
+
+### Changed — labelled datapoints are stat chips
+
+Account context and the Wiza section are now built out of **stat chips**: a muted
+ALL-CAPS label over a bold value, in a rounded box of page white on the card's
+grey. It replaces the label-left inline rows, which read as a sentence and scanned
+like one. A datapoint with **no value renders no chip** — never an empty box — and
+only a *status* chip tints its value, because a tone is meaning. It costs some
+vertical space and buys scannability: "how big is their sales team" is now a
+labelled box, not a phrase.
+
+### Removed — the "·" separator, panel-wide
+
+There is no interpunct anywhere a rep can see one: not in a line, not in a
+tooltip. Every place that strung facts together with a glyph now uses real
+structure instead — a flex gap (the timezone line, the sequence line, the
+company's domain/industry/headcount, activity detail, ownership), a chip (Account
+context, Wiza), a right-aligned column (a colleague's "contacted 3d ago" now sits
+at the trailing edge of its own line, under the name and badges), or plain
+punctuation inside a single value (tooltips are comma- or dash-joined). Values
+`hubspot-data.js` composes with an interpunct — a call's `Connected · 3:34`, a
+deal's lost reason and category — are split back into spans by the panel. The
+`--sep` token and its rules are gone.
+
+### Added — logos, photos and icons, so the panel isn't a wall of text
+
+- **Company favicon** beside the company name (28px), from
+  `https://www.google.com/s2/favicons?domain=…` — **the one third-party request
+  the panel makes**, sending the company's domain and nothing else, with no
+  referrer. Documented in **Privacy & permissions → What leaves the machine**. The
+  domain is validated against a bare-hostname pattern and URL-encoded before it is
+  interpolated.
+- **The contact's photo** (36px circle), from the LinkedIn card the dialer
+  scrapes — `eb:prospectContext.linkedin.photoUrl`, https-validated. A person's
+  fallback is **always their own initials**; company imagery is only ever valid on
+  a company row.
+- **Initials tiles** for every other person (20px), one or two letters on a
+  purple-scale square chosen deterministically from the name, so the same person
+  keeps the same tile. Only fills that pass AA for their label are in the
+  rotation: `--accent` and `--accent-ink` carry white, `--accent-2` carries
+  `--ink`; `--accent-soft` is excluded (white on it is 1.71:1).
+- **Initials render first in every case.** An image only replaces them once it has
+  actually decoded, so a slow, blocked or expired URL shows initials rather than
+  an empty box or a broken-image glyph — and a response that arrives after the
+  section re-rendered is dropped, so a photo can never land on the next
+  prospect's card. LinkedIn photo URLs are signed and expire, which makes this the
+  normal path rather than an error path.
+- **A LinkedIn glyph** beside the contact's name when the dialer captured a
+  profile URL (their headline is its tooltip; there is no visible headline line).
+  It suppresses the row-level "LinkedIn" link, which pointed at the same person.
+- **Section-head icons** — one 2px-stroke outline glyph per section (person,
+  building, people, the Wiza W, tag, bolt, pencil), static markup, `currentColor`.
+- **Activity type icons** — the text glyphs (☎ ✉ ◷ ✎ ✓), which rendered at a
+  different size and weight on every platform, are now SVG icons in an 18px
+  purple-wash disc, giving the timeline a rhythm down its left edge.
+- **The Wiza mark** at the far left of the panel's header, from
+  `icons/wizainc_logo.png`.
+
+All of it is decorative (`aria-hidden`, empty `alt`), all of it is built with
+`createElementNS` rather than `innerHTML`, and no handler is inline — MV3's CSP
+forbids both.
+
+### Changed — the panel reads more like the product
+
+Cards are rounded 10px (spacing unchanged — this panel is used mid-call and stays
+tight), the selected activity tab is an **outlined violet pill** on page white
+rather than a tinted slab, and the row-level out-links (LinkedIn, Company
+LinkedIn, the Wiza admin links) take a compact bordered treatment instead of a
+bare underlined word, matching the colleague "in" chip.
+
+### Fixed — a colleague's name met AA on the alert tint
+
+On a colleague row owned by someone else (the negative tint), the accent violet
+name was 4.27:1 — under AA for 12px text. It takes `--accent-ink` there (8.4:1),
+the same "accent text on a tinted ground" rule the rest of the panel follows.
+
+### Changed — `scripts/validate.mjs` checks the panel's images
+
+It already validated every local `<script src>` the panel loads; it now does the
+same for `<img src>`, so a renamed icon fails the build instead of showing a
+broken tile in the header. Remote images are skipped by design (the favicon
+service is fetched at runtime).
+
 ### Fixed — the tech stack reads like English again
 
 `web_technologies` holds HubSpot *enum* values, so the panel was printing them raw:

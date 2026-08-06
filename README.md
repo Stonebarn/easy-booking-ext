@@ -110,9 +110,12 @@ their own keys.
    prospect is captured, and clears it once the capture goes stale.
 4. **`sidepanel.html` / `sidepanel.js`** are the **side panel** (Chrome 114+),
    opened by clicking the toolbar icon. It shows the currently captured email and
-   timezone (with a friendly `IST · UTC+5:30` line and the prospect's local
-   time), how long ago the capture happened, and a manual "Fill now" button as a
-   fallback. Unlike the old popup it stays open while you move between tabs and
+   timezone (the zone abbreviation, the UTC offset and the prospect's own clock)
+   and a manual **Fill form** button, with the capture age on hover. That cluster
+   lives **inside the Contact column** of Contact & company when the prospect
+   matched a HubSpot record — the email *is* their identity — and falls back to a
+   block of its own above the sections when there is nothing to sit inside (no
+   match, or no HubSpot connection at all), so autofill never depends on the CRM. Unlike the old popup it stays open while you move between tabs and
    **updates live** as prospects change in the dialer. It also renders the live
    CRM context — see [CRM sidebar](#crm-sidebar) — and the
    [notes sync](#syncing-call-notes-to-hubspot). The **gear** in its header opens
@@ -160,7 +163,9 @@ For rolling this out to the team, see [Rollout](#rollout).
   shows per-field status ("Filled ✓" / "Set ✓") so you know it's connected.
 - The **toolbar icon** shows a green ✓ while a fresh prospect is captured.
 - Click the icon to open the **side panel**, which shows the captured details
-  (email, timezone, capture age) and a manual **Fill now** button. The panel
+  (email, timezone, capture age on hover) and a manual **Fill form** button —
+  in the Contact column when the prospect matched HubSpot, in its own block at
+  the top otherwise. The panel
   stays open as you switch tabs and refreshes itself the moment a new prospect
   loads in the dialer — no need to close and re-open it. Drag its inner edge to
   resize. Requires **Chrome 114+**.
@@ -248,6 +253,30 @@ For a renderer, the five tone names `hubspot-data.js` returns
 CSS class — `tone-positive`, `tone-caution`, and so on — that works on a `.pill`
 or on any text node. Hand it the tone name; never a colour.
 
+**Four idioms carry everything else**, and they are used consistently so a rep
+learns the panel once:
+
+- **Stat chips** — a labelled datapoint is a muted ALL-CAPS label over a bold
+  value, in a rounded box of page white on the card's grey. Account context and
+  the Wiza section are built entirely out of them. A datapoint with no value
+  renders **no chip** rather than an empty box, and only a *status* chip tints its
+  value (with a tone, because that is meaning).
+- **Record tiles** — a company shows its **favicon** beside its name (28px), the
+  contact shows the **photo the dialer captured from their LinkedIn card** (36px
+  circle), and every other person shows **initials** on a purple-scale square.
+  Initials are what render first in every case; an image only replaces them once
+  it has actually decoded, so a slow or dead URL shows initials rather than an
+  empty box or a broken-image glyph. A person's fallback is *always their own
+  initials* — company imagery only ever appears on a company.
+- **Icons** — one 2px-stroke outline glyph per section head, one per activity type
+  in a small purple-wash disc down the left edge of the timeline, and the Wiza
+  mark at the far left of the header. All monochrome, all decorative
+  (`aria-hidden`), all `currentColor`.
+- **No separator glyphs.** There is no "·" anywhere a rep can see one — not in a
+  line, not in a tooltip. Discrete facts are separated by real layout: a flex gap,
+  a chip, a right-aligned column, or a line break. Values the data layer composes
+  with an interpunct ("Connected · 3:34") are split back apart before rendering.
+
 #### Connecting HubSpot
 
 You connect **your own** HubSpot login, so notes and activity are attributed to
@@ -277,19 +306,19 @@ client ID that *is* checked in is a public identifier, not a credential.
 ### CRM sidebar
 
 With HubSpot connected, loading a prospect in the dialer fills six sections in
-the side panel — who they are, whether the account is worth calling and what to
+the side panel — who they are (with the live capture in among it), whether the account is worth calling and what to
 open with, **who else you're touching at the account**, whether they use Wiza,
 their deals, and every call/email/meeting/note/task on the record. Everything is
 read-only, and every record name links out to HubSpot (opens in a new tab).
 
 | Section | What it shows |
 |---|---|
-| **Contact & company** | One compact identity block: the contact's name (linked to the record) with a lifecycle-stage pill; their job title *@* their company (also linked); then the **phone row** — every number the record has (**Phone**, **Mobile**, **Phone 2**), lead status, and a **Wrong number?** link that corrects the number in HubSpot from here (see [Fixing a wrong number](#fixing-a-wrong-number)). Hover the company name for its domain, industry and headcount. Underneath, in this order: **who owns this account** (see below), **LinkedIn** and **Company LinkedIn** links (one click, no tabbing out to search for them), and the **sequence line** — *"In sequence: Outbound Q3 since Jul 2, 2026"* or *"Not in a sequence"*, plus *"Last contacted 3d ago"* (hover for the exact time). The company is matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"*; a company matched with no contact record says *"No contact record"*. |
-| **Account context** | Is this worth calling, and what do you open with. The **account grade** sits in the section header (*"Grade A"*). Inside: the company's own blurb in its own words (the first couple of lines, hover for the rest), **Company status**, **ICP fit**, **Sales team using Wiza** (the size of their sales team using Wiza data), **AE team**, **Outbound team**, **Sales leadership**, a **Tech stack** row (*"Salesforce · Outreach · Gong … +2 more"*, hover for the full list), and a muted *"Why: …"* line with the ICP reasoning (hover for all of it). Companies with **none** of this hide the whole section rather than showing an empty card. |
+| **Contact & company** | Two columns. **Contact**: the prospect's **photo** (from the LinkedIn card in the dialer; their initials when there isn't one) beside their name (linked to the record), a **LinkedIn glyph** straight to the captured profile — hover it for their headline — and a lifecycle-stage pill. Directly under that, the **live capture**: the email the booking form will be filled with, the prospect's zone and clock, and the **Fill form** button (see [Usage](#usage)). Then their job title; the **phone row** — every number the record has (**Phone**, **Mobile**, **Phone 2**), lead status, and a **Wrong number?** link that corrects the number in HubSpot from here (see [Fixing a wrong number](#fixing-a-wrong-number)); the **contact owner**; and the **sequence line** — *"In sequence: Outbound Q3"* (hover for the enrolment date) with *"contacted 3d ago"* beside it. **Company**: its **favicon** beside the name (linked), then its domain, industry and headcount, **who owns this account** (see below) and a **Company LinkedIn** link. The company is matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"* — and the capture cluster moves to its own block above, so autofill still works; a company matched with no contact record says *"No contact record"*. |
+| **Account context** | Is this worth calling, and what do you open with. The **account grade** sits in the section header (*"Grade A"*). Then every labelled datapoint the record has, as **stat chips**: **Status** (tinted by what it means), **ICP fit**, **ICP**, **Industry**, **Sales team** (the size of their sales team using Wiza data — the caveat is on the chip's hover), **AE**, **Outbound**, **Leadership**. ICP and industry live **here**, not in the Wiza section: they describe the company, not our product relationship. Below the chips: the company's own blurb in its own words (two lines, **MORE** for the rest), a **Tech** row (comma-separated, Wiza **competitors** highlighted, **MORE (n)** for the tail), and a muted *"Why: …"* line with the ICP reasoning. Companies with **none** of this hide the whole section rather than showing an empty card. |
 | **Others at this account (N)** | Everyone *else* on the same company record — who else you're touching there, without leaving the call. Collapsible, and the count is in the heading. Each row: the colleague's **name** (linked to their HubSpot contact record), an **In sequence** badge (hover it for the sequence name and start date) or a muted **Not sequenced** when HubSpot says so either way, their **job title**, **Last contacted 3d ago** (hover for the exact time), the **owner** — *"Owner: You"* when it's yours, otherwise their name — and a small **in** link straight to their LinkedIn profile when the record has one. Sorted so the useful ones are first: anyone currently in a sequence, then whoever was contacted most recently. Empty: *"No other contacts on this account"*. A prospect with no company at all doesn't get the section. |
-| **Wiza** | Whether this prospect is a Wiza user, and what their account looks like. **User**: an Active/Closed status pill, sign-up date, plan (status · credits · frequency), credits used in the last 30 days, when they last used Wiza, their Wiza ID, and **Open in Wiza Admin** / **Usage logs** links when the record has them. **Account** (from the company): account ID, subscribed accounts, API credit balance, credits used in 30 days, last credit purchase, ICP, industry, use case, and a **Target account** badge. Most prospects aren't users — those read *"Not a Wiza user yet"*, and any single value that isn't set is left out rather than shown blank. |
-| **Deals** | One row per associated deal — name (linked), human-readable stage, amount, close date, owner. Open deals sort first; closed-won gets a green pill. **Closed** rows also carry a one-line *why*: *"Lost: Went with incumbent vendor · Price"* (reason, then category, then secondary category — duplicates collapsed, long reasons capped with the rest on hover) or *"Won: Champion moved from a customer account"*. Open deals never show one, and a closed deal with nothing on file shows no line at all. Empty: *"No open deals"*. |
-| **Activity** | A tab per engagement type — **All · Calls · Emails · Meetings · Notes · Tasks** — each with its count, and up to 25 rows per type. Types with nothing logged are dimmed and not clickable. Every row is attributed to whoever logged it ("by Jenny Choi") and carries a relative timestamp with the exact date on hover, plus per-type detail: direction arrow, disposition and duration (`4:07`) on calls; direction and subject on emails; title and outcome on meetings; the first line of the body on notes; subject and status on tasks. **All** merges every type newest-first. The list scrolls inside a fixed height (about 40% of the panel) so the section stays small no matter how much history there is; your chosen tab sticks as you move between prospects. |
+| **Wiza user/account information** | Wiza **product** data, and only that. **User**: an Active/Closed status pill, then chips for **Plan** (status and billing frequency), **Plan credits**, **Credits 30d**, **Last used**, **Signed up** and **Wiza ID**, plus **Open in Wiza Admin** / **Usage logs** links when the record has them. **Account** (from the company): chips for **Account ID**, **Subscribed** (*"3 of 5"*), **API credits**, **Credits 30d**, **Purchases**, **Last purchase** and **Use case**, plus a **Target account** badge. Most prospects aren't users — those get one muted *"Not a Wiza user"* line above the account chips — and a value that isn't set (or is a zero) is left out rather than shown blank. Nothing here repeats the company's ICP or industry; that is Account context's. |
+| **Deals** | One row per associated deal — name (linked), human-readable stage, amount, close date, owner. Open deals sort first; closed-won gets a green pill. **Closed** rows also carry a one-line *why*: *"Lost: Went with incumbent vendor"* then *"Price"* (reason, then category, then secondary category — spaced, never glyph-separated — duplicates collapsed, long reasons capped with the rest on hover) or *"Won: Champion moved from a customer account"*. Open deals never show one, and a closed deal with nothing on file shows no line at all. Empty: *"No open deals"*. |
+| **Activity** | A tab per engagement type — **All**, **Calls**, **Emails**, **Meetings**, **Notes**, **Tasks** — each with its count, the selected one an outlined violet pill, and up to 25 rows per type. Types with nothing logged are dimmed and not clickable. Every row is attributed to whoever logged it ("by Jenny Choi") and carries a relative timestamp with the exact date on hover, plus a small tinted **type disc** on the left of every row (phone, envelope, clock, pencil, tick) and per-type detail: direction arrow, disposition and duration (`4:07`) on calls; direction and subject on emails; title and outcome on meetings; the first line of the body on notes; subject and status on tasks. **All** merges every type newest-first. The list scrolls inside a fixed height (about 40% of the panel) so the section stays small no matter how much history there is; your chosen tab sticks as you move between prospects. |
 
 **Who owns this account.** The identity block spells ownership out, one labelled
 row each, and only for the ones the record actually has:
@@ -671,9 +700,11 @@ easy-booking-ext/
 ├── docs/
 │   ├── PLAN-v3-hubspot-sidebar.md # the v3 plan and its settled decisions
 │   └── nooks-dom-recon.md         # live-DOM anchors the scrapers are built on
-├── icons/                 # ext_icon.png (toolbar + store icon)
+├── icons/
+│   ├── ext_icon.png       # toolbar + store icon
+│   └── wizainc_logo.png   # the Wiza mark in the panel's header
 ├── scripts/
-│   └── validate.mjs       # validates the manifest, its referenced files, and the panel's <script src> list (used by CI)
+│   └── validate.mjs       # validates the manifest, its referenced files, and the panel's <script src> and <img src> lists (used by CI)
 └── README.md
 ```
 
@@ -818,14 +849,23 @@ locally as well. Nothing else needs to happen for access to end.
 
 ### What leaves the machine
 
-There are exactly **two** network destinations, and both are silent until a rep
-clicks **Connect HubSpot**. Before that, the extension makes no network requests at
-all.
+There are **three** network destinations. The first two are silent until a rep
+clicks **Connect HubSpot**; the third is a company logo.
 
 | Destination | What it receives | What it returns |
 |---|---|---|
 | **`api.hubapi.com`** (HubSpot's CRM API) | The rep's **own** OAuth access token, and what's needed to identify the record: the prospect's email address, or their HubSpot record ID when the dialer supplied one. On a notes sync, the note text the rep sees in the panel. On a phone correction, the contact's record ID and the one phone value the rep typed. | The matching contact, company (incl. the Wiza product properties), deals and engagements — and, for a write, the created note's ID or the updated contact. |
 | **`wiza-hs-connect.lovable.app`** (the token endpoint, source in [`lovable/hubspot-token-function.ts`](./lovable/hubspot-token-function.ts)) | **Only OAuth material**: the one-time authorization code at connect time, and the rep's refresh token when an access token needs renewing (about every 30 minutes of use). It never sees a prospect, a note, or anything scraped from a page. | A fresh access token, plus the rep's HubSpot email/user ID/portal ID at connect time. |
+| **`www.google.com/s2/favicons`** (Google's favicon service) | **The matched company's domain, and nothing else** — as one `<img>` request per company shown, e.g. `?domain=powtoon.com&sz=64`. No prospect name, no email, no token, no referrer (the request is sent with `referrerpolicy="no-referrer"`). | A 64px site icon, drawn as the logo tile beside the company name. |
+
+**The favicon service is the one third-party call the panel makes**, and it is
+purely cosmetic. It only fires when a company record matched *and* has a
+domain-shaped `domain` property (validated against a bare-hostname pattern and
+URL-encoded before it is interpolated). If the request fails, is blocked, or the
+machine is offline, the tile falls back to the company's initial on a purple
+square — there is no broken-image state and nothing else changes. To switch it off
+entirely, delete the `faviconUrl` body's return in `sidepanel.js`; every tile then
+renders as initials.
 
 **Nothing else leaves the machine.** No analytics, no telemetry, no error
 reporting, no third-party scripts (Manifest V3's CSP forbids remote code, and

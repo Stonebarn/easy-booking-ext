@@ -65,6 +65,7 @@
       ACCOUNT_FIELDS: "account-fields-prospect-view-card",
       HUBSPOT_CONTACT_PANE: "hubspot-contact-pane-prospect-view-card",
       HUBSPOT_ACCOUNT_PANE: "hubspot-account-pane-prospect-view-card",
+      LINKEDIN: "prospect-linkedin-prospect-view-card",
     },
     // Label text used as the fallback (and, for "Record ID", the only) way to
     // pick a value row out of a card. Same label→climb→extract strategy as
@@ -347,6 +348,77 @@
     return { company: null, title: null, phone: null };
   }
 
+  // The LinkedIn card carries the prospect's profile photo, a link to their
+  // profile, and the headline line ("RevOps Manager at Turtl | ..."). All
+  // three are best-effort: the card is absent when Nooks has no LinkedIn
+  // match, and the licdn photo URLs are signed and eventually expire — the
+  // panel must always keep its initials fallback.
+  function detectLinkedIn(name) {
+    const card = byTestId(CONFIG.TESTID_ANCHORS.LINKEDIN);
+    if (!card) return null;
+
+    let profileUrl = null;
+    for (const a of card.querySelectorAll("a[href]")) {
+      let u;
+      try {
+        u = new URL(a.href);
+      } catch (e) {
+        continue;
+      }
+      if (u.protocol === "https:" && /(^|\.)linkedin\.com$/i.test(u.hostname)) {
+        profileUrl = u.href;
+        break;
+      }
+    }
+
+    // The card holds more substantial images than just the headshot: the
+    // employer's logo in the experience block, and LinkedIn's "ghost"
+    // placeholder when the person has no photo. Size alone can't tell them
+    // apart — when the headshot is missing, the biggest image IS the company
+    // logo. So only a positively identified person photo qualifies (licdn
+    // profile-photo URL shape, or alt text naming the prospect); on any doubt
+    // this stays null and the panel shows initials instead.
+    let photoUrl = null;
+    const nameNorm = norm(name);
+    for (const img of card.querySelectorAll("img[src]")) {
+      let u;
+      try {
+        u = new URL(img.currentSrc || img.src);
+      } catch (e) {
+        continue;
+      }
+      if (u.protocol !== "https:") continue;
+      if (/company-logo|ghost/i.test(u.href)) continue;
+      const rect = img.getBoundingClientRect();
+      if (Math.max(rect.width, rect.height, img.naturalWidth || 0) < 32) continue;
+      const alt = norm(img.alt);
+      const isProfilePhotoUrl = /profile-(display|framed)photo/i.test(u.pathname);
+      const altNamesProspect = Boolean(nameNorm) && Boolean(alt) && alt.includes(nameNorm);
+      if (isProfilePhotoUrl || altNamesProspect) {
+        photoUrl = u.href;
+        break;
+      }
+    }
+
+    // Headline: the "Role at Company | ..." line between the name row and the
+    // "About" label. Reading stops at "About" so bio prose (which also tends
+    // to contain " at ") can never be mistaken for the headline.
+    let headline = null;
+    for (const leaf of leavesIn(card)) {
+      const t = textOf(leaf);
+      if (!t) continue;
+      if (t === "About") break;
+      if (t === "LinkedIn" || (name && t.includes(name))) continue;
+      if (t.length >= 8 && t.length <= 220 && (t.includes("|") || /\bat\b/.test(t))) {
+        headline = t;
+        break;
+      }
+    }
+
+    if (!photoUrl && !profileUrl && !headline) return null;
+    return { photoUrl, profileUrl, headline };
+  }
+
   function detectContext() {
     const A = CONFIG.TESTID_ANCHORS;
     const nameEl = byTestId(A.PROSPECT_NAME);
@@ -377,6 +449,7 @@
       // exactly why storeContext() dedupes on a signature instead of writing once.
       hsContactId: recordIdIn(A.HUBSPOT_CONTACT_PANE),
       hsCompanyId: recordIdIn(A.HUBSPOT_ACCOUNT_PANE),
+      linkedin: detectLinkedIn(name),
     };
   }
 
@@ -416,8 +489,10 @@
       phone: ctx.phone || null,
       hsContactId: ctx.hsContactId || null,
       hsCompanyId: ctx.hsCompanyId || null,
+      linkedin: ctx.linkedin || null,
       capturedAt: Date.now(),
     };
+    const li = payload.linkedin || {};
     const signature = [
       norm(email),
       payload.name || "",
@@ -426,6 +501,9 @@
       payload.phone || "",
       payload.hsContactId || "",
       payload.hsCompanyId || "",
+      li.photoUrl || "",
+      li.profileUrl || "",
+      li.headline || "",
     ].join("|");
     // The observer fires on every keystroke pause; without this the panel would
     // refetch HubSpot on typing noise.

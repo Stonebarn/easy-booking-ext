@@ -81,6 +81,19 @@ if (panelPath && panelPath.endsWith(".html") && fileExists(panelPath)) {
     const rel = src.replace(/^\.?\//, "").split(/[?#]/)[0];
     need(fileExists(rel), `${panelPath} references a missing script: ${src}`);
   }
+
+  // Images the panel document loads. Same reasoning as the scripts: the manifest
+  // never mentions them, so a renamed icon is a broken tile in the header with
+  // nothing but a 404 in the console to say so. Remote images ARE allowed (the
+  // company favicon service is fetched at runtime from JS, and a page-level
+  // <img> to https is permitted by MV3's default CSP), so only local paths are
+  // checked for existence.
+  const imgs = [...html.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]);
+  for (const src of imgs) {
+    if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src) || /^data:/i.test(src)) continue;
+    const rel = src.replace(/^\.?\//, "").split(/[?#]/)[0];
+    need(fileExists(rel), `${panelPath} references a missing image: ${src}`);
+  }
 }
 
 // icons (action + top-level). Each may be a single path string or a

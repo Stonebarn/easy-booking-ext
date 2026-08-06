@@ -21,7 +21,7 @@ label-only approach.
 | Activity | `activity-prospect-view-card` | Prospect/Account tabs, connect/unanswered/replied/emails counts |
 | Prospect activity | `prospect-activity-prospect-view-card` | |
 | Account activity | `account-activity-prospect-view-card` | |
-| LinkedIn | `prospect-linkedin-prospect-view-card` | Name, country, About bio |
+| LinkedIn | `prospect-linkedin-prospect-view-card` | Profile photo (`img`, licdn signed URL — expires), linkedin.com profile link, name, location, headline ("Role at Co \| ..."), About bio (confirmed via screenshot 2026-08-06) |
 | Prospect name (header) | `prospectDataExpanded-prospectName` | Header also shows `Company • Title` line and phone |
 | View tabs | `expanded-view-dashboard` / `-activity` / `-battlecards` / `-transcript`, `expanded-view-prospect` / `-account` | |
 | Queue table | `dialing-table`, `dialing-row-0`, `prospect-name`, `prospect-phone-number`, `column-header-*` (incl. `column-header-prospectNote`, `column-header-timezone`) | |
