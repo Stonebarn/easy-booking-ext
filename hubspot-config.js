@@ -50,6 +50,16 @@
     // Keep this list in sync with the app's Auth tab. Engagement scopes
     // (crm.objects.notes.*, …) get added in Phase 4 only if a MISSING_SCOPES
     // error actually names them.
+    //
+    // crm.objects.custom.read (Phase 12): reads the Wiza User / Wiza Account /
+    // Trial custom objects for the richer Wiza usage section. It is on the
+    // app's Auth tab as of build #10, but a rep's TOKEN only carries a scope
+    // it was actually issued with — this array is what asks HubSpot for it on
+    // the next connect. Until a rep reconnects, hubspot-data.js's
+    // fetchCustomObject sees 403 MISSING_SCOPES on every custom-object read
+    // and degrades silently to the rollup properties, exactly as it did
+    // before this scope existed — see the Wiza custom objects note in the
+    // README.
     SCOPES: [
       "oauth",
       "crm.objects.contacts.read",
@@ -57,6 +67,7 @@
       "crm.objects.companies.read",
       "crm.objects.deals.read",
       "crm.objects.owners.read",
+      "crm.objects.custom.read",
     ],
 
     // Browser-side authorize step — no secret involved.

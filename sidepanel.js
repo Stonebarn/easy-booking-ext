@@ -837,6 +837,120 @@
     return row;
   }
 
+  // Phase 12: a second chip row, collapsed behind a MORE/LESS toggle exactly
+  // like the Account context tech row's (same .prose-more button, same
+  // "More (n)"/"Less" text, same aria-expanded). A fully-populated Wiza
+  // Account object has more secondary facts than the height budget affords
+  // showing unconditionally; this is how they stay reachable — one click, not
+  // gone — without spending the height on a record nobody asked to see yet.
+  function chipDisclosure(chips, noun) {
+    const kept = (chips || []).filter(Boolean);
+    if (!kept.length) return null;
+    const wrap = el("div", "chip-more-wrap");
+    const row = chipRow(kept);
+    row.hidden = true;
+    const toggle = el("button", "prose-more", `More (${kept.length})`);
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", `Show ${kept.length} more ${noun}`);
+    toggle.addEventListener("click", () => {
+      const expand = row.hidden;
+      row.hidden = !expand;
+      toggle.textContent = expand ? "Less" : `More (${kept.length})`;
+      toggle.setAttribute("aria-expanded", expand ? "true" : "false");
+    });
+    wrap.appendChild(row);
+    wrap.appendChild(toggle);
+    return wrap;
+  }
+
+  // --- Phase 12: usage sparkline row ----------------------------------------
+  // The panel's second labelled-datapoint idiom, one line: a caption label
+  // over a row holding the current value, then — only when there is enough
+  // history to draw one — a small inline line and a trend arrow. Same
+  // label-over-value shape as a stat chip, so the two read as one system.
+  //
+  // Every coordinate below is computed from numbers hubspot-data.js already
+  // downsampled (historyView's `points`), never from a CRM string: the
+  // no-innerHTML rule extends to "no interpolating untrusted text into SVG
+  // markup either", and this satisfies it by construction — there is no text
+  // in this SVG at all.
+  const SPARK_W = 64;
+  const SPARK_H = 18;
+  const SPARK_PAD = 2;
+  function sparklineSvg(points) {
+    if (!points || points.length < 2) return null;
+    const min = Math.min.apply(null, points);
+    const max = Math.max.apply(null, points);
+    const span = max - min || 1; // a flat line (every point equal) still draws, centred
+    const innerW = SPARK_W - SPARK_PAD * 2;
+    const innerH = SPARK_H - SPARK_PAD * 2;
+    const stepX = points.length > 1 ? innerW / (points.length - 1) : 0;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${SPARK_W} ${SPARK_H}`);
+    svg.setAttribute("width", String(SPARK_W));
+    svg.setAttribute("height", String(SPARK_H));
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("class", "spark");
+    const d = points
+      .map((v, i) => {
+        const x = SPARK_PAD + i * stepX;
+        const y = SPARK_PAD + innerH - ((v - min) / span) * innerH;
+        return (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2);
+      })
+      .join(" ");
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+    return svg;
+  }
+
+  // Chevron, not a full arrowhead: it has to sit inline at caption size and
+  // read instantly as "up" or "down" without competing with the sparkline
+  // next to it.
+  const TREND_PATHS = { up: ["M5 15 10 9 15 15"], down: ["M5 9 10 15 15 9"] };
+  // Usage trending up is a good sign to open a call with (green, the panel's
+  // one positive tone); usage trending down is not bad news worth flagging in
+  // red mid-dial — that would read as churn — so it stays muted. Flat gets no
+  // arrow at all: there is nothing directional to say.
+  function trendArrow(trend) {
+    if (trend !== "up" && trend !== "down") return null;
+    const arrow = el("span", "spark-trend " + trend);
+    arrow.appendChild(svgIcon(TREND_PATHS[trend]));
+    arrow.title = trend === "up" ? "Trending up" : "Trending down";
+    return arrow;
+  }
+
+  // `historyVm` is a historyView() result (or null/undefined for "nothing
+  // fetched"). Renders nothing at all when there is no current value; renders
+  // the value ALONE — no chart, no placeholder — when there isn't enough
+  // history for a line (historyVm.sparkline is false). `format` defaults to
+  // fmt.number; pass fmt.credits for a value where -1 means Unlimited.
+  function sparklineRow(label, historyVm, opts) {
+    const o = opts || {};
+    if (!historyVm || historyVm.latest == null) return null;
+    const format = o.format || fmt.number;
+    const row = el("div", "spark-row");
+    row.appendChild(el("span", "spark-label", label));
+    const line = el("div", "spark-line");
+    line.appendChild(el("span", "spark-value", format(historyVm.latest)));
+    if (historyVm.sparkline) {
+      const svg = sparklineSvg(historyVm.points);
+      if (svg) line.appendChild(svg);
+    }
+    const arrow = trendArrow(historyVm.trend);
+    if (arrow) line.appendChild(arrow);
+    row.appendChild(line);
+    if (o.title) row.title = o.title;
+    return row;
+  }
+
   // hubspot-data.js composes a few multi-part values with an interpunct
   // ("Connected · 3:34", "Lost: price · Competitor"). The panel prints
   // structure, never a separator glyph, so the parts are split back apart here:
@@ -2083,23 +2197,71 @@
   // prospect with no user and no account data gets no section at all, and inside
   // each subsection every datapoint with no value (or a zero) is simply not
   // built.
+  // Phase 12 added the custom-object view-models (wiza.userObject,
+  // wiza.accountObject, wiza.trial) alongside the rollups above. Everything
+  // below is ADDITIVE on the rollup rendering that already existed: every
+  // rollup chip still renders exactly as before, a richer object value takes
+  // over a chip only where the two are literally the same fact (last used,
+  // signed up, the admin links, the Wiza ID, the account ID — see the
+  // merged* values below), and every net-new fact from the objects gets its
+  // own chip or, for the two usage series a sparkline replaces its
+  // once-numeric chip. So: no object data at all (no association, a 403
+  // ahead of crm.objects.custom.read landing, a 404) means every merged*
+  // value falls through to the rollup and every net-new chip is simply
+  // absent — which is exactly what this section rendered before this phase.
   function renderWizaSection(bundle) {
     const body = crmEls.wiza;
     const wiza = bundle.wiza || {};
     const user = wiza.user || {};
     const account = wiza.account || {};
+    const userObj = wiza.userObject || null;
+    const accountObj = wiza.accountObject || null;
+    const trialObj = wiza.trial || null;
+    const hasUserObj = !!(userObj && userObj.hasData);
+    const hasAccountObj = !!(accountObj && accountObj.hasData);
+    const hasTrial = !!(trialObj && trialObj.hasData);
 
     // Status at section level so it's readable without opening anything.
+    // The object's own status wins when the rollup has none at all — a
+    // record whose contact was never synced but whose Wiza User object
+    // exists should not show an unlabelled pill.
     const variant = wizaStatusVariant(user.status);
+    const pillLabel = user.statusLabel || (userObj && userObj.statusLabel) || null;
+    const pillVariant = user.statusLabel ? variant : hasUserObj ? wizaStatusVariant(userObj.status) : variant;
+
+    // The two facts the User object states more richly than the contact
+    // rollup ever could: when they last actually used the product, and when
+    // they signed up. Both fall back to the rollup value untouched.
+    const lastUsageAt = (userObj && userObj.lastUsageAt) || user.lastUsageAt || null;
+    const signedUpAt = (userObj && userObj.signedUpAt) || user.signedUpAt || null;
+    const adminUrl = user.adminUrl || (userObj && userObj.adminUrl) || null;
+    const usageLogsUrl = user.usageLogsUrl || (userObj && userObj.usageLogsUrl) || null;
+    const wizaId = user.wizaId || (userObj && userObj.userId) || null;
+    // The user's own credits-30d trend — one of the panel's two sparkline
+    // series. Below HISTORY_MIN_SPARKLINE_POINTS usable versions, the value
+    // still renders (as the plain "Credits 30d" chip below), just without a
+    // line — sparkline is false, not the whole datapoint.
+    const userCreditsHistory = userObj && userObj.creditsUsed30dHistory;
+    const userCreditsSpark = !!(userCreditsHistory && userCreditsHistory.sparkline);
+    const userCreditsValue = userObj && userObj.creditsUsed30d != null ? userObj.creditsUsed30d : user.creditsUsed30d;
 
     // --- Account: the Wiza account's own identity and its metrics, as chips.
     // Zero-suppression happens before the chip is built, so a zeroed account
     // contributes no chips rather than a row of boxes reading "0".
-    const accountChips = account.hasData
+    const mergedAccountId = account.accountId || account.primaryAccountId || (accountObj && accountObj.accountId) || null;
+    const mergedApiCreditBalance =
+      accountObj && accountObj.apiCreditBalance != null ? accountObj.apiCreditBalance : account.apiCreditBalance;
+    const accountCreditsHistory = accountObj && accountObj.creditsUsed30dHistory;
+    const accountCreditsSpark = !!(accountCreditsHistory && accountCreditsHistory.sparkline);
+    const accountCreditsValue =
+      accountObj && accountObj.creditsUsed30d != null ? accountObj.creditsUsed30d : account.creditsUsed30d;
+
+    // { headline, more } — the object's own chips split into what's always
+    // visible and what's behind the MORE toggle (see accountObjectChips).
+    const accountObjectSplit = accountObj ? accountObjectChips(accountObj) : { headline: [], more: [] };
+    const accountChips = (account.hasData
       ? [
-          chip("Account ID", account.accountId || account.primaryAccountId, {
-            title: "Wiza account ID",
-          }),
+          chip("Account ID", mergedAccountId, { title: "Wiza account ID" }),
           chip(
             "Subscribed",
             // "0 of 1" is a zero; only a real subscription is worth the words.
@@ -2108,10 +2270,14 @@
               : metric(account.subscribedAccounts),
             { title: "Subscribed accounts of associated accounts" }
           ),
-          chip("API credits", metric(account.apiCreditBalance), { title: "API credit balance" }),
-          chip("Credits 30d", metric(account.creditsUsed30d), {
-            title: "API credits used in the last 30 days",
-          }),
+          chip("API credits", metric(mergedApiCreditBalance), { title: "API credit balance" }),
+          // Superseded by the sparkline row below once there's a real trend to
+          // draw; until then this is the only place the number appears.
+          accountCreditsSpark
+            ? null
+            : chip("Credits 30d", metric(accountCreditsValue), {
+                title: "Credits used in the last 30 days",
+              }),
           chip(
             "Purchases",
             metric(account.timesPurchased) ? `${fmt.number(account.timesPurchased)}×` : null,
@@ -2125,31 +2291,33 @@
             }
           ),
           chip("Use case", account.useCase, { title: "Use case" }),
-        ].filter(Boolean)
-      : [];
-    const hasAccount = !!(accountChips.length || account.isTargetAccount);
+        ]
+      : []
+    ).concat(accountObj ? accountObjectSplit.headline : []).filter(Boolean);
+    const accountMoreChips = accountObj ? accountObjectSplit.more : [];
+    const hasAccount = !!(accountChips.length || account.isTargetAccount || hasAccountObj);
 
     // Nothing to say, or nothing left after the zeros went: no section.
-    if (!user.isUser && !hasAccount) {
+    if (!user.isUser && !hasUserObj && !hasAccount && !hasTrial) {
       setPill(crmEls.wizaPill, null);
       crmEls.wizaSection.hidden = true;
       clearNode(body);
       return;
     }
     crmEls.wizaSection.hidden = false;
-    setPill(crmEls.wizaPill, user.statusLabel, variant);
+    setPill(crmEls.wizaPill, pillLabel, pillVariant);
     clearNode(body);
 
-    // The "User"/"Account" sub-labels only earn their line when both halves are
-    // on screen and a reader could otherwise mix them up.
-    const labelSubs = user.isUser && hasAccount;
+    // The "User"/"Account"/"Trial" sub-labels only earn their line when more
+    // than one half is on screen and a reader could otherwise mix them up.
+    const labelSubs = [user.isUser || hasUserObj, hasAccount, hasTrial].filter(Boolean).length > 1;
 
-    if (user.isUser) {
+    if (user.isUser || hasUserObj) {
       const sub = el("div", "wiza-sub");
       const head = el("div", "wiza-head");
       if (labelSubs) head.appendChild(el("span", "wiza-label", "User"));
-      if (user.statusLabel) {
-        head.appendChild(el("span", ("pill tiny " + variant).trim(), user.statusLabel));
+      if (pillLabel) {
+        head.appendChild(el("span", ("pill tiny " + pillVariant).trim(), pillLabel));
       }
       // Only worth saying when it's false — an unconfirmed email explains a lot
       // of "signed up but never used it" records.
@@ -2167,28 +2335,53 @@
         chip("Plan", plan, { title: "Plan status and billing frequency" }),
         chip(
           "Plan credits",
-          user.planCredits != null ? `${fmt.number(user.planCredits)} credits` : null,
+          user.planCredits != null ? `${fmt.credits(user.planCredits)} credits` : null,
           { title: "Credits included in the plan" }
         ),
-        chip("Credits 30d", metric(user.creditsUsed30d), {
-          title: "Credits used in the last 30 days",
+        // Superseded by the sparkline row below once there's a real trend.
+        userCreditsSpark
+          ? null
+          : chip("Credits 30d", metric(userCreditsValue), { title: "Credits used in the last 30 days" }),
+        chip("Last used", lastUsageAt ? fmt.relativeTime(lastUsageAt) : null, {
+          title: lastUsageAt ? `Last used ${fmt.dateTime(lastUsageAt)}` : null,
         }),
-        chip("Last used", user.lastUsageAt ? fmt.relativeTime(user.lastUsageAt) : null, {
-          title: user.lastUsageAt ? `Last used ${fmt.dateTime(user.lastUsageAt)}` : null,
-        }),
-        chip("Signed up", user.signedUpAt ? fmt.date(user.signedUpAt) : null, {
-          title: "Signed up",
-        }),
-        chip("Wiza ID", user.wizaId, { title: "Wiza user ID" }),
+        chip("Signed up", signedUpAt ? fmt.date(signedUpAt) : null, { title: "Signed up" }),
+        chip("Wiza ID", wizaId, { title: "Wiza user ID" }),
       ]);
       if (chips) sub.appendChild(chips);
 
+      // The credits-used sparkline: one line, only when there's enough
+      // history to draw — see sparklineRow.
+      const spark = userCreditsSpark
+        ? sparklineRow("Credits 30d", userCreditsHistory, { title: "Credits used in the last 30 days" })
+        : null;
+      if (spark) sub.appendChild(spark);
+
+      // Net-new profile facts only the custom object carries — behind the
+      // same MORE/LESS toggle the Account sub uses, so a fully-populated
+      // record doesn't spend height on them until asked.
+      const more = chipDisclosure(
+        [
+          chip("Role", userObj && userObj.role, { title: "Wiza role" }),
+          chip(
+            "Last enrichment",
+            userObj && userObj.lastEnrichmentAt ? fmt.relativeTime(userObj.lastEnrichmentAt) : null,
+            { title: userObj && userObj.lastEnrichmentAt ? `Last enrichment ${fmt.date(userObj.lastEnrichmentAt)}` : null }
+          ),
+          chip(
+            "Last export",
+            userObj && userObj.lastBulkExportAt ? fmt.relativeTime(userObj.lastBulkExportAt) : null,
+            { title: userObj && userObj.lastBulkExportAt ? `Last bulk export ${fmt.date(userObj.lastBulkExportAt)}` : null }
+          ),
+          chip("Extension", userObj && userObj.extensionVersion, { title: "Extension version" }),
+        ],
+        "user details"
+      );
+      if (more) sub.appendChild(more);
+
       // Both links come from URL properties and are only rendered when set.
       const links = el("div", "wiza-links");
-      appendAll(links, [
-        extLink("Open in Wiza Admin", user.adminUrl),
-        extLink("Usage logs", user.usageLogsUrl),
-      ]);
+      appendAll(links, [extLink("Open in Wiza Admin", adminUrl), extLink("Usage logs", usageLogsUrl)]);
       if (links.childElementCount) sub.appendChild(links);
 
       if (sub.childElementCount) body.appendChild(sub);
@@ -2207,11 +2400,184 @@
       // Account data but nobody signed up: the company is known to us, this
       // person isn't. One muted line above the chips — it is a statement about
       // the contact, not a datapoint about the account, so it isn't a chip.
-      if (!user.isUser) sub.appendChild(el("p", "crm-note", "Not a Wiza user"));
+      if (!user.isUser && !hasUserObj) sub.appendChild(el("p", "crm-note", "Not a Wiza user"));
       const chips = chipRow(accountChips);
       if (chips) sub.appendChild(chips);
+
+      // The account-wide credits-used sparkline — the second of the panel's
+      // two usage series.
+      const spark = accountCreditsSpark
+        ? sparklineRow("Credits 30d", accountCreditsHistory, { title: "Account-wide credits used in the last 30 days" })
+        : null;
+      if (spark) sub.appendChild(spark);
+
+      // Billing/revenue detail behind MORE — see chipDisclosure.
+      const more = chipDisclosure(accountMoreChips, "billing details");
+      if (more) sub.appendChild(more);
+
       if (sub.childElementCount) body.appendChild(sub);
     }
+
+    if (hasTrial) {
+      const sub = el("div", "wiza-sub");
+      if (labelSubs) {
+        const head = el("div", "wiza-head");
+        head.appendChild(el("span", "wiza-label", "Trial"));
+        sub.appendChild(head);
+      }
+      const dates =
+        trialObj.startAt && trialObj.endAt
+          ? `${fmt.date(trialObj.startAt)}–${fmt.date(trialObj.endAt)}`
+          : trialObj.endAt
+            ? `Ends ${fmt.date(trialObj.endAt)}`
+            : trialObj.startAt
+              ? `Started ${fmt.date(trialObj.startAt)}`
+              : null;
+      const chips = chipRow([
+        chip("Dates", dates, { title: "Trial period" }),
+        chip("Length", trialObj.lengthDays != null ? `${fmt.number(trialObj.lengthDays)}d` : null, {
+          title: "Trial length",
+        }),
+        chip("Paid", trialObj.paid, { title: "Paid trial" }),
+        chip("Amount", trialObj.amount != null ? fmt.currencyCompact(trialObj.amount) : null, {
+          title: "Trial amount",
+        }),
+        chip("Trial users", trialObj.userCount != null ? fmt.number(trialObj.userCount) : null, {
+          title: trialObj.userEmails || "Number of trial users",
+        }),
+        chip("Export credits", trialObj.exportCredits, { title: "Trial export credits" }),
+        chip("API credits", trialObj.apiCredits, { title: "Trial API credits" }),
+        chip(
+          "Monitor",
+          trialObj.monitorAccess == null ? null : trialObj.monitorAccess ? "Yes" : "No",
+          { title: "Monitor access" }
+        ),
+      ]);
+      if (chips) sub.appendChild(chips);
+      // The free-text notes field is hover detail on the sub-card rather than
+      // its own prose block — it keeps this sub-section to one compact card.
+      if (trialObj.notes) sub.title = trialObj.notes;
+      if (sub.childElementCount) body.appendChild(sub);
+    }
+  }
+
+  // The Wiza Account custom object's own chips — everything the rollup
+  // company properties never carried: plan, seats, the credit balances
+  // "account plan & credits" asks for, and the billing/revenue facts
+  // ("billing & revenue"). Split into `headline` (always visible — Jack's
+  // "seats used vs total, period end, credit balances") and `more` (the
+  // billing/revenue detail, behind the MORE toggle — see chipDisclosure and
+  // the height-budget note on renderWizaSection). The credits-30d fact is
+  // deliberately in neither list — the caller decides between a chip and a
+  // sparkline row for it, from the same rollup+object merge every other
+  // Account chip uses.
+  // "monthly"/"yearly" → "mo"/"yr": short enough that the Plan chip fits
+  // beside Seats on a 320px panel (the whole reason both are the headline).
+  // Anything else prints as-is rather than guessing at an abbreviation.
+  const BILLING_FREQ_SHORT = { monthly: "mo", yearly: "yr", annual: "yr", annually: "yr", weekly: "wk" };
+  function shortFrequency(value) {
+    const v = String(value == null ? "" : value).toLowerCase();
+    if (!v) return "";
+    // hasOwnProperty guard: a CRM value of "constructor" or "toString" must
+    // miss the lookup, not hand back a function from Object.prototype.
+    return Object.prototype.hasOwnProperty.call(BILLING_FREQ_SHORT, v) ? BILLING_FREQ_SHORT[v] : v;
+  }
+
+  function accountObjectChips(accountObj) {
+    const planBits = [accountObj.planName, accountObj.planPrice != null ? `(${fmt.currencyCompact(accountObj.planPrice)}${accountObj.planFrequency ? "/" + shortFrequency(accountObj.planFrequency) : ""})` : null]
+      .filter(Boolean)
+      .join(" ");
+    const seats =
+      accountObj.planSeatsUsed != null && accountObj.planSeatsTotal != null
+        ? `${fmt.number(accountObj.planSeatsUsed)} of ${fmt.number(accountObj.planSeatsTotal)}`
+        : accountObj.planSeatsUsed != null
+          ? fmt.number(accountObj.planSeatsUsed)
+          : null;
+    const credits = [
+      accountObj.emailCredits != null ? `${fmt.credits(accountObj.emailCredits)} email` : null,
+      accountObj.phoneCredits != null ? `${fmt.credits(accountObj.phoneCredits)} phone` : null,
+      accountObj.exportCredits != null ? `${fmt.credits(accountObj.exportCredits)} export` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const lastPayment =
+      accountObj.lastPaymentAmount != null
+        ? `${fmt.currency(accountObj.lastPaymentAmount)}${accountObj.lastPaymentAt ? ` on ${fmt.date(accountObj.lastPaymentAt)}` : ""}`
+        : accountObj.lastPaymentAt
+          ? fmt.date(accountObj.lastPaymentAt)
+          : null;
+    return {
+      // Plan + seats are the headline (Jack's "account plan & credits"
+      // group) — short enough that they share a row on a 320px panel, which
+      // is the point. Period end and the credit BALANCES move to `more` with
+      // billing/revenue: api_credit_balance already has its own
+      // always-visible chip via the rollup merge above, so period end and
+      // email/phone/export are real facts worth one click, not a guaranteed
+      // row on every fully-populated record.
+      headline: [
+        chip("Plan", planBits, { title: accountObj.planCategory }),
+        chip("Seats", seats, { title: "Plan seats used of total" }),
+      ],
+      more: [
+        chip(
+          "Renews",
+          accountObj.planPeriodEnd ? fmt.date(accountObj.planPeriodEnd) : null,
+          { title: "Plan period end" }
+        ),
+        chip("Credits", credits, {
+          title:
+            [
+              accountObj.activeUsers30d != null ? `${fmt.number(accountObj.activeUsers30d)} active users (30d)` : null,
+              accountObj.newUsers30d != null ? `${fmt.number(accountObj.newUsers30d)} new users (30d)` : null,
+              accountObj.listsCount30d != null ? `${fmt.number(accountObj.listsCount30d)} lists (30d)` : null,
+            ]
+              .filter(Boolean)
+              .join(", ") || "Email / phone / export credit balances",
+        }),
+        // Spend and total spend read as one datapoint — a rep asks "how much
+        // are they worth", not two separate questions — which also halves the
+        // two chips this used to be.
+        chip(
+          "Spend",
+          [
+            accountObj.spend30d != null ? `${fmt.currencyCompact(accountObj.spend30d)} (30d)` : null,
+            accountObj.totalSpend != null ? `${fmt.currencyCompact(accountObj.totalSpend)} total` : null,
+          ]
+            .filter(Boolean)
+            .join(", "),
+          { title: "Spend in the last 30 days and lifetime" }
+        ),
+        chip("Last payment", lastPayment, { title: "Last payment" }),
+        chip("Overage", accountObj.hasOverage == null ? null : accountObj.hasOverage ? "Yes" : "No", {
+          title: "Has overage",
+          tone: accountObj.hasOverage === true ? "caution" : undefined,
+        }),
+        chip(
+          "Card on file",
+          accountObj.hasCardOnFile == null ? null : accountObj.hasCardOnFile ? "Yes" : "No",
+          { title: "Has a card on file", tone: accountObj.hasCardOnFile === false ? "caution" : undefined }
+        ),
+        // Stripe status is the headline fact (it's the one explicitly asked
+        // for); account status stands in for it on a record with no Stripe
+        // subscription at all — never BOTH silently, and never neither when
+        // either exists. CRM-connected and the account's own trial flag are
+        // hover detail rather than two more chips.
+        chip("Stripe status", accountObj.stripeStatus || accountObj.accountStatus, {
+          title:
+            [
+              accountObj.stripeStatus && accountObj.accountStatus && accountObj.accountStatus !== accountObj.stripeStatus
+                ? `Account status: ${accountObj.accountStatus}`
+                : null,
+              accountObj.crmConnected ? `CRM connected: ${accountObj.crmConnected}` : null,
+              accountObj.trialStatus
+                ? `Trial status: ${accountObj.trialStatus}${accountObj.trialEndsAt ? ` (ends ${fmt.date(accountObj.trialEndsAt)})` : ""}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(", ") || "Stripe subscription status",
+        }),
+      ],
+    };
   }
 
   function renderDealsSection(bundle) {

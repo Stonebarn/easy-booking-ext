@@ -1250,6 +1250,56 @@
         line-height: 1.35;
         font-weight: var(--fw-value);
       }
+      /* Phase 12: usage sparkline row — the chip idiom's label-over-value,
+         one line, with the current value, a small inline trend line and an
+         arrow sharing the row instead of stacking under it. Sits among the
+         chips, so it gets the chip's own top margin from .chips + generic
+         sibling spacing; standing alone (a sub with only a sparkline) it
+         still reads as one compact line. */
+      .spark-row {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        margin-top: 4px;
+      }
+      .spark-label {
+        font-size: 10px;
+        line-height: 12px;
+        font-weight: var(--fw-caption);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .spark-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        line-height: 18px;
+      }
+      .spark-value {
+        font-size: 12px;
+        font-weight: var(--fw-value);
+        color: var(--ink);
+      }
+      /* Decoration, not meaning — the purple accent scale, same as every other
+         chart/graphical mark in the panel that isn't a status. */
+      .spark { display: block; flex: 0 0 auto; color: var(--accent); }
+      .spark-trend { display: inline-flex; flex: 0 0 auto; cursor: help; }
+      .spark-trend svg { width: 12px; height: 12px; display: block; }
+      /* Usage trending up is worth opening a call with — the panel's one
+         positive tone. Trending down stays muted: a red arrow mid-dial would
+         read as a churn alarm this section is not built to raise. */
+      .spark-trend.up { color: var(--tone-positive-fg); }
+      .spark-trend.down { color: var(--muted); }
+      /* The chip-level MORE/LESS toggle (see chipDisclosure): same spacing as
+         every other row in a Wiza sub-card, and the revealed chips get a
+         bottom margin of their own so the button underneath doesn't crowd them.
+         `.chips[hidden]` is needed because `.chips` sets `display: flex`
+         unconditionally — same specificity as the `[hidden]` UA rule, so
+         without this the collapsed row would render anyway. */
+      .chip-more-wrap { margin-top: 4px; }
+      .chip-more-wrap .chips { margin-bottom: 4px; }
+      .chips[hidden] { display: none; }
 
       /* Deal rows */
       .deal + .deal { margin-top: 8px; border-top: 1px solid var(--rule); padding-top: 8px; }
@@ -1750,12 +1800,15 @@
         </details>
       </section>
 
-      <!-- ===== Wiza user/account information =====
+      <!-- ===== Wiza usage =====
            Wiza PRODUCT data only: who this person is to us as a user (status,
-           ID, plan, credits, last usage, the admin links) and what their Wiza
+           ID, plan, credits, last usage, the admin links), what their Wiza
            account looks like (account ID, subscriptions, API credits,
-           purchases). Company classification — ICP, industry — belongs to
-           Account context above and is never repeated here. -->
+           purchases, plan/billing, usage sparklines) and any Trial on record.
+           Titled "Wiza usage" rather than the old "Wiza user/account
+           information" — that compound didn't scan at 10px caps. Company
+           classification — ICP, industry — belongs to Account context above
+           and is never repeated here. -->
       <section id="crm-wiza-section">
         <div class="section-head">
           <span class="sec-head-main">
@@ -1763,7 +1816,7 @@
             <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
               <path d="M3.5 6 8 18l4-7.5 4 7.5 4.5-12" />
             </svg>
-            <span class="section-title">Wiza user/account information</span>
+            <span class="section-title">Wiza usage</span>
           </span>
           <span class="pill info" id="crm-wiza-pill" style="display: none"></span>
         </div>

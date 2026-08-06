@@ -93,8 +93,10 @@
     // session, before a reload) can never be rendered by newer code that expects
     // fields it doesn't have. 10 = Phase 9's `colleagues` + Phase 10's extra
     // phone fields (both landed on 9 independently, so neither number is safe).
-    // 11 = Phase 11's accountContext.techStack and ownership.roles.
-    CACHE_VERSION: 11,
+    // 11 = Phase 11's accountContext.techStack and ownership.roles. 12 = Phase
+    // 12's Wiza custom-object reads (wiza.userObject / wiza.accountObject /
+    // wiza.trial) — a bundle cached before this phase has none of those keys.
+    CACHE_VERSION: 12,
     // Colleagues shown for the account (Phase 9). This is the *association page
     // limit we ask for* as well as the row cap, which is the point: one page, one
     // batch read, no paging, ever. 25 names is already more than a rep reads
@@ -246,6 +248,105 @@
       "hs_is_closed_lost",
       "closed_won_reason",
     ],
+
+    // --- Phase 12: Wiza custom objects (richer product data) --------------
+    // The rollup properties on CONTACT_PROPERTIES / COMPANY_PROPERTIES above
+    // are a thin slice of the portal's own Wiza User / Wiza Account / Trial
+    // custom objects — one record per user, one per billing account, an
+    // optional Trial on either. Every view-model built from these is null
+    // whenever the object doesn't exist for this prospect (no association),
+    // can't be read (403 ahead of crm.objects.custom.read landing on a
+    // reconnect, 404, anything) — see fetchCustomObject — so the section
+    // renders the rollup view above and nothing about it looks unfinished.
+    WIZA_USER_OBJECT_TYPE: "2-48448238",
+    WIZA_ACCOUNT_OBJECT_TYPE: "2-48693578",
+    TRIAL_OBJECT_TYPE: "2-40064102",
+    // Associations on a v3 object GET come back keyed by the fully-qualified
+    // name; some responses key them by the "2-X" object type id instead. Every
+    // lookup tries both — see firstAssocId.
+    WIZA_USER_ASSOC_KEYS: ["p40063500_wiza_users", "2-48448238"],
+    WIZA_ACCOUNT_ASSOC_KEYS: ["p40063500_accounts", "2-48693578"],
+    TRIAL_ASSOC_KEYS: ["p40063500_trials", "2-40064102"],
+    WIZA_USER_OBJECT_PROPERTIES: [
+      "wiza_user_id",
+      "user_status",
+      "wiza_role",
+      "wiza_email",
+      "user_signup_date",
+      "number_of_credits_used_in_last_30_days",
+      "date_of_last_wiza_usage",
+      "date_of_last_enrichment",
+      "date_of_last_bulk_export",
+      "last_usage_at",
+      "extension_version",
+      "wiza_admin_url",
+      "wiza_usage_logs",
+    ],
+    // The one series the User sub-section can sparkline: credits used, last
+    // 30 days, as it stood at every version HubSpot kept.
+    WIZA_USER_HISTORY_PROPERTIES: ["number_of_credits_used_in_last_30_days"],
+    WIZA_ACCOUNT_OBJECT_PROPERTIES: [
+      "account_id",
+      "plan_name",
+      "plan_price",
+      "plan_frequency",
+      "plan_category",
+      "plan_period_end",
+      "plan_seats_used",
+      "account_plan_seats_no",
+      "account_email_credits",
+      "account_phone_credits",
+      "api_credit_balance",
+      "export_credits",
+      "number_of_credits_used_in_last_30_days",
+      "number_of_active_users_last_30_days",
+      "number_of_new_users_in_last_30_days",
+      "reports_count_30d",
+      "spend_last_30d",
+      "total_spend",
+      "last_payment_date",
+      "last_payment_amount",
+      "has_overage",
+      "has_card_on_file",
+      "stripe_plan_subscription_status",
+      "account_status",
+      "account_trial_status",
+      "trial_ends_at__edt_",
+      "crm_connected",
+    ],
+    // Account-wide credits used, 30 days — the second of the panel's two
+    // sparkline series. api_credit_balance and active-users history are asked
+    // for too (density here is unknown ahead of a real read) but the panel only
+    // ever draws a line for the two credits-used series; see wizaAccountObjectView.
+    WIZA_ACCOUNT_HISTORY_PROPERTIES: [
+      "number_of_credits_used_in_last_30_days",
+      "api_credit_balance",
+      "number_of_active_users_last_30_days",
+    ],
+    TRIAL_OBJECT_PROPERTIES: [
+      "company_name",
+      "trial_start_date",
+      "trial_end_date",
+      "trial_end_date_calculated",
+      "trial_length",
+      "paid_trial",
+      "trial_amount",
+      "how_many_trial_users",
+      "emails_of_trial_users",
+      "trial_notes",
+      "trial_export_credits",
+      "trial_api_credits",
+      "monitor_access",
+    ],
+    // Points kept per sparkline after downsampling — a handful of pixels wide,
+    // so more than this buys no legibility.
+    HISTORY_MAX_POINTS: 24,
+    // Fewer usable (numeric, timestamped) history versions than this and a
+    // line is not a trend — the renderer prints the value alone. Portal
+    // history density is unverified ahead of a real read: a property that has
+    // never changed still comes back with exactly one version, which must
+    // degrade at least this gracefully, not draw a flat two-pixel stub.
+    HISTORY_MIN_SPARKLINE_POINTS: 3,
 
     // The five engagement object types, in the order ties are broken. There is
     // no single timeline endpoint (legacy engagements v1 is dead), so each type
@@ -1161,6 +1262,54 @@
 
   const propList = (props) => props.map(encodeURIComponent).join(",");
 
+  // --- Phase 12: custom-object association lookup --------------------------
+  // A contact/company GET's associations block can key a custom object by its
+  // fully-qualified name OR by its "2-X" object type id — see the CONFIG
+  // comment above WIZA_USER_ASSOC_KEYS. `keys` lists both spellings; the first
+  // one that actually has results wins.
+  //
+  // Deliberately the FIRST associated id, not the "best" one: telling which of
+  // several is the right one (say, by last-usage date) needs a request per
+  // candidate, and that is the batch-fan-out this phase's budget explicitly
+  // rules out. One prospect, one Wiza user, one fetch.
+  function firstAssocId(record, keys) {
+    for (const key of keys || []) {
+      const ids = associatedIds(record, key);
+      if (ids.length) return ids[0];
+    }
+    return null;
+  }
+
+  // One custom-object GET, resilient exactly like getActivity's per-type
+  // reads: ANY failure — no id to fetch, 403 (the app's crm.objects.custom.read
+  // scope not yet on this rep's token), 404, rate-limited, offline — logs its
+  // HTTP status and resolves to null rather than throwing. This is
+  // deliberate and different from deals/activity, which surface a section
+  // error on total failure: a Wiza custom object is an ENRICHMENT of the
+  // rollup properties already on the contact/company, never the only source
+  // for the section, so its failure must never be reported to the rep at
+  // all — the section simply renders what the rollups have, which is exactly
+  // what it rendered before this phase existed.
+  async function fetchCustomObject(kind, objectTypeId, id, properties, historyProperties) {
+    if (!isId(id)) return null;
+    try {
+      const hist =
+        historyProperties && historyProperties.length
+          ? `&propertiesWithHistory=${propList(historyProperties)}`
+          : "";
+      return await request(
+        `/crm/v3/objects/${objectTypeId}/${encodeURIComponent(id)}?properties=${propList(properties)}${hist}`
+      );
+    } catch (e) {
+      log(
+        `custom object (${kind} ${id}) could not be read — HTTP ${(e && e.status) || "?"}`,
+        (e && e.code) || "?",
+        (e && e.message) || e
+      );
+      return null;
+    }
+  }
+
   // --- Formatting (exported: the panel renders with these, and they are the
   // easiest part of this file to get subtly wrong, so they are unit-tested) ---
 
@@ -1190,6 +1339,35 @@
     } catch (_) {
       return `$${n}`;
     }
+  }
+
+  // Phase 12: plan price and total spend run from tens of dollars into the low
+  // six figures on this portal. Exact below $10k — a rep reading a monthly
+  // plan price wants the real number — and compact ("$86K") at $10k and
+  // above, where the extra digits buy nothing anyone acts on.
+  function formatCurrencyCompact(amount) {
+    const n = asNumber(amount);
+    if (n == null) return "";
+    if (Math.abs(n) < 10000) return formatCurrency(n);
+    try {
+      return new Intl.NumberFormat(CONFIG.LOCALE, {
+        style: "currency",
+        currency: CONFIG.CURRENCY,
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(n);
+    } catch (_) {
+      return formatCurrency(n);
+    }
+  }
+
+  // Several of the portal's credit-balance properties use -1 as "Unlimited"
+  // rather than a picklist, so a raw -1 must never reach the panel looking like
+  // a data error.
+  function formatCredits(value) {
+    const n = asNumber(value);
+    if (n == null) return "";
+    return n < 0 ? "Unlimited" : formatNumber(n);
   }
 
   function formatDate(value) {
@@ -1603,10 +1781,16 @@
   }
 
   // --- Contact / company resolution ---------------------------------------
+  // Phase 12: both the contact and company GETs additionally ask for the
+  // custom-object associations they might carry — zero extra requests, the
+  // ids just ride along in the same response's `associations` block (see
+  // firstAssocId). Trial is requested on BOTH ends because which side it
+  // associates to is unverified; whichever comes back non-empty wins.
   function contactByIdPath(id) {
     return (
       `/crm/v3/objects/contacts/${encodeURIComponent(id)}` +
-      `?associations=companies,deals&properties=${propList(CONFIG.CONTACT_PROPERTIES)}`
+      `?associations=companies,deals,${CONFIG.WIZA_USER_ASSOC_KEYS[0]},${CONFIG.TRIAL_ASSOC_KEYS[0]}` +
+      `&properties=${propList(CONFIG.CONTACT_PROPERTIES)}`
     );
   }
 
@@ -1616,7 +1800,8 @@
     orNull(
       request(
         `/crm/v3/objects/companies/${encodeURIComponent(id)}` +
-          `?properties=${propList(CONFIG.COMPANY_PROPERTIES)}`
+          `?associations=${CONFIG.WIZA_ACCOUNT_ASSOC_KEYS[0]},${CONFIG.TRIAL_ASSOC_KEYS[0]}` +
+          `&properties=${propList(CONFIG.COMPANY_PROPERTIES)}`
       )
     );
 
@@ -2391,6 +2576,222 @@
     return account;
   }
 
+  // --- Phase 12: property history → sparkline view-model -------------------
+  // propertiesWithHistory arrives as { value, timestamp, sourceType, ... },
+  // NEWEST FIRST, and version density is unverified ahead of a live read — a
+  // property that has never changed still comes back with exactly one
+  // version, and one that changes on every credit spend could come back with
+  // hundreds. Both turn into the same shape, so the renderer never branches:
+  //   points     numbers only, OLDEST → NEWEST (left-to-right on a
+  //              sparkline), downsampled to HISTORY_MAX_POINTS with both
+  //              endpoints always kept
+  //   count      how many usable (numeric, timestamped) versions there were
+  //              BEFORE downsampling — what `sparkline` is decided from, not
+  //              the (possibly smaller) length of `points`
+  //   latest     the newest usable value, or null when there is none
+  //   trend      "up" | "down" | "flat" | null — the two endpoints of
+  //              `points` compared; null with fewer than two of them
+  //   sparkline  true once there is enough history to draw a line at all; the
+  //              renderer prints the value alone when this is false — no
+  //              empty chart, no placeholder, ever
+  function historyView(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    const points = [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      // A version whose value never parses as a number, or that arrived with
+      // no usable timestamp, is dropped rather than plotted as a break.
+      const e = list[i];
+      const v = asNumber(e && e.value);
+      const t = toMillis(e && e.timestamp);
+      if (v == null || !t) continue;
+      points.push(v);
+    }
+    if (!points.length) return { points: [], count: 0, latest: null, trend: null, sparkline: false };
+
+    const max = Number(CONFIG.HISTORY_MAX_POINTS) > 0 ? Number(CONFIG.HISTORY_MAX_POINTS) : 24;
+    let sampled = points;
+    if (points.length > max) {
+      // Even spacing by index, both endpoints always kept: "where it started"
+      // and "where it is now" matter more to a rep glancing at the line than
+      // any point in between.
+      sampled = [];
+      const step = (points.length - 1) / (max - 1);
+      let lastIdx = -1;
+      for (let i = 0; i < max; i++) {
+        const idx = Math.round(i * step);
+        if (idx === lastIdx) continue; // rounding can repeat an index near the ends
+        sampled.push(points[idx]);
+        lastIdx = idx;
+      }
+    }
+    const latest = points[points.length - 1];
+    const first = points[0];
+    const floor =
+      Number(CONFIG.HISTORY_MIN_SPARKLINE_POINTS) > 0 ? Number(CONFIG.HISTORY_MIN_SPARKLINE_POINTS) : 3;
+    return {
+      points: sampled,
+      count: points.length,
+      latest,
+      trend: points.length >= 2 ? (latest > first ? "up" : latest < first ? "down" : "flat") : null,
+      sparkline: points.length >= floor,
+    };
+  }
+
+  // --- Phase 12: Wiza custom objects — richer product data ------------------
+  // Each view-model is null whenever fetchCustomObject came back with
+  // nothing (no association, a 403 ahead of the app's crm.objects.custom.read
+  // scope landing on a reconnect, a 404, anything) — never a half-built object
+  // with the renderer left to guess which half. `hasData` is what the panel
+  // gates a whole sub-section's extra content on.
+  function wizaUserObjectView(obj) {
+    if (!obj) return null;
+    const p = obj.properties || {};
+    const hist = obj.propertiesWithHistory || {};
+    const view = {
+      id: String(obj.id),
+      userId: asText(p.wiza_user_id),
+      status: asText(p.user_status),
+      // The Wiza custom objects share the same lowercase, no-underscore enum
+      // convention as the contact's own wiza_status ("active"/"closed") —
+      // humanizeEnum leaves those alone because they already look like a
+      // label, so every one of them goes through statusLabel() here instead,
+      // which additionally capitalizes.
+      statusLabel: statusLabel(p.user_status),
+      role: statusLabel(p.wiza_role),
+      email: asText(p.wiza_email),
+      signedUpAt: toMillis(p.user_signup_date) || null,
+      creditsUsed30d: asNumber(p.number_of_credits_used_in_last_30_days),
+      creditsUsed30dHistory: historyView(hist.number_of_credits_used_in_last_30_days),
+      // The richer of the two "last used" properties this object carries;
+      // date_of_last_wiza_usage is the same fact the contact rollup has, kept
+      // here as a fallback for a record where last_usage_at was never backfilled.
+      lastUsageAt: toMillis(p.last_usage_at) || toMillis(p.date_of_last_wiza_usage) || null,
+      lastEnrichmentAt: toMillis(p.date_of_last_enrichment) || null,
+      lastBulkExportAt: toMillis(p.date_of_last_bulk_export) || null,
+      extensionVersion: asText(p.extension_version),
+      adminUrl: safeUrl(p.wiza_admin_url),
+      usageLogsUrl: safeUrl(p.wiza_usage_logs),
+    };
+    view.hasData = !!(
+      view.status ||
+      view.role ||
+      view.email ||
+      view.signedUpAt ||
+      view.creditsUsed30d != null ||
+      view.lastUsageAt ||
+      view.lastEnrichmentAt ||
+      view.lastBulkExportAt ||
+      view.extensionVersion ||
+      view.adminUrl ||
+      view.usageLogsUrl
+    );
+    return view;
+  }
+
+  function wizaAccountObjectView(obj) {
+    if (!obj) return null;
+    const p = obj.properties || {};
+    const hist = obj.propertiesWithHistory || {};
+    const view = {
+      id: String(obj.id),
+      accountId: asText(p.account_id),
+      planName: asText(p.plan_name),
+      planPrice: asNumber(p.plan_price),
+      planFrequency: statusLabel(p.plan_frequency),
+      planCategory: statusLabel(p.plan_category),
+      planPeriodEnd: toMillis(p.plan_period_end) || null,
+      planSeatsUsed: asNumber(p.plan_seats_used),
+      planSeatsTotal: asNumber(p.account_plan_seats_no),
+      // -1 on any of these three means Unlimited (see formatCredits); the raw
+      // number rides in the view-model either way, and the renderer decides.
+      emailCredits: asNumber(p.account_email_credits),
+      phoneCredits: asNumber(p.account_phone_credits),
+      exportCredits: asNumber(p.export_credits),
+      apiCreditBalance: asNumber(p.api_credit_balance),
+      apiCreditBalanceHistory: historyView(hist.api_credit_balance),
+      creditsUsed30d: asNumber(p.number_of_credits_used_in_last_30_days),
+      creditsUsed30dHistory: historyView(hist.number_of_credits_used_in_last_30_days),
+      activeUsers30d: asNumber(p.number_of_active_users_last_30_days),
+      activeUsers30dHistory: historyView(hist.number_of_active_users_last_30_days),
+      newUsers30d: asNumber(p.number_of_new_users_in_last_30_days),
+      listsCount30d: asNumber(p.reports_count_30d),
+      spend30d: asNumber(p.spend_last_30d),
+      totalSpend: asNumber(p.total_spend),
+      lastPaymentAt: toMillis(p.last_payment_date) || null,
+      lastPaymentAmount: asNumber(p.last_payment_amount),
+      hasOverage: asBool(p.has_overage),
+      hasCardOnFile: asBool(p.has_card_on_file),
+      stripeStatus: statusLabel(p.stripe_plan_subscription_status),
+      accountStatus: statusLabel(p.account_status),
+      trialStatus: statusLabel(p.account_trial_status),
+      trialEndsAt: toMillis(p.trial_ends_at__edt_) || null,
+      // A vendor name ("hubspot", "salesforce"), not an enum state — techLabel
+      // is the panel's existing vendor-casing table (the tech-stack row uses
+      // it for exactly this), so this reads "HubSpot", never "Hubspot".
+      crmConnected: techLabel(p.crm_connected),
+    };
+    view.hasData = !!(
+      view.planName ||
+      view.planPrice != null ||
+      view.planSeatsUsed != null ||
+      view.planSeatsTotal != null ||
+      view.emailCredits != null ||
+      view.phoneCredits != null ||
+      view.exportCredits != null ||
+      view.apiCreditBalance != null ||
+      view.creditsUsed30d != null ||
+      view.activeUsers30d != null ||
+      view.newUsers30d != null ||
+      view.listsCount30d != null ||
+      view.spend30d != null ||
+      view.totalSpend != null ||
+      view.lastPaymentAt ||
+      view.hasOverage != null ||
+      view.hasCardOnFile != null ||
+      view.stripeStatus ||
+      view.accountStatus ||
+      view.trialStatus ||
+      view.trialEndsAt ||
+      view.crmConnected
+    );
+    return view;
+  }
+
+  function trialObjectView(obj) {
+    if (!obj) return null;
+    const p = obj.properties || {};
+    const view = {
+      id: String(obj.id),
+      companyName: asText(p.company_name),
+      startAt: toMillis(p.trial_start_date) || null,
+      // The calculated end date is the portal's own answer to "when does this
+      // actually end" (it accounts for extensions the plain end date doesn't);
+      // the plain field is the fallback for a record where it was never set.
+      endAt: toMillis(p.trial_end_date_calculated) || toMillis(p.trial_end_date) || null,
+      lengthDays: asNumber(p.trial_length),
+      paid: statusLabel(p.paid_trial),
+      amount: asNumber(p.trial_amount),
+      userCount: asNumber(p.how_many_trial_users),
+      userEmails: asText(p.emails_of_trial_users),
+      notes: asText(p.trial_notes) ? stripHtml(asText(p.trial_notes)) : null,
+      exportCredits: statusLabel(p.trial_export_credits),
+      apiCredits: statusLabel(p.trial_api_credits),
+      monitorAccess: asBool(p.monitor_access),
+    };
+    view.hasData = !!(
+      view.startAt ||
+      view.endAt ||
+      view.lengthDays != null ||
+      view.paid ||
+      view.amount != null ||
+      view.userCount != null ||
+      view.exportCredits ||
+      view.apiCredits ||
+      view.monitorAccess != null
+    );
+    return view;
+  }
+
   async function buildBundle(ctx) {
     const email = normEmail(ctx.email);
     const { contact, company, contactVia, companyVia } = await resolveProspect(ctx);
@@ -2406,6 +2807,7 @@
     const errors = {};
     let deals = [];
     let activity = [];
+    let wizaUserObj = null;
 
     // Phase 9's colleagues read is gated on the COMPANY, not the contact (an
     // account can be worth showing even when this particular person isn't in the
@@ -2421,11 +2823,39 @@
         })
       : Promise.resolve([]);
 
+    // Phase 12: the Wiza Account custom object, gated on the company exactly
+    // like colleagues, and the Trial — requested off whichever of contact or
+    // company actually carries the association (unverified which one it is;
+    // see CONFIG.TRIAL_ASSOC_KEYS). Both are resilient on their own
+    // (fetchCustomObject never throws), so neither one ever touches `errors`:
+    // a Wiza custom object is enrichment on top of the rollup properties, not
+    // a section of its own, and its absence must read as "nothing to add",
+    // never as a failure.
+    const wizaAccountObjPromise = fetchCustomObject(
+      "wiza_account",
+      CONFIG.WIZA_ACCOUNT_OBJECT_TYPE,
+      company ? firstAssocId(company, CONFIG.WIZA_ACCOUNT_ASSOC_KEYS) : null,
+      CONFIG.WIZA_ACCOUNT_OBJECT_PROPERTIES,
+      CONFIG.WIZA_ACCOUNT_HISTORY_PROPERTIES
+    );
+    const trialObjPromise = fetchCustomObject(
+      "trial",
+      CONFIG.TRIAL_OBJECT_TYPE,
+      (contact && firstAssocId(contact, CONFIG.TRIAL_ASSOC_KEYS)) ||
+        (company && firstAssocId(company, CONFIG.TRIAL_ASSOC_KEYS)) ||
+        null,
+      CONFIG.TRIAL_OBJECT_PROPERTIES,
+      null
+    );
+
     if (contact) {
       const dealIds = associatedIds(contact, "deals");
       // Deals and activity are independent sections: one failing must not blank
       // the other, so each records its own typed error code instead of throwing.
-      const [dealResult, activityResult] = await Promise.all([
+      // The Wiza User object rides the same Promise.all — one fetch, gated on
+      // the contact, no fan-out even when several users are associated (see
+      // firstAssocId).
+      const [dealResult, activityResult, wizaUserObjResult] = await Promise.all([
         getDeals(contact.id, dealIds).catch((e) => {
           errors.deals = isDataError(e) ? e.code : "TRANSIENT";
           if (isDataError(e) && e.retryAfterMs) errors.dealsRetryAfterMs = e.retryAfterMs;
@@ -2438,12 +2868,21 @@
           log("activity fetch failed:", e && e.message);
           return [];
         }),
+        fetchCustomObject(
+          "wiza_user",
+          CONFIG.WIZA_USER_OBJECT_TYPE,
+          firstAssocId(contact, CONFIG.WIZA_USER_ASSOC_KEYS),
+          CONFIG.WIZA_USER_OBJECT_PROPERTIES,
+          CONFIG.WIZA_USER_HISTORY_PROPERTIES
+        ),
       ]);
       deals = dealResult;
       activity = activityResult;
+      wizaUserObj = wizaUserObjResult;
     }
 
     const accountContacts = await colleaguesPromise;
+    const [wizaAccountObj, trialObj] = await Promise.all([wizaAccountObjPromise, trialObjPromise]);
     // Best-effort, and free: read from the stored connection, never looked up.
     const selfOwnerId = await connectedOwnerId();
 
@@ -2488,7 +2927,17 @@
         selfOwnerId,
         owners,
       }),
-      wiza: { user: wizaUserView(contact), account: wizaAccountView(company) },
+      wiza: {
+        user: wizaUserView(contact),
+        account: wizaAccountView(company),
+        // Phase 12: the custom-object views. Each is null exactly when
+        // fetchCustomObject came back with nothing — see its own comment —
+        // and the panel's fallback rule is "render precisely what these
+        // being null renders today", not a separate code path.
+        userObject: wizaUserObjectView(wizaUserObj),
+        accountObject: wizaAccountObjectView(wizaAccountObj),
+        trial: trialObjectView(trialObj),
+      },
       deals,
       activity,
       contactVia,
@@ -2569,6 +3018,13 @@
     view: {
       wizaUser: wizaUserView,
       wizaAccount: wizaAccountView,
+      // Phase 12: the custom-object views + the history → sparkline shaper,
+      // each pure over a fetched object (or null) so the harness can build a
+      // bundle without a network call, same as every view-model above.
+      wizaUserObject: wizaUserObjectView,
+      wizaAccountObject: wizaAccountObjectView,
+      trial: trialObjectView,
+      history: historyView,
       activityItem,
       // Phase 8 (pure over fetched properties; the panel renders these directly)
       ownership: ownershipView,
@@ -2612,6 +3068,8 @@
     // Formatting (shared with the panel; unit-tested)
     format: {
       currency: formatCurrency,
+      currencyCompact: formatCurrencyCompact,
+      credits: formatCredits,
       date: formatDate,
       dateTime: formatDateTime,
       number: formatNumber,

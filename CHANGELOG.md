@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Wiza custom objects: richer usage data, and two sparklines
+
+The "Wiza usage" section (renamed from "Wiza user/account information" — the
+old compound didn't scan at 10px caps) now layers the portal's own Wiza User,
+Wiza Account and Trial **custom objects** on top of the rollup properties it
+already rendered. The rollup view is untouched and remains the automatic
+fallback: no association, a 403 (the new `crm.objects.custom.read` scope not
+yet on a rep's token — reconnect in Settings to pick it up), a 404, anything —
+degrades silently to exactly what the section rendered before this shipped,
+never blanker.
+
+When the objects **are** readable, the section gains:
+
+- **User**: Role, Extension version, Last enrichment and Last bulk export
+  (behind a **MORE (n)** toggle), and an inline **Credits 30d sparkline**
+  replacing the plain chip once there's a real trend to draw.
+- **Account**: Plan (name + compact price) and Seats (used of total) as
+  headline chips; Renews (plan period end), Credits (email/phone/export
+  balances — `-1` renders as **Unlimited**, never a negative number), Spend
+  (30-day and lifetime), Last payment, Overage, Card on file and Stripe
+  status behind their own **MORE (n)**; and a second **Credits 30d
+  sparkline** for the account-wide trend.
+- **Trial**: a new sub-section, shown only when a Trial record is
+  associated — dates, length, paid status, amount, trial users, export/API
+  credit tiers and monitor access.
+
+Sparklines are built as inline SVG from numbers computed in `hubspot-data.js`
+(never from interpolated CRM strings), downsampled to at most 24 points; a
+property with fewer than 3 recorded history versions renders its value alone,
+with no chart. A trend arrow appears only for "up" or "down" — up in the
+panel's positive green, down in a muted grey, never red (a churn-red arrow
+mid-dial would cry wolf on the common case).
+
+Fetch cost: **+0 to +3** requests per prospect (one per associated custom
+object, only when one exists), all riding on associations the existing
+contact/company reads already carry for free. `CACHE_VERSION` bumped to 12.
+
 ## [0.4.0] - 2026-08-06
 
 ### Changed — the live capture lives in the Contact column
