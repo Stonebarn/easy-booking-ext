@@ -638,6 +638,71 @@
       }
       .ctx-more { color: var(--muted); font-weight: 600; }
 
+      /* ---- Others at this account (Phase 9) ----------------------------- */
+      /* Same reason as the account-context section: JS hides this one whenever
+         the prospect has no company. */
+      #crm-colleagues-section[hidden] { display: none; }
+      /* The section head doubles as the <details> toggle. It keeps the exact
+         .section-head layout so the collapsible section doesn't read as a
+         different kind of thing to the four fixed ones. */
+      .sec-toggle { cursor: pointer; list-style: none; }
+      .sec-toggle::-webkit-details-marker { display: none; }
+      .sec-toggle:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+      .sec-caret {
+        font-size: 9px;
+        color: var(--muted);
+        flex: 0 0 auto;
+        transition: transform 120ms ease;
+      }
+      #crm-colleagues-details:not([open]) .sec-caret { transform: rotate(-90deg); }
+      @media (prefers-reduced-motion: reduce) {
+        .sec-caret { transition: none; }
+      }
+      /* Same ceiling-and-scroll treatment as the Activity list: the panel's
+         footprint must not depend on how many people work at the account. */
+      .peer-list {
+        display: flex;
+        flex-direction: column;
+        max-height: max(180px, 34vh);
+        overflow-y: auto;
+      }
+      .peer + .peer { margin-top: 7px; border-top: 1px solid var(--line); padding-top: 7px; }
+      .peer-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 3px 6px;
+      }
+      .peer-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+      a.peer-name { color: var(--purple); text-decoration: none; }
+      a.peer-name:hover { text-decoration: underline; }
+      /* Icon-link, not a word: at 320px the row is already carrying a name, a
+         badge and a title. "in" is a glyph everyone reads instantly. */
+      a.peer-li {
+        flex: 0 0 auto;
+        padding: 0 4px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 15px;
+        text-decoration: none;
+      }
+      a.peer-li:hover { color: var(--purple); border-color: currentColor; }
+      .peer-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1px 8px;
+        margin-top: 1px;
+        font-size: 11px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .peer-title { color: var(--ink); }
+      .peer-when { cursor: help; }
+      .peer-owner .peer-who { font-weight: 600; color: var(--ink); }
+
       /* ---- Wiza section ------------------------------------------------- */
       .wiza-sub + .wiza-sub {
         margin-top: 8px;
@@ -981,6 +1046,27 @@
           <span class="pill info" id="crm-account-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-account"></div>
+      </section>
+
+      <!-- ===== Others at this account (Phase 9) =====
+           "Who else has been sequenced from this account" during a live call,
+           and names to pivot to when the prospect says "wrong person" — both
+           currently answered by tabbing out (the full dialer tab filtered by
+           account, or the company's LinkedIn page). Collapsible because it is
+           reference material, not the headline; the list scrolls inside a fixed
+           ceiling like Activity so 25 colleagues can't push the panel around.
+           Hidden entirely when the prospect has no company: there is no account
+           to be "others at", and no request is made either. -->
+      <section id="crm-colleagues-section">
+        <details id="crm-colleagues-details" open>
+          <summary class="section-head sec-toggle">
+            <span class="section-title" id="crm-colleagues-title">Others at this account</span>
+            <span class="sec-caret" aria-hidden="true">▾</span>
+          </summary>
+          <div class="card crm-body">
+            <div class="peer-list" id="crm-colleagues"></div>
+          </div>
+        </details>
       </section>
 
       <section id="crm-wiza-section">

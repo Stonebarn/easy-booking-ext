@@ -6,6 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ### Added — fix a wrong number from the panel (write path)
 
 - **Reps can now correct a contact's phone number in HubSpot from the side
@@ -64,6 +65,52 @@ adheres to [Semantic Versioning](https://semver.org/).
   set. README's Privacy & permissions section now spells out that the extension
   can **write contact phone numbers** — a meaningful capability change from
   "notes only" for anyone reviewing it — with a table of every write it can make.
+=======
+### Added — "Others at this account"
+
+- **A new collapsible CRM section listing the other contacts on the prospect's
+  company**, placed after Account context. Two SDR asks, one section: *"who else
+  has been sequenced from that account"* — visible today only on the full dialer
+  tab filtered by account, i.e. never during a live call — and the *"wrong person"*
+  pivot, which reps currently handle by opening the company's LinkedIn page and
+  reading employee names off it mid-dial.
+- Each row: the colleague's **name** (linked to their HubSpot contact record,
+  `0-1/{id}`), an **In sequence** badge (hover names the sequence and its start
+  date) or a muted **Not sequenced** when the portal says either way — and *no*
+  badge when it doesn't say, because "not in a sequence" is a claim; their **job
+  title**; **Last contacted 3d ago** with the exact time on hover; the **owner**,
+  shown as *"Owner: You"* when it's the connected rep's own contact and as the
+  teammate's name otherwise; and a compact **in** link to their LinkedIn profile
+  when `hs_linkedin_url` is set. The list scrolls inside a fixed height, like
+  Activity, so the panel's footprint doesn't depend on how big the account is.
+- Ordering is a pure, unit-tested view-model (`EB.hubspotData.view.accountContacts`):
+  **currently in a sequence first**, then **most recently contacted**, then name
+  and id purely for determinism. Job-title seniority is deliberately not a sort
+  key — it needs a title taxonomy to beat guessing, and a wrong guess about who
+  matters at an account is worse than alphabetical. The prospect the rep is already
+  looking at is excluded, by record ID *and* by email.
+- **Request budget: exactly two added requests per prospect** — one
+  `GET /crm/v4/objects/companies/{id}/associations/contacts?limit=25` and one
+  `POST /crm/v3/objects/contacts/batch/read`. Both are on the general pool
+  (110 req/10s); **no CRM Search call is made**, ever — that pool is 5 req/s for
+  the whole portal. Zero requests when the prospect has no company, one when the
+  company has no associated contacts. The page size *is* the row cap, so paging
+  isn't a code path. The result rides in the existing per-email bundle, so the
+  5-minute cache and the in-flight dedup already cover it (`CACHE_VERSION` 8 → 9).
+  Owner names come from the same batched, session-cached owner pass the rest of the
+  bundle uses, with a new `ACCOUNT_OWNER_LOOKUP_MAX` (10) ceiling on *first-time*
+  lookups so an account whose 25 contacts each have a different owner can't turn a
+  2-request section into 27.
+- Owner IDs are never shown: an ID that can't be resolved to a name renders with no
+  owner at all. "Yours vs a teammate's" is decided by comparing IDs against the
+  stored connection, which costs no request — and when the connection has no owner
+  ID resolved yet, the row makes neither claim.
+- States match the rest of the panel: no company → the section is hidden outright;
+  no colleagues → *"No other contacts on this account"*; signed out → the shared
+  **Connect** prompt; a rate limit → the countdown. A **403 does not claim the
+  sign-in expired** (it says the rep's permissions don't cover it), a genuine 401
+  does, and an empty result always renders as empty rather than as an error.
+>>>>>>> phase9-account-contacts
 
 ### Fixed — note attribution was blank
 
