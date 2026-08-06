@@ -567,7 +567,12 @@
       tzSelected = false;
       tzLabel = null;
       panelDismissed = false;
+      // A new prospect is a new booking: drop the old watch and its baseline so
+      // the next confirmation is measured against this prospect's page, and let
+      // a second booking in the same tab publish its own signal.
       bookingReset();
+      stopBookingWatch();
+      bookedPublished = false;
     }
     apply();
   });
@@ -630,32 +635,59 @@
     ],
     // A control that must never arm a booking, however it is styled.
     CANCEL_TEXTS: ["cancel", "back", "close", "reschedule", "cancel booking"],
-    // Confirmation copy, matched against a visible leaf's whole trimmed text
-    // (prefix match, ≤120 chars). Only counts when it appears AFTER the click.
+    // Confirmation copy. CONFIRMED live 2026-08-06 (Jack): the booking page
+    // says exactly "Your meeting has been scheduled!" — which the first
+    // version of this matcher would have MISSED twice over, because it only
+    // matched a phrase at the START of a line and had no entry for
+    // "meeting has been scheduled". Hence both changes here:
+    //
+    //   ANYWHERE — each of these contains a subject and a verb, so it cannot
+    //   collide with a stray word, and is matched anywhere in a short visible
+    //   line. The live string is the first entry.
     CONFIRM_PHRASES: [
+      "meeting has been scheduled",
+      "meeting has been booked",
+      "meeting is scheduled",
+      "meeting is booked",
+      "meeting scheduled",
+      "meeting confirmed",
+      "booking confirmed",
+      "booking is confirmed",
+      "successfully scheduled",
+      "successfully booked",
       "you're booked",
       "you are booked",
       "you're all set",
       "you are all set",
-      "booking confirmed",
-      "meeting confirmed",
-      "meeting scheduled",
-      "confirmed",
+      "you're scheduled",
+      "on the calendar",
+      "added to your calendar",
       "invitation sent",
       "invite sent",
       "thanks for booking",
       "thank you for booking",
-      "this meeting is scheduled",
     ],
+    //   WHOLE LINE ONLY — bare words that are evidence when they ARE the line
+    //   (a confirmation headline) and noise inside a sentence ("not confirmed",
+    //   "confirmed?" on a button).
+    CONFIRM_PHRASES_EXACT: ["confirmed", "booked", "scheduled", "all set", "you're all set!"],
     CONFIRM_URL_HINTS: ["confirmed", "confirmation", "booked", "success", "thank-you", "thankyou"],
     CONFIRM_WINDOW_MS: 25000,
     // How long the form has to stay gone before its absence counts as evidence
     // (a React re-render blanks the tree for a frame or two).
     FORM_GONE_MS: 1800,
     POLL_MS: 400,
+    // Debounce on the confirmation check: the page mutates constantly while the
+    // rep picks a slot, and the check walks the copy elements.
+    CHECK_DEBOUNCE_MS: 250,
+    // A booking mid-call can take a while; a tab left open should not hold an
+    // observer forever. 30 minutes matches the capture freshness window.
+    WATCH_MAX_MS: 30 * 60 * 1000,
   };
 
-  let pendingBooking = null; // { email, armedAt, phrasesBefore:Set, urlBefore, goneSince }
+  let pendingBooking = null; // { email, armedAt, urlBefore, goneSince } — a recognized submit click
+  let bookingWatch = null; // { email, urlBefore, phrasesBefore:Set, observer, timer } — from fill onward
+  let bookedPublished = false; // one signal per booking, per page life
   let bookingSeq = 0;
   let bookingPoll = null;
 
@@ -669,19 +701,31 @@
 
   const collapseText = (s) => String(s || "").replace(/\s+/g, " ").trim();
 
-  // Visible leaf elements only, so a phrase buried in the page's inline JSON
-  // (this is a Next.js app — its bootstrap payload contains "booked") can never
-  // be read as a confirmation.
+  // Short visible lines of copy, scanned for a confirmation.
+  //
+  // Two deliberate bounds keep the page's own text from lying to us. Only the
+  // element types that hold copy are queried, so this can never see the Next.js
+  // bootstrap JSON (that lives in <script>, which is not in the selector list
+  // and holds the word "booked"). And a line over 120 characters is skipped,
+  // which excludes the wrappers that contain the whole page as well as the
+  // event description ("A 30-minute demo … booked through an SDR").
+  //
+  // Leaves are NOT required: a headline is often split by markup
+  // (`<h2>Your meeting has been <b>scheduled</b>!</h2>`), and reading only
+  // childless elements would see "scheduled" alone and miss the sentence.
   function visibleConfirmPhrases() {
     const found = new Set();
-    const leaves = document.querySelectorAll("h1, h2, h3, h4, p, span, div, strong, li");
-    for (const el of leaves) {
-      if (el.children.length) continue;
+    for (const el of document.querySelectorAll("h1, h2, h3, h4, p, span, div, strong, li, section")) {
       const text = collapseText(el.textContent).toLowerCase();
       if (!text || text.length > 120) continue;
       if (!isVisible(el)) continue;
       for (const phrase of BOOKING.CONFIRM_PHRASES) {
-        if (text.indexOf(phrase) === 0 || text === phrase) found.add(phrase);
+        if (text.indexOf(phrase) !== -1) found.add(phrase);
+      }
+      // Bare words count only as the entire line, punctuation aside.
+      const bare = text.replace(/[!.…\s]+$/, "");
+      for (const phrase of BOOKING.CONFIRM_PHRASES_EXACT) {
+        if (bare === phrase) found.add(phrase);
       }
     }
     return found;
@@ -723,14 +767,52 @@
       how,
       url: location.href,
     };
+    bookedPublished = true;
     bookingReset();
+    stopBookingWatch();
     chrome.storage.local.set({ [BOOKED_KEY]: payload }, () => {
       // eslint-disable-next-line no-console
       console.debug("[EasyBooking] meeting booked:", payload.email || "(no email)", `(${how})`);
     });
   }
 
+  // The page saying so is enough. This runs whether or not a submit click was
+  // recognized, because a recognized click cannot be relied on: the button's
+  // label is a guess, and gating the whole feature on guessing it right is the
+  // exact mistake that kept note auto-sync from ever firing (see the layered
+  // detection in content-nooks.js and CHANGELOG 0.5.2). What IS reliable is
+  // that this extension filled this form for a known prospect and the page has
+  // since started saying a meeting is scheduled.
+  //
+  // Returns true when it published.
+  function checkConfirmation() {
+    if (!bookingWatch || bookedPublished) return false;
+    // The form must have been filled for a prospect we know, or this is not our
+    // booking to take credit for.
+    if (!emailFilled || !currentPayload || !currentPayload.email) return false;
+    const w = bookingWatch;
+
+    if (location.href !== w.urlBefore && urlLooksConfirmed(location.href)) {
+      publishBooked(currentPayload.email, "confirmation url");
+      return true;
+    }
+    // Only copy that was NOT already on screen when the form was filled: the
+    // page's own description mentions bookings, and a confirmation left over
+    // from a previous booking in the same tab must not fire a second time.
+    for (const phrase of visibleConfirmPhrases()) {
+      if (!w.phrasesBefore.has(phrase)) {
+        publishBooked(currentPayload.email, `page said "${phrase}"`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Weaker evidence, allowed only after a positively-classified submit click:
+  // the form we filled is gone and has stayed gone. On its own this would fire
+  // on any route change, which is why it needs the click behind it.
   function settleBooking() {
+    if (checkConfirmation()) return;
     if (!pendingBooking) return;
     const p = pendingBooking;
     if (Date.now() - p.armedAt > BOOKING.CONFIRM_WINDOW_MS) {
@@ -739,17 +821,6 @@
       bookingReset();
       return;
     }
-    if (location.href !== p.urlBefore && urlLooksConfirmed(location.href)) {
-      publishBooked(p.email, "confirmation url");
-      return;
-    }
-    for (const phrase of visibleConfirmPhrases()) {
-      if (!p.phrasesBefore.has(phrase)) {
-        publishBooked(p.email, `page said "${phrase}"`);
-        return;
-      }
-    }
-    // The form we filled is gone and has stayed gone: the flow moved on.
     if (!findEmailInput()) {
       if (p.goneSince == null) p.goneSince = Date.now();
       else if (Date.now() - p.goneSince >= BOOKING.FORM_GONE_MS) {
@@ -758,6 +829,54 @@
     } else {
       p.goneSince = null;
     }
+  }
+
+  // Starts watching as soon as the email lands in the form — long before any
+  // submit — so the "before" snapshot is genuinely the pre-booking page. The
+  // confirmation arrives as a DOM change, so an observer costs nothing while
+  // the rep is still picking a time.
+  function startBookingWatch() {
+    if (bookingWatch || bookedPublished) return;
+    if (!currentPayload || !currentPayload.email) return;
+    bookingWatch = {
+      email: currentPayload.email,
+      startedAt: Date.now(),
+      urlBefore: location.href,
+      phrasesBefore: visibleConfirmPhrases(),
+      observer: null,
+      timer: null,
+    };
+    const check = () => {
+      clearTimeout(bookingWatch && bookingWatch.timer);
+      if (!bookingWatch) return;
+      bookingWatch.timer = setTimeout(() => {
+        try {
+          checkConfirmation();
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.debug("[EasyBooking] booking confirmation check failed:", (e && e.message) || e);
+        }
+      }, BOOKING.CHECK_DEBOUNCE_MS);
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    bookingWatch.observer = observer;
+    window.addEventListener("popstate", check);
+    // A booking can take a while mid-call, but not all day: stop watching after
+    // the window so a tab left open overnight isn't holding an observer.
+    setTimeout(() => {
+      if (bookingWatch && !bookedPublished) stopBookingWatch();
+    }, BOOKING.WATCH_MAX_MS);
+    check();
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] watching this booking form for its confirmation");
+  }
+
+  function stopBookingWatch() {
+    if (!bookingWatch) return;
+    if (bookingWatch.observer) bookingWatch.observer.disconnect();
+    clearTimeout(bookingWatch.timer);
+    bookingWatch = null;
   }
 
   document.addEventListener(
@@ -793,6 +912,29 @@
     true
   );
 
+  // Begin watching once the form has been filled. Driven from here rather than
+  // called out of tryFillEmail on purpose: that function runs during the very
+  // first apply(), which happens BEFORE this block's `const BOOKING` is
+  // initialized, so calling into here from there would throw on the temporal
+  // dead zone. A half-second poll that cancels itself the moment the form is
+  // filled costs nothing and cannot be ordered wrongly.
+  let fillPoll = setInterval(() => {
+    if (bookedPublished || bookingWatch) {
+      clearInterval(fillPoll);
+      return;
+    }
+    if (emailFilled && currentPayload && currentPayload.email) {
+      clearInterval(fillPoll);
+      try {
+        startBookingWatch();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] could not start the booking watch:", (e && e.message) || e);
+      }
+    }
+  }, 500);
+  setTimeout(() => clearInterval(fillPoll), BOOKING.WATCH_MAX_MS);
+
   // Exposed for the fixture harness and console debugging (isolated world, so
   // the page's own JS cannot see it).
   const EB = (window.EB = window.EB || {});
@@ -803,14 +945,22 @@
     visibleConfirmPhrases,
     urlLooksConfirmed,
     settleBooking,
+    checkConfirmation,
+    startBookingWatch,
+    stopBookingWatch,
     pendingBookingState: () => pendingBooking,
-    reset: bookingReset,
+    bookingWatchState: () => bookingWatch,
+    publishedState: () => bookedPublished,
+    reset: () => {
+      bookingReset();
+      stopBookingWatch();
+      bookedPublished = false;
+    },
     // Test seam: arm without a real click (the click path needs a live document).
     armBooking: (email) => {
       pendingBooking = {
         email,
         armedAt: Date.now(),
-        phrasesBefore: visibleConfirmPhrases(),
         urlBefore: location.href,
         goneSince: null,
       };

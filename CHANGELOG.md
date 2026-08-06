@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-06
+
+### Fixed — the booking page's actual confirmation is now recognized
+
+The live booking page says **"Your meeting has been scheduled!"** (confirmed by
+Jack). As shipped in 0.6.0 that would never have fired: the matcher only looked
+for a phrase at the *start* of a line, and the phrase list had no entry for
+"meeting has been scheduled" — so the celebration would have stayed silent
+after a real booking. Three changes:
+
+- The confirmation string and its siblings are in the list, and phrases now
+  match **anywhere** in a short visible line. Each carries a subject and a verb
+  so a stray word can't trip it; bare words ("Confirmed", "Booked") count only
+  when they are the whole line.
+- Nested markup reads as one sentence. A headline split by tags
+  (`<h2>Your meeting has been <strong>scheduled</strong>!</h2>`) previously
+  scanned as the single word "scheduled" and missed.
+- **A recognized submit-button label is no longer required.** Detection starts
+  when the form is filled, snapshots the page's copy as a baseline, and
+  publishes when *new* confirmation copy appears — so an unexpected button
+  label, or a submit by keyboard, can't suppress a real booking. This is the
+  same failure mode that kept note auto-sync from ever firing (0.5.2): don't
+  gate a feature on guessing a third party's control label when the page states
+  the outcome in words.
+
+Guards kept: only a form this extension filled for a known prospect counts, only
+copy that was **not** already on screen at fill time is evidence (the page's own
+description mentions bookings, and a leftover confirmation in the same tab must
+not re-fire), and one booking publishes exactly one signal.
+
 ## [0.6.0] - 2026-08-06
 
 ### Added — the won-meeting moment
