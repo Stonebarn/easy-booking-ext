@@ -32,6 +32,13 @@
 //             plan, how many credits, what does their account look like)
 //   activity  up to 25 engagements per type, each attributed to an owner, plus
 //             the tab counts/filters the panel's Activity tab bar is built from
+// and, added in Phase 8 for the dialing decision itself — all of it read from
+// properties on the same contact/company/deal records, so it costs no extra
+// requests:
+//   ownership       who owns outbound on this account, correctly: the portal's
+//                   sdr_company_owner, not hubspot_owner_id
+//   accountContext  grade, team sizes, company blurb, ICP, tech stack
+//   sequence        whether this contact is already being worked
 // Those last helpers are shaped for the UI on purpose: they are pure functions
 // over the fetched items, which is what makes the tab bar unit-testable without
 // a DOM (same reasoning as the exported formatters).
@@ -66,9 +73,21 @@
     // cache, so a bundle cached by an earlier version of this file (same panel
     // session, before a reload) can never be rendered by newer code that expects
     // fields it doesn't have.
-    CACHE_VERSION: 6,
+    CACHE_VERSION: 8,
     // Characters of a note body kept for the one-line activity preview.
     NOTE_PREVIEW_CHARS: 120,
+    // Characters of the company blurb shown inline; the full text rides along as
+    // the row's hover title. Long enough to answer "do you even know what we
+    // do?", short enough that it doesn't own the panel.
+    SNIPPET_CHARS: 200,
+    // The AI ICP rationale runs to paragraphs — it is a hover detail, and even
+    // there it gets a ceiling (a title= tooltip is not a document viewer).
+    REASONING_CHARS: 400,
+    // Tech-stack entries shown before "+N more". Eight fits two lines at 320px.
+    TECH_STACK_MAX: 8,
+    // Closed-lost reasons are free text and some reps write essays; the row
+    // shows this much, the hover title the rest.
+    OUTCOME_CHARS: 140,
 
     CONTACT_PROPERTIES: [
       "firstname",
@@ -94,6 +113,16 @@
       "wiza_admin_url",
       "wiza_usage_logs",
       "wiza_email_confirmed",
+      // --- Phase 8: dialing-decision context (contact) ---------------------
+      // hs_linkedin_url, NOT linkedin_url — the latter is deprecated in the
+      // portal and empty on most records.
+      "hs_linkedin_url",
+      // "Are they already being worked?" — the sequence line in the identity
+      // block. hs_latest_sequence_enrolled is the sequence *name*.
+      "hs_sequences_is_enrolled",
+      "hs_latest_sequence_enrolled",
+      "hs_latest_sequence_enrolled_date",
+      "notes_last_contacted",
     ],
     COMPANY_PROPERTIES: [
       "name",
@@ -114,6 +143,31 @@
       "industry_wiza",
       "hs_is_target_account",
       "use_case",
+      // --- Phase 8: dialing-decision context (company) ---------------------
+      // Ownership. HubSpot's own description of sdr_company_owner: "[OFFICIAL]
+      // The SDR / outbound rep who owns prospecting for this account. Use this
+      // for outbound ownership, not hubspot_owner_id." So the panel shows this
+      // one first and labels all three; hubspot_owner_id above is the *company*
+      // owner, which is not the same person and never was.
+      "sdr_company_owner",
+      "cs_company_owner",
+      "outbound_ownership_change_date",
+      // Worth-calling check: grade, then how big the teams are.
+      "account_grade_v1",
+      "asm_sales_team_size",
+      "ae_team_size",
+      "ob_team_size",
+      "sales_leadership_team_size",
+      "company_lifecycle_stage",
+      // "Do you even know what we do?" — first non-empty of these three is the
+      // blurb a rep can read mid-dial.
+      "description",
+      "about_us",
+      "linkedinbio",
+      "account_icp_ai_reasoning",
+      "icp_fit",
+      "web_technologies",
+      "linkedin_company_page",
     ],
     DEAL_PROPERTIES: [
       "dealname",
@@ -122,6 +176,14 @@
       "amount",
       "closedate",
       "hubspot_owner_id",
+      // --- Phase 8: closed-lost talk track ---------------------------------
+      // Why the last deal died is the opener on a re-approach. Only rendered on
+      // closed deals (which already sort last), never on open ones.
+      "closed_lost_reason",
+      "closed_loss_category",
+      "closed_lost_category__secondary_",
+      "hs_is_closed_lost",
+      "closed_won_reason",
     ],
 
     // The five engagement object types, in the order ties are broken. There is
@@ -384,6 +446,53 @@
     } catch (_) {
       return null;
     }
+  }
+
+  // LinkedIn URLs in HubSpot are hand-entered and very often scheme-less
+  // ("linkedin.com/in/jane"), which safeUrl rejects outright. A value that is
+  // *exactly* a linkedin.com path gets an https:// prefix; anything else goes
+  // through safeUrl untouched, so javascript:/data:/relative values are still
+  // dropped rather than linked.
+  function linkedInUrl(v) {
+    const s = asText(v);
+    if (!s) return null;
+    if (/^(?:https?:\/\/)/i.test(s)) return safeUrl(s);
+    // Optional www./country subdomain, then a linkedin.com path — and nothing
+    // before it, so "javascript:linkedin.com/x" can never match.
+    if (/^(?:www\.|[a-z]{2,3}\.)?linkedin\.com\/[^\s]*$/i.test(s)) return safeUrl(`https://${s}`);
+    return safeUrl(s);
+  }
+
+  // First value that actually has text, for the description/about_us/linkedinbio
+  // waterfall — most companies have exactly one of the three filled in.
+  function firstText(values) {
+    for (const v of values || []) {
+      const t = asText(v);
+      if (t) return t;
+    }
+    return null;
+  }
+
+  // A delimited CRM property (web_technologies is semicolon-ish, but the portal
+  // has commas and newlines in it too) as a capped, de-duplicated list:
+  // { items, more, total, all }. `more` is what "+N more" prints; `all` is the
+  // full list for the hover title. Null when there is nothing to show.
+  function delimitedList(value, max) {
+    const raw = asText(value);
+    if (!raw) return null;
+    const cap = Number(max) > 0 ? Number(max) : CONFIG.TECH_STACK_MAX;
+    const seen = Object.create(null);
+    const all = [];
+    for (const part of raw.split(/[;,|\r\n\t]+/)) {
+      const item = part.trim().replace(/\s+/g, " ");
+      if (!item) continue;
+      const key = item.toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      all.push(item);
+    }
+    if (!all.length) return null;
+    return { items: all.slice(0, cap), more: Math.max(0, all.length - cap), total: all.length, all };
   }
 
   function truncate(text, max) {
@@ -684,6 +793,21 @@
     return (o && o.name) || null;
   };
 
+  // The portal's ownership properties (sdr_company_owner, cs_company_owner) are
+  // not typed the way hubspot_owner_id is: depending on how the record was
+  // written they hold either an owner-ID reference *or* an already-resolved
+  // name. So inspect the value rather than trusting the schema:
+  //   digits      → resolve through the session owner cache; if that fails the
+  //                 answer is "nothing to show", never the bare number (a rep
+  //                 reading "Outbound owner 682134" learns less than nothing)
+  //   anything else → already a name (or an email), pass it through
+  function ownerRef(value, owners) {
+    const raw = asText(value);
+    if (!raw) return null;
+    if (!isId(raw)) return raw;
+    return ownerName(owners, raw);
+  }
+
   // --- Contact / company resolution ---------------------------------------
   function contactByIdPath(id) {
     return (
@@ -804,6 +928,15 @@
         closeDate: p.closedate || null,
         ownerId: p.hubspot_owner_id || null,
         url: recordUrl("deal", d.id),
+        // Outcome context (Phase 8). Kept as separate nullable fields rather
+        // than a pre-joined string so dealOutcome() — which the panel renders
+        // and the harness asserts on — stays the only place that decides what a
+        // closed row says. closedLost is HubSpot's own flag; null when unset.
+        closedLost: asBool(p.hs_is_closed_lost),
+        lostReason: asText(p.closed_lost_reason),
+        lostCategory: humanizeEnum(p.closed_loss_category) || null,
+        lostCategorySecondary: humanizeEnum(p.closed_lost_category__secondary_) || null,
+        wonReason: asText(p.closed_won_reason),
       };
     });
     // Open deals are what a rep is about to talk about; closed ones are context.
@@ -812,6 +945,40 @@
       return toMillis(b.closeDate) - toMillis(a.closeDate);
     });
     return deals;
+  }
+
+  // --- Deal outcome line (Phase 8; pure, exported, unit-tested) -------------
+  // The one-line "why this ended" for a *closed* deal: the talk track for a
+  // re-approach ("last time this stalled on budget…"). Open deals have no
+  // outcome, and a closed deal with none of the reason properties set gets no
+  // row at all rather than an empty label.
+  //
+  // Returns { text, title } — text is capped for the row, title carries the
+  // whole thing for the hover.
+  function dealOutcome(deal) {
+    if (!deal || !deal.closed) return null;
+    // Pipeline probability says won; hs_is_closed_lost is the portal's explicit
+    // flag and wins when the two disagree. Closed and not won = lost.
+    const lost = deal.closedLost === true || !deal.won;
+    const parts = lost
+      ? [deal.lostReason, deal.lostCategory, deal.lostCategorySecondary]
+      : [deal.wonReason];
+    const seen = Object.create(null);
+    const kept = [];
+    for (const part of parts) {
+      const t = asText(part);
+      if (!t) continue;
+      // A secondary category that repeats the primary adds nothing to a row
+      // this narrow.
+      const key = t.toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      kept.push(t);
+    }
+    if (!kept.length) return null;
+    const full = kept.join(" · ");
+    const prefix = lost ? "Lost" : "Won";
+    return { lost, text: `${prefix}: ${truncate(full, CONFIG.OUTCOME_CHARS)}`, title: `${prefix}: ${full}` };
   }
 
   // --- Activity ------------------------------------------------------------
@@ -997,6 +1164,9 @@
       ownerId: p.hubspot_owner_id || null,
       ownerName: ownerName(owners, p.hubspot_owner_id),
       lastActivityAt: p.notes_last_updated ? toMillis(p.notes_last_updated) : null,
+      // One-click LinkedIn from the identity block (Phase 8): the rep was going
+      // to open a tab and search for them anyway.
+      linkedinUrl: linkedInUrl(p.hs_linkedin_url),
       url: recordUrl("contact", contact.id),
     };
   }
@@ -1012,8 +1182,130 @@
       employees: p.numberofemployees != null && p.numberofemployees !== "" ? Number(p.numberofemployees) : null,
       ownerId: p.hubspot_owner_id || null,
       ownerName: ownerName(owners, p.hubspot_owner_id),
+      linkedinUrl: linkedInUrl(p.linkedin_company_page),
       url: recordUrl("company", company.id),
     };
+  }
+
+  // --- Ownership (Phase 8) -------------------------------------------------
+  // The correctness fix: the identity block used to show one unlabelled name
+  // taken from hubspot_owner_id, which is *not* the outbound owner. HubSpot's
+  // own description of sdr_company_owner says so explicitly ("use this for
+  // outbound ownership, not hubspot_owner_id"), and "who owns prospecting on
+  // this account" is the question a rep asks before dialing.
+  //
+  // So: four separately-labelled, separately-nullable names. Outbound is the
+  // prominent one; the rest are supporting detail. Every value goes through
+  // ownerRef, which resolves ID-shaped values and drops the ones it can't
+  // resolve — a bare numeric ID is never a name.
+  function ownershipView(contact, company, owners) {
+    const cp = (company && company.properties) || {};
+    const kp = (contact && contact.properties) || {};
+    const own = {
+      outbound: ownerRef(cp.sdr_company_owner, owners),
+      csm: ownerRef(cp.cs_company_owner, owners),
+      companyOwner: ownerRef(cp.hubspot_owner_id, owners),
+      contactOwner: ownerRef(kp.hubspot_owner_id, owners),
+      changedAt: toMillis(cp.outbound_ownership_change_date) || null,
+    };
+    own.hasData = !!(own.outbound || own.csm || own.companyOwner || own.contactOwner);
+    return own;
+  }
+
+  // --- Account context (Phase 8) -------------------------------------------
+  // Two SDR asks in one view-model because they answer one question — "is this
+  // worth calling, and what do I open with":
+  //   grade / team sizes / company status  → worth calling at all
+  //   blurb / ICP / tech stack             → what to say once they pick up
+  //
+  // Every field is independently nullable and `hasData` is false when the
+  // company has none of them (the common case for a thin record), which is what
+  // lets the panel hide the whole section instead of drawing an empty card.
+  function accountContextView(company) {
+    const p = (company && company.properties) || {};
+
+    // description → about_us → linkedinbio. The full text is kept for the hover
+    // title; `truncated` tells the panel whether a hover is worth offering.
+    const blurb = firstText([p.description, p.about_us, p.linkedinbio]);
+    const snippet = blurb ? truncate(stripHtml(blurb), CONFIG.SNIPPET_CHARS) : null;
+    const blurbFull = blurb ? stripHtml(blurb) : null;
+
+    const reasoningFull = asText(p.account_icp_ai_reasoning)
+      ? stripHtml(asText(p.account_icp_ai_reasoning))
+      : null;
+
+    const ctx = {
+      // Worth-calling check
+      grade: asText(p.account_grade_v1),
+      status: humanizeEnum(p.company_lifecycle_stage) || null,
+      salesTeamSize: asNumber(p.asm_sales_team_size),
+      aeTeamSize: asNumber(p.ae_team_size),
+      obTeamSize: asNumber(p.ob_team_size),
+      leadershipTeamSize: asNumber(p.sales_leadership_team_size),
+      // What to open with
+      snippet,
+      snippetFull: blurbFull,
+      snippetTruncated: !!(blurbFull && snippet && blurbFull.length > snippet.length),
+      industry: humanizeEnum(p.industry_wiza) || null,
+      icp: humanizeEnum(p.account_icp) || null,
+      icpFit: humanizeEnum(p.icp_fit) || null,
+      icpReasoning: reasoningFull ? truncate(reasoningFull, CONFIG.REASONING_CHARS) : null,
+      icpReasoningFull: reasoningFull,
+      tech: delimitedList(p.web_technologies),
+    };
+    ctx.hasData = !!(
+      ctx.grade ||
+      ctx.status ||
+      ctx.salesTeamSize != null ||
+      ctx.aeTeamSize != null ||
+      ctx.obTeamSize != null ||
+      ctx.leadershipTeamSize != null ||
+      ctx.snippet ||
+      ctx.industry ||
+      ctx.icp ||
+      ctx.icpFit ||
+      ctx.icpReasoning ||
+      ctx.tech
+    );
+    return ctx;
+  }
+
+  // --- Sequence context (Phase 8) ------------------------------------------
+  // "Are they already being worked, and when did anyone last touch them" — the
+  // difference between a cold dial and stepping on a teammate's sequence.
+  //
+  // `line` is the whole statement, and it is null when the portal doesn't say:
+  // claiming "Not in a sequence" on a record with no enrolment data at all would
+  // be a guess presented as a fact. An unenrolled contact that still has a
+  // latest-sequence name reports it as `lastSequence` instead, which is true.
+  function sequenceView(contact) {
+    const p = (contact && contact.properties) || {};
+    const enrolled = asBool(p.hs_sequences_is_enrolled);
+    const name = asText(p.hs_latest_sequence_enrolled);
+    const enrolledAt = toMillis(p.hs_latest_sequence_enrolled_date) || null;
+    const seq = {
+      enrolled,
+      name,
+      enrolledAt,
+      lastContactedAt: toMillis(p.notes_last_contacted) || null,
+      line: null,
+      lastSequence: null,
+      lastSequenceAt: null,
+    };
+    if (enrolled === true) {
+      const since = enrolledAt ? ` since ${formatDate(enrolledAt)}` : "";
+      seq.line = (name ? `In sequence: ${name}` : "In sequence") + since;
+    } else if (enrolled === false) {
+      seq.line = "Not in a sequence";
+      seq.lastSequence = name;
+      seq.lastSequenceAt = name ? enrolledAt : null;
+    } else if (name) {
+      // No enrolment flag, but a sequence name: report the fact, not a state.
+      seq.lastSequence = name;
+      seq.lastSequenceAt = enrolledAt;
+    }
+    seq.hasData = !!(seq.line || seq.lastSequence || seq.lastContactedAt);
+    return seq;
   }
 
   // --- Wiza product data ---------------------------------------------------
@@ -1131,9 +1423,16 @@
       activity = activityResult;
     }
 
+    // One batched owner-name pass for every ID the bundle will render. The two
+    // Phase 8 ownership properties join it here rather than getting a lookup of
+    // their own: resolveOwners ignores any value that isn't all digits, so a
+    // property that already holds a name costs nothing, and one that holds an ID
+    // shares this call (and the session cache the whole team's records hit).
     const owners = await resolveOwners([
       contact && contact.properties && contact.properties.hubspot_owner_id,
       company && company.properties && company.properties.hubspot_owner_id,
+      company && company.properties && company.properties.sdr_company_owner,
+      company && company.properties && company.properties.cs_company_owner,
       ...deals.map((d) => d.ownerId),
     ]);
     for (const d of deals) d.ownerName = ownerName(owners, d.ownerId);
@@ -1143,6 +1442,11 @@
       version: CONFIG.CACHE_VERSION,
       contact: contactView(contact, owners),
       company: companyView(company, owners),
+      // Phase 8 view-models. Additive: every existing bundle field is untouched,
+      // and each of these is independently "no data" for a thin record.
+      ownership: ownershipView(contact, company, owners),
+      accountContext: accountContextView(company),
+      sequence: sequenceView(contact),
       wiza: { user: wizaUserView(contact), account: wizaAccountView(company) },
       deals,
       activity,
@@ -1224,6 +1528,11 @@
       wizaUser: wizaUserView,
       wizaAccount: wizaAccountView,
       activityItem,
+      // Phase 8 (pure over fetched properties; the panel renders these directly)
+      ownership: ownershipView,
+      accountContext: accountContextView,
+      sequence: sequenceView,
+      dealOutcome,
     },
     activity: {
       TABS: ACTIVITY_TABS,
@@ -1243,6 +1552,9 @@
       humanizeEnum,
       truncate,
       safeUrl,
+      linkedInUrl,
+      firstText,
+      delimitedList,
       toMillis,
       recordUrl,
     },

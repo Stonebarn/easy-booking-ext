@@ -450,7 +450,13 @@
   }
 
   // ==========================================================================
-  // CRM context — identity block, Wiza product data, Deals, Activity.
+  // CRM context — identity block, Account context, Wiza product data, Deals,
+  // Activity.
+  //
+  // Phase 8 added the dialing-decision bits: labelled ownership (outbound owner
+  // first — see ownershipBlock), one-click LinkedIn, sequence state, the account
+  // context section, and the closed-deal outcome line. All of it renders from
+  // view-models on the same bundle; nothing here fetches.
   //
   // Input is "eb:prospectContext" (email + identity + the HubSpot record IDs
   // content-nooks.js scraped from the Nooks panes), with "eb:currentProspect"'s
@@ -474,6 +480,12 @@
     refreshNote: document.getElementById("crm-refresh-note"),
     identity: document.getElementById("crm-identity"),
     identityPill: document.getElementById("crm-identity-pill"),
+    // Account context (Phase 8). The section element itself is held because this
+    // is the one section that hides entirely when the company has nothing worth
+    // a card.
+    accountSection: document.getElementById("crm-account-section"),
+    account: document.getElementById("crm-account"),
+    accountPill: document.getElementById("crm-account-pill"),
     wiza: document.getElementById("crm-wiza"),
     wizaPill: document.getElementById("crm-wiza-pill"),
     deals: document.getElementById("crm-deals"),
@@ -482,7 +494,13 @@
     activityPill: document.getElementById("crm-activity-pill"),
     activityTabs: document.getElementById("crm-activity-tabs"),
   };
-  const crmBodies = [crmEls.identity, crmEls.wiza, crmEls.deals, crmEls.activity];
+  const crmBodies = [
+    crmEls.identity,
+    crmEls.account,
+    crmEls.wiza,
+    crmEls.deals,
+    crmEls.activity,
+  ];
 
   // status: "idle" (nothing to show) | "loading" | "ready" | "error"
   const crm = {
@@ -644,12 +662,84 @@
   }
 
   // --- section renderers ---------------------------------------------------
+
+  // Ownership (Phase 8). Four separately-labelled names, each rendered only when
+  // the record has it, with the *outbound* owner prominent: HubSpot's own
+  // description of `sdr_company_owner` says to use it for outbound ownership
+  // rather than `hubspot_owner_id`, and "who owns prospecting here" is the
+  // question this block exists to answer before a rep dials.
+  //
+  // Every name arrives already resolved from hubspot-data.js (ID-shaped values
+  // are looked up, unresolvable ones dropped), so nothing here can print a bare
+  // owner ID.
+  function ownershipBlock(own) {
+    if (!own || !own.hasData) return null;
+    const block = el("div", "own");
+
+    if (own.outbound) {
+      const primary = el("div", "own-primary");
+      primary.appendChild(el("span", "own-label", "Outbound owner"));
+      primary.appendChild(el("span", "own-name", own.outbound));
+      // When ownership last moved is context for "why haven't they been called",
+      // not a headline — hover detail on the row it belongs to.
+      if (own.changedAt) {
+        primary.title = `Outbound ownership changed ${fmt.date(own.changedAt)}`;
+      }
+      block.appendChild(primary);
+    }
+
+    // The supporting names, one dense wrapping line. Each is labelled, because
+    // an unlabelled name next to a phone number is exactly the ambiguity this
+    // block replaces.
+    const more = el("div", "own-more");
+    const pair = (label, name) => {
+      if (!name) return null;
+      const span = el("span", null, `${label}: `);
+      span.appendChild(el("span", "own-who", name));
+      return span;
+    };
+    appendAll(more, [
+      pair("CSM", own.csm),
+      pair("Company owner", own.companyOwner),
+      pair("Contact owner", own.contactOwner),
+    ]);
+    if (more.childElementCount) block.appendChild(more);
+
+    return block.childElementCount ? block : null;
+  }
+
+  // Sequence context (Phase 8): whether this contact is already being worked,
+  // and when anyone last touched them. `line` is null when the portal doesn't
+  // say — no line is better than a guess.
+  function sequenceLine(seq) {
+    if (!seq || !seq.hasData) return null;
+    const row = el("div", "ident-seq");
+    if (seq.line) {
+      const span = el("span", seq.enrolled === true ? "seq-on" : null, seq.line);
+      row.appendChild(span);
+    }
+    if (seq.lastSequence) {
+      const text = seq.lastSequenceAt
+        ? `Last sequence: ${seq.lastSequence} (${fmt.date(seq.lastSequenceAt)})`
+        : `Last sequence: ${seq.lastSequence}`;
+      row.appendChild(el("span", null, text));
+    }
+    if (seq.lastContactedAt) {
+      const when = el("span", null, `Last contacted ${fmt.relativeTime(seq.lastContactedAt)}`);
+      const exact = fmt.dateTime(seq.lastContactedAt);
+      if (exact) when.title = exact;
+      row.appendChild(when);
+    }
+    return row.childElementCount ? row : null;
+  }
+
   // One block for both records, three lines deep:
   //   1  Name · lifecycle stage
   //   2  Title @ Company        (both linked to their HubSpot records)
-  //   3  Owner · phone · lead status
-  // The company's domain, industry and headcount ride along as the company
-  // link's hover text — kept, but not spending a row each.
+  //   3  Phone · lead status
+  // then (Phase 8) the labelled ownership rows, the LinkedIn links, and the
+  // sequence line. The company's domain, industry and headcount ride along as
+  // the company link's hover text — kept, but not spending a row each.
   function renderIdentitySection(bundle) {
     const body = crmEls.identity;
     const c = bundle.contact;
@@ -687,16 +777,112 @@
     }
     if (role.childElementCount) block.appendChild(role);
 
+    // Owner used to sit here, unlabelled — and it was the wrong field for the
+    // question reps were using it to answer. It now lives in ownershipBlock
+    // below, labelled, with the outbound owner first.
     const meta = el("div", "ident-meta");
-    const owner = (c && c.ownerName) || (co && co.ownerName) || null;
     appendAll(meta, [
-      owner ? el("span", null, owner) : null,
       c && c.phone ? el("span", null, c.phone) : null,
       c && c.leadStatus ? el("span", null, c.leadStatus) : null,
     ]);
     if (meta.childElementCount) block.appendChild(meta);
 
+    const own = ownershipBlock(bundle.ownership);
+    if (own) block.appendChild(own);
+
+    // One-click LinkedIn (Phase 8). Both hrefs come from safeUrl'd CRM values in
+    // hubspot-data.js, so a javascript:/data: property value is already gone.
+    const links = el("div", "ident-links");
+    appendAll(links, [
+      extLink("LinkedIn", c && c.linkedinUrl),
+      extLink("Company LinkedIn", co && co.linkedinUrl),
+    ]);
+    if (links.childElementCount) block.appendChild(links);
+
+    const seq = sequenceLine(bundle.sequence);
+    if (seq) block.appendChild(seq);
+
     body.appendChild(block);
+  }
+
+  // --- Account context (Phase 8) -------------------------------------------
+  // "Worth calling?" up top (grade in the section pill, then the team sizes and
+  // company status), then "what do I open with" (the company's own blurb, ICP,
+  // tech stack). Empty rows are never built — most prospects have most of these
+  // blank — and if the whole thing is empty the section is hidden rather than
+  // drawn as a card that says nothing.
+  function renderAccountSection(bundle) {
+    const body = crmEls.account;
+    const ctx = bundle.accountContext || {};
+    if (!ctx.hasData) {
+      setPill(crmEls.accountPill, null);
+      crmEls.accountSection.hidden = true;
+      clearNode(body);
+      return;
+    }
+    crmEls.accountSection.hidden = false;
+    // The grade is the single most scannable "worth calling" signal, so it goes
+    // in the section head where a rep sees it without reading the card.
+    setPill(crmEls.accountPill, ctx.grade ? `Grade ${ctx.grade}` : null);
+    clearNode(body);
+
+    if (ctx.snippet) {
+      const p = el("p", "ctx-snippet", ctx.snippet);
+      if (ctx.snippetTruncated && ctx.snippetFull) p.title = ctx.snippetFull;
+      body.appendChild(p);
+    }
+
+    // The Wiza section already shows ICP and industry for companies that have
+    // Wiza account data; don't print them twice in the same panel.
+    const wizaAccount = (bundle.wiza && bundle.wiza.account) || {};
+    const dupWiza = !!wizaAccount.hasData;
+
+    const grid = el("div", "kv-grid");
+    appendAll(grid, [
+      kv("Company status", ctx.status),
+      kv("ICP fit", ctx.icpFit),
+      dupWiza ? null : kv("ICP", ctx.icp),
+      dupWiza ? null : kv("Industry", ctx.industry),
+      // Label straight from the property's own description: this is the size of
+      // the customer's sales team using Wiza data, not their headcount.
+      kv(
+        "Sales team using Wiza",
+        ctx.salesTeamSize != null ? fmt.number(ctx.salesTeamSize) : null,
+        "Size of the sales team using Wiza data"
+      ),
+      kv("AE team", ctx.aeTeamSize != null ? fmt.number(ctx.aeTeamSize) : null),
+      kv("Outbound team", ctx.obTeamSize != null ? fmt.number(ctx.obTeamSize) : null),
+      kv(
+        "Sales leadership",
+        ctx.leadershipTeamSize != null ? fmt.number(ctx.leadershipTeamSize) : null
+      ),
+    ]);
+    if (grid.childElementCount) body.appendChild(grid);
+
+    // Tech stack: a delimited property parsed into a capped, de-duplicated list
+    // in hubspot-data.js. The row shows the first few and "+N more"; the hover
+    // carries all of them.
+    if (ctx.tech) {
+      const row = el("div", "kv");
+      row.appendChild(el("span", "kv-label", "Tech stack"));
+      const value = el("span", "kv-value", ctx.tech.items.join(" · "));
+      if (ctx.tech.more > 0) {
+        value.appendChild(el("span", "ctx-more", ` +${ctx.tech.more} more`));
+      }
+      row.appendChild(value);
+      if (ctx.tech.more > 0) row.title = ctx.tech.all.join(" · ");
+      body.appendChild(row);
+    }
+
+    // Why the ICP call was made. Long, model-written, and secondary: one muted
+    // line with the rest on hover.
+    if (ctx.icpReasoning) {
+      const why = el("p", "ctx-why", `Why: ${ctx.icpReasoning}`);
+      if (ctx.icpReasoningFull && ctx.icpReasoningFull.length > ctx.icpReasoning.length) {
+        why.title = ctx.icpReasoningFull;
+      }
+      body.appendChild(why);
+    }
   }
 
   // active → green (the default pill), closed → muted outline, anything else a
@@ -850,6 +1036,16 @@
       if (close) meta.appendChild(el("span", null, `Closes ${close}`));
       if (d.ownerName) meta.appendChild(el("span", null, d.ownerName));
       if (meta.childElementCount) row.appendChild(meta);
+
+      // Why it ended (Phase 8) — closed rows only, and only when the portal
+      // actually says. Open deals get nothing; a closed deal with no reason on
+      // file gets nothing either, rather than a "Lost:" with nothing after it.
+      const outcome = data.view.dealOutcome(d);
+      if (outcome) {
+        const line = el("div", "deal-outcome" + (outcome.lost ? " lost" : ""), outcome.text);
+        if (outcome.title !== outcome.text) line.title = outcome.title;
+        row.appendChild(line);
+      }
 
       body.appendChild(row);
     }
@@ -1012,9 +1208,13 @@
     crmEls.refresh.disabled = !(data && crm.connected && email && crm.status !== "loading");
     if (crmEls.refreshNote) crmEls.refreshNote.textContent = refreshNoteText();
     setPill(crmEls.identityPill, null);
+    setPill(crmEls.accountPill, null);
     setPill(crmEls.wizaPill, null);
     setPill(crmEls.dealsPill, null);
     setPill(crmEls.activityPill, null);
+    // Account context hides itself when a company has none; every other state
+    // (loading, error, signed out) has something to say, so it comes back.
+    crmEls.accountSection.hidden = false;
     // Nothing below this point shows tabs unless a bundle is actually rendered.
     hideActivityTabs();
 
@@ -1036,6 +1236,7 @@
     }
     if (crm.status === "loading") {
       skeleton(crmEls.identity, 3);
+      skeleton(crmEls.account, 3);
       skeleton(crmEls.wiza, 3);
       skeleton(crmEls.deals, 2);
       skeleton(crmEls.activity, 4);
@@ -1051,6 +1252,7 @@
       return;
     }
     renderIdentitySection(crm.bundle);
+    renderAccountSection(crm.bundle);
     renderWizaSection(crm.bundle);
     renderDealsSection(crm.bundle);
     renderActivitySection(crm.bundle);

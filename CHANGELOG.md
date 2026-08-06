@@ -6,6 +6,74 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — the panel showed the wrong owner
+
+- **Ownership in the identity block was the wrong field.** It showed the record's
+  `hubspot_owner_id`, unlabelled. HubSpot's own description of the company
+  property `sdr_company_owner` is explicit — *"[OFFICIAL] The SDR / outbound rep
+  who owns prospecting for this account. Use this for outbound ownership, not
+  hubspot_owner_id"* — and "who owns prospecting here" is the question SDRs were
+  using that line to answer before dialing. The block now shows up to four
+  **labelled** names, each only when set: **Outbound owner** (`sdr_company_owner`,
+  prominent, with `outbound_ownership_change_date` as its hover detail), **CSM**
+  (`cs_company_owner`), **Company owner** (company `hubspot_owner_id`) and
+  **Contact owner** (contact `hubspot_owner_id`). The unlabelled owner is gone.
+- These two properties are not typed like `hubspot_owner_id`: depending on how a
+  record was written they hold either an owner-ID reference **or** an
+  already-resolved name. Values are inspected at render time — ID-shaped ones go
+  through the existing session owner cache, name-shaped ones pass through
+  untouched, and anything that can't be resolved is **left out**. A bare numeric
+  owner ID can no longer reach the panel.
+
+### Added — dialing-decision context (Phase 8, all from properties on records the panel already reads)
+
+- **Account context** (new section, between *Contact & company* and *Wiza*):
+  account grade (`account_grade_v1`) in the section pill, **Company status**
+  (`company_lifecycle_stage`, humanized), **ICP fit** (`icp_fit`), and the team
+  sizes SDRs qualify on — **Sales team using Wiza** (`asm_sales_team_size`,
+  labelled after the property's own description), **AE team** (`ae_team_size`),
+  **Outbound team** (`ob_team_size`), **Sales leadership**
+  (`sales_leadership_team_size`).
+- **The company in its own words**, for the *"do you even know what we do?"*
+  objection: the first non-empty of `description` / `about_us` / `linkedinbio`,
+  trimmed of HTML, capped at ~200 characters with the full text on hover; plus
+  `industry_wiza`, `account_icp`, and `account_icp_ai_reasoning` as a muted
+  *"Why: …"* line (long, so it's secondary with the rest on hover). Industry and
+  ICP are skipped here when the Wiza section is already showing them.
+- **Tech stack** from `web_technologies`: split on `;` `,` `|` newlines and tabs,
+  trimmed, de-duplicated case-insensitively, capped at 8 with *"+N more"* and the
+  whole list on hover.
+- **One-click LinkedIn** in the identity block: company `linkedin_company_page`
+  and contact `hs_linkedin_url` (**not** the deprecated `linkedin_url`). Values
+  are hand-entered and often scheme-less, so a bare `linkedin.com/...` path is
+  upgraded to `https://`; everything else still goes through the same `safeUrl`
+  filter, and `javascript:` / `data:` / relative values are dropped rather than
+  linked.
+- **Sequence context**: *"In sequence: {name} since {date}"* or *"Not in a
+  sequence"* from `hs_sequences_is_enrolled` / `hs_latest_sequence_enrolled` /
+  `hs_latest_sequence_enrolled_date`, plus *"Last contacted 3d ago"* from
+  `notes_last_contacted` (exact time on hover). A record with no enrolment data
+  gets **no** line — claiming "not in a sequence" without being told would be a
+  guess presented as a fact.
+- **Closed-deal talk track**: closed rows (which already sort after open ones)
+  carry a one-line *"Lost: {reason} · {category} · {secondary}"* or *"Won:
+  {reason}"* from `closed_lost_reason`, `closed_loss_category`,
+  `closed_lost_category__secondary_`, `hs_is_closed_lost` and
+  `closed_won_reason`. Repeated categories collapse, long reasons are capped with
+  the rest on hover, open deals never show one, and a closed deal with nothing on
+  file shows no line at all.
+
+### Changed
+
+- `CACHE_VERSION` **6 → 8**, so a bundle cached earlier in a live panel session
+  can't be rendered by the new sections (it wouldn't have the fields).
+- **No new requests.** Every property above was added to the existing
+  `CONTACT_PROPERTIES` / `COMPANY_PROPERTIES` / `DEAL_PROPERTIES` arrays, so it
+  rides the contact GET, the company GET and the deals batch read that already
+  happen — the search fallbacks reuse the same arrays. The only extra traffic
+  possible is an owner-name lookup for an ID-shaped ownership value, which joins
+  the batched owner pass the bundle already runs and is cached for the session.
+
 ## [0.3.0] - 2026-08-05
 
 The side-panel release: the popup is gone, the panel is the product, and it now
