@@ -386,9 +386,9 @@
 
   const PANEL_CSS = `
     .bar{box-sizing:border-box;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-      width:100%;padding:8px 16px;background:#0d0d12;color:#fff;
+      width:100%;padding:8px 16px;background:#091948;color:#fff;
       font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;font-size:13px;
-      border-bottom:2px solid #9371F0;box-shadow:0 2px 10px rgba(0,0,0,.15);}
+      border-bottom:2px solid #0C3380;box-shadow:0 2px 10px rgba(9,25,72,.22);}
     .brand{display:flex;align-items:center;gap:7px;font-weight:700;white-space:nowrap;}
     .brand .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.25);}
     .brand .src{font-weight:500;opacity:.6;}
@@ -406,7 +406,7 @@
   `;
   const PANEL_HTML = `
     <div class="bar" role="status" aria-live="polite">
-      <span class="brand"><span class="dot"></span>Dialer Helper Pro<span class="src">· from dialer</span></span>
+      <span class="brand"><span class="dot"></span>Dialer Helper Pro</span>
       <span class="rows">
         <span class="row"><span class="ico">✉</span><span id="eb-email" class="val"></span><span id="eb-email-pill" class="pill">Ready to fill</span></span>
         <span class="row" id="eb-tz-row"><span class="ico">🕑</span><span id="eb-tz" class="val"></span><span id="eb-tz-pill" class="pill">Ready to fill</span></span>

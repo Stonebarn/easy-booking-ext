@@ -176,6 +176,10 @@ header:
   popover so you're looking at the sections it just reloaded.
 - **Notes** — **Auto-sync saved notes to HubSpot** (on by default). See
   [auto-sync on save](#auto-sync-on-save).
+- **Appearance** — **System / Light / Dark**. **System** (the default) follows
+  your computer's light-or-dark setting; **Light** and **Dark** pin the panel
+  regardless of it. Per rep, remembered across restarts (`eb:settings` in
+  `chrome.storage.local`), and applied to every panel window you have open.
 - **HubSpot** — **Connect HubSpot**, or, once connected, your HubSpot email and a
   **Disconnect** link. Connection problems are reported here.
 
@@ -774,7 +778,8 @@ the next time. No other user's identity is ever sent.
   and notes do live in `chrome.storage.local` (`eb:currentProspect`,
   `eb:prospectContext`, `eb:notes`, `eb:notes:lastSynced`) and are overwritten or
   cleared as the prospect changes. `eb:settings` holds the rep's own preferences
-  (currently just the notes auto-sync toggle) and contains no prospect data.
+  (the notes auto-sync toggle and the light/dark choice) and contains no
+  prospect data.
 
 ### Revoking access (offboarding)
 

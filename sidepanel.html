@@ -3,79 +3,191 @@
   <head>
     <meta charset="utf-8" />
     <title>Dialer Helper Pro</title>
+    <!-- First script on the page, and the only one in <head>: it puts the saved
+         theme on the root element before the body exists, so an explicit Light
+         or Dark choice does not flash the OS theme first. -->
+    <script src="theme.js"></script>
     <style>
+      /* ===== Palette =====================================================
+         Wiza's own colours, straight off wiza.co: #0C3380 primary navy (the
+         brand anchor), #123769 mid navy, #091948 deep navy, #310C80 violet,
+         #1A1B25 near-black, #615E6E gray, #E6E2E3 light gray. Everything
+         else below is a tint derived from one of those, and only exists
+         where a brand hex cannot carry WCAG AA on the ground it has to sit
+         on: a saturated navy is unreadable as text on near-black, and a navy
+         tint light enough to read there is far too pale to fill a button.
+         Every pair in the panel is checked at 4.5:1 (text) / 3:1 (large text
+         and control edges) — see the contrast table in the PR notes.
+
+         Each value is declared EXACTLY ONCE, here: --lt-* is the light set,
+         --dk-* the dark one. The three blocks after this one carry no colour
+         literals at all — they only say which set is live. So a colour is
+         one edit, in one place, no matter how the theme was chosen. */
       :root {
-        /* Carried over from the popup so the panel, the on-page banner and the
-           badge all read as one product. */
-        --ink: #0d0d12;
-        --muted: #6b7280;
-        --line: #ececf1;
-        --purple: #9371f0;
-        --green-bg: #e7f8ee;
-        --green-fg: #16a34a;
-        --amber-fg: #b45309;
-        --bg: #fff;
-        --surface: #fafafc;
-        --header-bg: var(--ink);
-        --header-fg: #fff;
-        --disabled-bg: #d1d5db;
-        --disabled-fg: #6b7280;
-        --danger-fg: #b91c1c;
+        /* -- Light. Wiza's own site is light-first, so this is the base. -- */
+        --lt-bg: #fff;
+        --lt-surface: #f6f4f5;
+        --lt-line: #e1dcde; /* hairline: dividers, card and pill edges */
+        --lt-sep: #8e8a95; /* the "·" between facts — punctuation, not text */
+        --lt-field-line: #86828e; /* textarea / input / select edges, 3:1 */
+        --lt-ink: #1a1b25;
+        --lt-muted: #615e6e;
+        --lt-accent: #0c3380; /* links, accent text, focus rings */
+        --lt-accent-fill: #0c3380; /* filled buttons */
+        --lt-accent-edge: transparent; /* see the note on `button` */
+        --lt-on-accent: #fff;
+        --lt-accent-soft: #dbe3f4; /* selected tab */
+        --lt-accent-2: #310c80; /* the one violet: the lifecycle pill */
+        --lt-accent-2-soft: #e2daf4;
+        --lt-header-bg: #0c3380;
+        --lt-header-fg: #fff;
+        --lt-green-bg: #e0f0e6;
+        --lt-green-fg: #0c6b3c;
+        --lt-amber-fg: #8a5200;
+        --lt-amber-fill: #8a5200;
+        --lt-on-amber: #fff;
+        --lt-danger-fg: #b02318;
+        --lt-disabled-bg: #dcd8db;
+        --lt-disabled-fg: #5f5d68;
+        --lt-scheme: light;
+
+        /* -- Dark. Same brand, tinted for a near-black ground. -- */
+        --dk-bg: #171923;
+        --dk-surface: #1f2130;
+        --dk-line: #2e3140;
+        --dk-sep: #6e7488;
+        --dk-field-line: #767c90;
+        --dk-ink: #e8eaf2;
+        --dk-muted: #a2a6b8;
+        --dk-accent: #a6c0f2; /* navy lightened until it reads on near-black */
+        --dk-accent-fill: #0c3380; /* the brand navy, kept for filled surfaces */
+        --dk-accent-edge: #4c72c9; /* draws the fill's edge against the page */
+        --dk-on-accent: #fff;
+        --dk-accent-soft: #23315c;
+        --dk-accent-2: #beaaf6;
+        --dk-accent-2-soft: #2a2158;
+        --dk-header-bg: #091948;
+        --dk-header-fg: #f4f6fc;
+        --dk-green-bg: #123321;
+        --dk-green-fg: #5fd08d;
+        --dk-amber-fg: #f0b44a;
+        --dk-amber-fill: #e0a03c;
+        --dk-on-amber: #14161e; /* amber is bright here, so the label is dark */
+        --dk-danger-fg: #f58a80;
+        --dk-disabled-bg: #303341;
+        --dk-disabled-fg: #9ba1b5;
+        --dk-scheme: dark;
+
+        /* -- Theme-independent. The header is a navy bar in both themes, so
+              its white overlays and its status dots have one value each,
+              declared once here rather than once per theme. -- */
+        --header-overlay: rgba(255, 255, 255, 0.14);
+        --header-overlay-on: rgba(255, 255, 255, 0.28);
+        --header-overlay-off: rgba(255, 255, 255, 0.06);
+        --header-fg-off: rgba(255, 255, 255, 0.35);
+        --dot-idle: #9ca3af; /* no prospect / not connected yet */
+        --dot-live: #22c55e;
+        --dot-live-halo: rgba(34, 197, 94, 0.25);
+        --dot-warn: #f59e0b;
+        --pop-shadow: rgba(0, 0, 0, 0.22);
       }
-      /* Dark tokens, applied two ways: the OS preference, and an explicit
-         data-theme="dark" on the root (which a harness or a future in-panel
-         toggle can set, and which must win over a light OS preference). CSS has
-         no way to share a declaration block between selectors, so the three
-         blocks below are duplicates by necessity — change one, change all. */
+
+      /* Which set is live. Light is the base; the OS preference swaps it; and
+         an explicit data-theme — written by the Theme control in Settings, and
+         absent for "System" — beats both, in either direction. The
+         :not([data-theme="light"]) is what lets an explicit Light win under a
+         dark OS; the [data-theme="dark"] block below the media query is what
+         lets an explicit Dark win under a light one.
+         MAPPING ONLY: no colour value belongs past this line. */
+      :root,
+      :root[data-theme="light"] {
+        --bg: var(--lt-bg);
+        --surface: var(--lt-surface);
+        --line: var(--lt-line);
+        --sep: var(--lt-sep);
+        --field-line: var(--lt-field-line);
+        --ink: var(--lt-ink);
+        --muted: var(--lt-muted);
+        --accent: var(--lt-accent);
+        --accent-fill: var(--lt-accent-fill);
+        --accent-edge: var(--lt-accent-edge);
+        --on-accent: var(--lt-on-accent);
+        --accent-soft: var(--lt-accent-soft);
+        --accent-2: var(--lt-accent-2);
+        --accent-2-soft: var(--lt-accent-2-soft);
+        --header-bg: var(--lt-header-bg);
+        --header-fg: var(--lt-header-fg);
+        --green-bg: var(--lt-green-bg);
+        --green-fg: var(--lt-green-fg);
+        --amber-fg: var(--lt-amber-fg);
+        --amber-fill: var(--lt-amber-fill);
+        --on-amber: var(--lt-on-amber);
+        --danger-fg: var(--lt-danger-fg);
+        --disabled-bg: var(--lt-disabled-bg);
+        --disabled-fg: var(--lt-disabled-fg);
+        --scheme: var(--lt-scheme);
+      }
       @media (prefers-color-scheme: dark) {
-        :root {
-          --ink: #e9e9f0;
-          --muted: #9ca3af;
-          --line: #2c2c36;
-          --purple: #a48bf3;
-          --green-bg: #14351f;
-          --green-fg: #4ade80;
-          --amber-fg: #fbbf24;
-          --bg: #17171d;
-          --surface: #1e1e26;
-          --header-bg: #0d0d12;
-          --header-fg: #f4f4f8;
-          --disabled-bg: #34343f;
-          --disabled-fg: #7b7b88;
-          --danger-fg: #f87171;
+        :root:not([data-theme="light"]) {
+          --bg: var(--dk-bg);
+          --surface: var(--dk-surface);
+          --line: var(--dk-line);
+          --sep: var(--dk-sep);
+          --field-line: var(--dk-field-line);
+          --ink: var(--dk-ink);
+          --muted: var(--dk-muted);
+          --accent: var(--dk-accent);
+          --accent-fill: var(--dk-accent-fill);
+          --accent-edge: var(--dk-accent-edge);
+          --on-accent: var(--dk-on-accent);
+          --accent-soft: var(--dk-accent-soft);
+          --accent-2: var(--dk-accent-2);
+          --accent-2-soft: var(--dk-accent-2-soft);
+          --header-bg: var(--dk-header-bg);
+          --header-fg: var(--dk-header-fg);
+          --green-bg: var(--dk-green-bg);
+          --green-fg: var(--dk-green-fg);
+          --amber-fg: var(--dk-amber-fg);
+          --amber-fill: var(--dk-amber-fill);
+          --on-amber: var(--dk-on-amber);
+          --danger-fg: var(--dk-danger-fg);
+          --disabled-bg: var(--dk-disabled-bg);
+          --disabled-fg: var(--dk-disabled-fg);
+          --scheme: var(--dk-scheme);
         }
       }
       :root[data-theme="dark"] {
-        --ink: #e9e9f0;
-        --muted: #9ca3af;
-        --line: #2c2c36;
-        --purple: #a48bf3;
-        --green-bg: #14351f;
-        --green-fg: #4ade80;
-        --amber-fg: #fbbf24;
-        --bg: #17171d;
-        --surface: #1e1e26;
-        --header-bg: #0d0d12;
-        --header-fg: #f4f4f8;
-        --disabled-bg: #34343f;
-        --disabled-fg: #7b7b88;
-        --danger-fg: #f87171;
+        --bg: var(--dk-bg);
+        --surface: var(--dk-surface);
+        --line: var(--dk-line);
+        --sep: var(--dk-sep);
+        --field-line: var(--dk-field-line);
+        --ink: var(--dk-ink);
+        --muted: var(--dk-muted);
+        --accent: var(--dk-accent);
+        --accent-fill: var(--dk-accent-fill);
+        --accent-edge: var(--dk-accent-edge);
+        --on-accent: var(--dk-on-accent);
+        --accent-soft: var(--dk-accent-soft);
+        --accent-2: var(--dk-accent-2);
+        --accent-2-soft: var(--dk-accent-2-soft);
+        --header-bg: var(--dk-header-bg);
+        --header-fg: var(--dk-header-fg);
+        --green-bg: var(--dk-green-bg);
+        --green-fg: var(--dk-green-fg);
+        --amber-fg: var(--dk-amber-fg);
+        --amber-fill: var(--dk-amber-fill);
+        --on-amber: var(--dk-on-amber);
+        --danger-fg: var(--dk-danger-fg);
+        --disabled-bg: var(--dk-disabled-bg);
+        --disabled-fg: var(--dk-disabled-fg);
+        --scheme: var(--dk-scheme);
       }
-      :root[data-theme="light"] {
-        --ink: #0d0d12;
-        --muted: #6b7280;
-        --line: #ececf1;
-        --purple: #9371f0;
-        --green-bg: #e7f8ee;
-        --green-fg: #16a34a;
-        --amber-fg: #b45309;
-        --bg: #fff;
-        --surface: #fafafc;
-        --header-bg: var(--ink);
-        --header-fg: #fff;
-        --disabled-bg: #d1d5db;
-        --disabled-fg: #6b7280;
-        --danger-fg: #b91c1c;
+      /* One declaration, wherever --scheme came from: it makes the UA's own
+         chrome (scrollbars, the select popup, form-control internals) match
+         the theme the panel is actually painting. */
+      :root {
+        color-scheme: var(--scheme);
       }
 
       * { box-sizing: border-box; }
@@ -109,12 +221,12 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #9ca3af;
+        background: var(--dot-idle);
         flex: 0 0 auto;
       }
       header.live .dot {
-        background: #22c55e;
-        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+        background: var(--dot-live);
+        box-shadow: 0 0 0 3px var(--dot-live-halo);
       }
       header h1 {
         font-size: 12px;
@@ -123,7 +235,6 @@
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
-      header .src { font-size: 11px; opacity: 0.55; font-weight: 500; }
       /* Pushes the settings control to the right edge at any panel width. */
       header .spacer { flex: 1 1 auto; }
       header .hdr-btn {
@@ -134,12 +245,13 @@
         font-size: 11px;
         font-weight: 600;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.14);
+        background: var(--header-overlay);
+        box-shadow: none;
         color: var(--header-fg);
       }
       header .hdr-btn:disabled {
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(255, 255, 255, 0.35);
+        background: var(--header-overlay-off);
+        color: var(--header-fg-off);
         cursor: default;
       }
       /* The gear: square-ish, glyph-only, same pill treatment as any header
@@ -150,9 +262,9 @@
         line-height: 16px;
         border-radius: 8px;
       }
-      header .hdr-btn[aria-expanded="true"] { background: rgba(255, 255, 255, 0.28); }
+      header .hdr-btn[aria-expanded="true"] { background: var(--header-overlay-on); }
       header .hdr-btn:focus-visible {
-        outline: 2px solid #fff;
+        outline: 2px solid var(--header-fg);
         outline-offset: 1px;
       }
 
@@ -164,10 +276,10 @@
         height: 7px;
         border-radius: 50%;
         flex: 0 0 auto;
-        background: #9ca3af;
+        background: var(--dot-idle);
       }
-      header .hs-dot.on { background: #22c55e; }
-      header .hs-dot.off { background: #f59e0b; }
+      header .hs-dot.on { background: var(--dot-live); }
+      header .hs-dot.off { background: var(--dot-warn); }
 
       /* ---- Settings popover -------------------------------------------- */
       /* Anchored under the header's right edge, capped so it always fits the
@@ -183,7 +295,7 @@
         border-radius: 10px;
         background: var(--bg);
         color: var(--ink);
-        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+        box-shadow: 0 10px 28px var(--pop-shadow);
         text-align: left;
       }
       .pop-head {
@@ -235,16 +347,46 @@
         width: 14px;
         height: 14px;
         margin: 1px 0 0;
-        accent-color: var(--purple);
+        accent-color: var(--accent);
         cursor: pointer;
       }
       .pop-check input:focus-visible {
-        outline: 2px solid var(--purple);
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      /* Theme choice: three native radios in one row, same type scale as the
+         checkbox row above. Native inputs on purpose — the arrow-key handling,
+         the group semantics and the "one of these" announcement are the
+         platform's, and the popover's focus trap already collects `input`. */
+      .pop-radios {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+      }
+      .pop-radio {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .pop-radio input {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      .pop-radio input:focus-visible {
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
       .popover .hint { font-size: 12px; color: var(--muted); margin: 0; }
       .popover button:focus-visible, .popover a:focus-visible {
-        outline: 2px solid var(--purple);
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
 
@@ -373,14 +515,21 @@
       .empty .big { font-size: 13px; font-weight: 600; color: var(--danger-fg); }
       .empty .small { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
+      /* The filled action. The rim is how the fill's edge clears 3:1 against
+         the page: the brand navy is 11.7:1 against white but only 1.5:1 against
+         the dark ground, and a navy light enough to fix that stops looking like
+         Wiza. It is `transparent` in light, where the fill does the job itself.
+         Inset, not a border, so no button changes size. Every button below that
+         replaces this background has to turn the rim off too. */
       button {
         margin-top: 12px;
         width: 100%;
         padding: 9px;
         border: 0;
         border-radius: 7px;
-        background: var(--purple);
-        color: #fff;
+        background: var(--accent-fill);
+        color: var(--on-accent);
+        box-shadow: inset 0 0 0 1px var(--accent-edge);
         font-weight: 600;
         font-size: 13px;
         cursor: pointer;
@@ -388,6 +537,7 @@
       button:disabled {
         background: var(--disabled-bg);
         color: var(--disabled-fg);
+        box-shadow: none;
         cursor: default;
       }
 
@@ -439,6 +589,7 @@
         width: auto;
         padding: 0;
         background: none;
+        box-shadow: none;
         border: 0;
         color: var(--muted);
         font-size: 11px;
@@ -451,7 +602,7 @@
       /* The "Connect" affordance inside a signed-out CRM empty state: reads as a
          link in the sentence, opens the settings popover. */
       .linkish.inline {
-        color: var(--purple);
+        color: var(--accent);
         font-size: 12px;
         font-weight: 600;
       }
@@ -487,7 +638,7 @@
       .fact-line .fact-n { color: var(--ink); font-weight: 700; }
       /* The separator is decoration, not content: it must never be read out or
          land in a copied selection as a word. */
-      .fact-sep { color: var(--line); }
+      .fact-sep { color: var(--sep); }
       /* Same separator for the other `·`-joined chip lines, where the items are
          built as plain spans. Generated content, so it is punctuation only. */
       .ident-seq > *:not(:first-child)::before,
@@ -495,7 +646,7 @@
       .peer-meta > *:not(:first-child)::before,
       .act-detail > *:not(:first-child)::before {
         content: "·";
-        color: var(--line);
+        color: var(--sep);
         margin-right: 6px;
       }
 
@@ -523,6 +674,7 @@
         width: auto;
         padding: 0;
         background: none;
+        box-shadow: none;
         border: 0;
         color: var(--muted);
         font-size: 10px;
@@ -532,8 +684,8 @@
         text-decoration: underline;
         cursor: pointer;
       }
-      .prose-more:hover { color: var(--purple); }
-      .prose-more:focus-visible { outline: 2px solid var(--purple); outline-offset: 1px; }
+      .prose-more:hover { color: var(--accent); }
+      .prose-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
       /* Record title line: a link plus any number of pills, wrapping. */
       .rec-head {
@@ -543,7 +695,7 @@
         gap: 6px;
       }
       .rec-name { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
-      a.rec-name, a.link { color: var(--purple); text-decoration: none; }
+      a.rec-name, a.link { color: var(--accent); text-decoration: none; }
       a.rec-name:hover, a.link:hover { text-decoration: underline; }
 
       .pill.info {
@@ -552,7 +704,8 @@
         border: 1px solid var(--line);
         font-weight: 600;
       }
-      .pill.stage { background: rgba(147, 113, 240, 0.14); color: var(--purple); }
+      /* The one place the brand violet appears: the lifecycle stage. */
+      .pill.stage { background: var(--accent-2-soft); color: var(--accent-2); }
       .pill.closed { background: transparent; color: var(--muted); border: 1px solid var(--line); }
       .pill.won { background: var(--green-bg); color: var(--green-fg); }
       /* Smaller pill for the dense rows (identity line, Wiza subsections). */
@@ -575,7 +728,11 @@
         color: var(--muted);
         overflow-wrap: anywhere;
       }
-      .ident-role .at { opacity: 0.55; }
+      /* The "@" in "title @ company" reads as punctuation but it is real text in
+         the accessibility tree, so it keeps the line's muted colour: the
+         recessive separator colour would put a 3:1 glyph inside a 4.5:1 line.
+         (It used to be opacity 0.55, which computed to 2.6:1.) */
+      .ident-role .at { color: inherit; }
       .ident-role a.link { font-weight: 600; }
       .ident-meta {
         display: flex;
@@ -594,8 +751,9 @@
         width: auto;
         padding: 0;
         background: none;
+        box-shadow: none;
         border: 0;
-        color: var(--purple);
+        color: var(--accent);
         font-size: 11px;
         font-weight: 700;
         text-decoration: underline;
@@ -603,7 +761,7 @@
         flex: 0 0 auto;
       }
       .wn-open:focus-visible {
-        outline: 2px solid var(--purple);
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
       .wn {
@@ -634,7 +792,7 @@
       .wn input {
         width: 100%;
         padding: 7px 8px;
-        border: 1px solid var(--line);
+        border: 1px solid var(--field-line);
         border-radius: 7px;
         background: var(--bg);
         color: var(--ink);
@@ -645,7 +803,7 @@
       .wn input:disabled { background: var(--surface); color: var(--muted); }
       .wn select:focus-visible,
       .wn input:focus-visible {
-        outline: 2px solid var(--purple);
+        outline: 2px solid var(--accent);
         outline-offset: 0;
       }
       /* What is on the record right now, for reference while typing. */
@@ -672,6 +830,7 @@
         width: auto;
         padding: 8px 12px;
         background: transparent;
+        box-shadow: none;
         color: var(--muted);
         border: 1px solid var(--line);
       }
@@ -679,8 +838,14 @@
          at the panel's 320px floor — below that the two buttons stack. */
       .wn-save { flex: 1 1 130px; }
       /* Armed = one more click writes. Amber, because it is a warning, not a
-         success. */
-      .wn-save.armed { background: var(--amber-fg); }
+         success — and it carries its own label colour, because the amber is dark
+         in light mode and bright in dark mode, so a single white label would
+         pass on one theme (6.4:1) and fail badly on the other (1.9:1). */
+      .wn-save.armed {
+        background: var(--amber-fill);
+        color: var(--on-amber);
+        box-shadow: none;
+      }
       .wn-result { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
       .wn-result.ok { color: var(--green-fg); font-weight: 600; }
       .wn-result.err { color: var(--danger-fg); font-weight: 600; }
@@ -747,7 +912,7 @@
         line-height: 1.35;
         color: var(--muted);
       }
-      .ident-seq .seq-on { color: var(--purple); font-weight: 600; }
+      .ident-seq .seq-on { color: var(--accent); font-weight: 600; }
       .ident-seq [title] { cursor: help; }
 
       /* ---- Account context (Phase 8) ----------------------------------- */
@@ -759,7 +924,7 @@
          different kind of thing to the four fixed ones. */
       .sec-toggle { cursor: pointer; list-style: none; }
       .sec-toggle::-webkit-details-marker { display: none; }
-      .sec-toggle:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+      .sec-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .sec-caret {
         font-size: 9px;
         color: var(--muted);
@@ -799,14 +964,14 @@
         gap: 0 6px;
       }
       .peer-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-      a.peer-name { color: var(--purple); text-decoration: none; }
+      a.peer-name { color: var(--accent); text-decoration: none; }
       a.peer-name:hover { text-decoration: underline; }
       /* Icon-link, not a word: at 320px the row is already carrying a name, a
          badge and a title. "in" is a glyph everyone reads instantly. */
       a.peer-li {
         flex: 0 0 auto;
         padding: 0 4px;
-        border: 1px solid var(--line);
+        border: 1px solid var(--field-line);
         border-radius: 4px;
         color: var(--muted);
         font-size: 10px;
@@ -814,7 +979,7 @@
         line-height: 15px;
         text-decoration: none;
       }
-      a.peer-li:hover { color: var(--purple); border-color: currentColor; }
+      a.peer-li:hover { color: var(--accent); border-color: currentColor; }
       .peer-meta {
         display: flex;
         flex-wrap: wrap;
@@ -901,6 +1066,7 @@
         padding: 3px 8px;
         border-radius: 6px;
         background: transparent;
+        box-shadow: none;
         color: var(--muted);
         font-size: 11px;
         font-weight: 600;
@@ -908,13 +1074,13 @@
       }
       .tab:hover:not([aria-disabled="true"]) { background: var(--line); color: var(--ink); }
       .tab[aria-selected="true"] {
-        background: rgba(147, 113, 240, 0.14);
-        color: var(--purple);
+        background: var(--accent-soft);
+        color: var(--accent);
       }
       .tab[aria-disabled="true"] { color: var(--disabled-fg); cursor: default; }
-      .tab-count { font-weight: 700; margin-left: 4px; opacity: 0.8; }
+      .tab-count { font-weight: 700; margin-left: 4px; }
       .tab:focus-visible, .act-list:focus-visible {
-        outline: 2px solid var(--purple);
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
 
@@ -1009,7 +1175,7 @@
         min-height: 66px;
         resize: vertical;
         padding: 8px 9px;
-        border: 1px solid var(--line);
+        border: 1px solid var(--field-line);
         border-radius: 7px;
         background: var(--bg);
         color: var(--ink);
@@ -1064,7 +1230,6 @@
     <header id="header">
       <span class="dot"></span>
       <h1>Dialer Helper Pro</h1>
-      <span class="src">· from dialer</span>
       <span class="spacer"></span>
       <!-- Connection state, always visible. The controls behind it live in the
            popover below; this is the at-a-glance signal. -->
@@ -1124,6 +1289,38 @@
           <p class="pop-note" id="setting-autosync-note">
             Saving a note in the dialer adds it to the matched contact and company
             for you. Turn this off to sync only when you click Sync to HubSpot.
+          </p>
+        </div>
+
+        <!-- Appearance: the panel's own light/dark choice. The markup lives
+             here; the behavior belongs to theme.js, which is loaded in <head>
+             so the saved theme is applied as early as the page can apply it. -->
+        <div class="pop-sec">
+          <div class="pop-sec-head">
+            <span class="pop-label" id="setting-theme-label">Appearance</span>
+          </div>
+          <div class="pop-radios" role="radiogroup" aria-labelledby="setting-theme-label">
+            <label class="pop-radio" for="setting-theme-system">
+              <input
+                type="radio"
+                name="setting-theme"
+                id="setting-theme-system"
+                value="system"
+                checked
+              />
+              <span>System</span>
+            </label>
+            <label class="pop-radio" for="setting-theme-light">
+              <input type="radio" name="setting-theme" id="setting-theme-light" value="light" />
+              <span>Light</span>
+            </label>
+            <label class="pop-radio" for="setting-theme-dark">
+              <input type="radio" name="setting-theme" id="setting-theme-dark" value="dark" />
+              <span>Dark</span>
+            </label>
+          </div>
+          <p class="pop-note" id="setting-theme-note">
+            System follows your computer's light or dark setting.
           </p>
         </div>
 

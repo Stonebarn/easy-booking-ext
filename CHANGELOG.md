@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — the side panel wears Wiza's colours, and you can pick light or dark
+
+A re-theme, not a redesign: no layout, spacing or section order changed, and the
+density pass's heights are untouched (**1,210px at 320px, 1,093px at 580px**, same
+to the pixel in both themes).
+
+- **Wiza's palette, from wiza.co.** `#0C3380` primary navy carries links, accent
+  text, focus rings and every filled button; `#310C80` violet appears exactly
+  once, on the lifecycle pill; `#1A1B25` is body text and `#615E6E` muted text in
+  light mode, over white and `#E6E2E3`-family grounds. The panel header is a navy
+  bar in both themes. The old lavender `#9371F0` — which appears nowhere in
+  Wiza's brand — is gone.
+- **Light mode you can choose.** **gear → Appearance → System / Light / Dark**.
+  **System** stays the default and follows your computer; Light and Dark pin the
+  panel either way. Saved per rep in `eb:settings.theme`, applied to every open
+  panel window at once, and applied from `<head>` on load so an explicit choice
+  does not flash the other theme first.
+- **Contrast is now checked, not eyeballed.** Every text/background pair the panel
+  renders meets WCAG AA in both themes (4.5:1 body, 3:1 large text and control
+  edges), including three that did not before: the armed **Save** button's label
+  on its amber fill (white-on-bright-amber was 1.9:1 in dark mode — the label is
+  now dark there), the textarea and phone-editor borders, and the `@` in
+  "title @ company" (an `opacity: 0.55` that computed to 2.6:1).
+- Native scrollbars, select popups and focus rings now match the panel's theme
+  (`color-scheme`), instead of a light scrollbar on a dark panel.
+- The header wordmark drops the redundant **"· from dialer"** suffix; the
+  connection dots and the gear are unchanged. (The on-page scheduler banner still
+  carries the old suffix and its near-black bar — `content-scheduler.js` was out
+  of scope for this pass.)
+
 ### Changed — density pass on the side panel (no data lost)
 
 Behaviour-preserving layout work: nothing about fetching, auth, sync or scraping
