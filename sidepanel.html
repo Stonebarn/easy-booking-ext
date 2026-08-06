@@ -459,6 +459,84 @@
         color: var(--muted);
       }
 
+      /* ---- Ownership, links, sequence (Phase 8) ------------------------- */
+      /* Ownership is the block a rep reads before dialing, so it gets its own
+         labelled rows instead of one anonymous name in .ident-meta. Outbound
+         owner is the prominent one — it is the field HubSpot itself says to use
+         for outbound ownership. Everything wraps; nothing is fixed-width. */
+      .own {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 4px;
+        padding-top: 5px;
+        border-top: 1px solid var(--line);
+      }
+      .own-primary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 6px;
+      }
+      .own-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        flex: 0 0 auto;
+      }
+      .own-name { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+      .own-more {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1px 10px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .own-more .own-who { font-weight: 600; color: var(--ink); }
+      /* Compact one-click LinkedIn row: kills the tab-out to search for them. */
+      .ident-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        margin-top: 4px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      /* "In sequence: Outbound Q3 since Jul 2, 2026 · last contacted 3d ago" */
+      .ident-seq {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px 8px;
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .ident-seq .seq-on { color: var(--purple); font-weight: 600; }
+
+      /* ---- Account context (Phase 8) ----------------------------------- */
+      /* Explicit rather than leaning on the UA rule for [hidden]: this section
+         is hidden from JS whenever the company has nothing to put in it. */
+      #crm-account-section[hidden] { display: none; }
+      /* The blurb is the one place in the panel with running prose; cap it at a
+         few lines and hand the rest to the hover title. */
+      .ctx-snippet {
+        font-size: 12px;
+        line-height: 1.4;
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .ctx-snippet[title], .ctx-why[title] { cursor: help; }
+      .ctx-why {
+        font-size: 11px;
+        line-height: 1.35;
+        color: var(--muted);
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .ctx-more { color: var(--muted); font-weight: 600; }
+
       /* ---- Wiza section ------------------------------------------------- */
       .wiza-sub + .wiza-sub {
         margin-top: 8px;
@@ -499,6 +577,16 @@
         color: var(--muted);
       }
       .deal-amount { font-weight: 700; color: var(--ink); }
+      /* Why a closed deal ended — the re-approach talk track (Phase 8). Only
+         ever rendered on closed rows, and only when the portal says something. */
+      .deal-outcome {
+        margin-top: 2px;
+        font-size: 11px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .deal-outcome[title] { cursor: help; }
+      .deal-outcome.lost { color: var(--danger-fg); }
 
       /* ---- Activity tabs + scroller ------------------------------------- */
       /* The bar scrolls sideways instead of wrapping: at 320px six tabs don't
@@ -778,6 +866,20 @@
           <span class="pill info" id="crm-identity-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-identity"></div>
+      </section>
+
+      <!-- ===== Account context (Phase 8) =====
+           "Is this worth calling, and what do I open with": account grade and
+           team sizes, then the company's own blurb, ICP and tech stack. The
+           whole section is hidden when the company record has none of it —
+           which is the normal case for a thin record — so it never costs a
+           card's worth of vertical space to say nothing. -->
+      <section id="crm-account-section">
+        <div class="section-head">
+          <span class="section-title">Account context</span>
+          <span class="pill info" id="crm-account-pill" style="display: none"></span>
+        </div>
+        <div class="card crm-body" id="crm-account"></div>
       </section>
 
       <section id="crm-wiza-section">
