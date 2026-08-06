@@ -384,25 +384,38 @@
   let currentPayload = null;
   let tzLabel = null;
 
+  // The banner is its own document (a shadow root), so it cannot share the side
+  // panel's tokens — it carries the same brand values, declared once each on
+  // `.bar`, which every element below is inside of. Same palette, same rules:
+  // white ground, ink text, the accent violet as the only fill, and the two
+  // "Ready to fill" / "Filled" badges on semantic tones because they are states.
+  // The old opacity-based dimming is gone: it computed to 2:1 or worse.
   const PANEL_CSS = `
-    .bar{box-sizing:border-box;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-      width:100%;padding:8px 16px;background:#091948;color:#fff;
-      font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;font-size:13px;
-      border-bottom:2px solid #0C3380;box-shadow:0 2px 10px rgba(9,25,72,.22);}
+    .bar{--bg:#ffffff;--ink:#26114a;--muted:#615e6e;--line:#dfe1e6;
+      --accent:#7e43ff;--accent-wash:#f5f0ff;
+      --positive:#1e7f5c;--positive-fg:#1d7b59;--positive-bg:#e3f4ec;
+      --halo:rgba(30,127,92,.18);--shadow:rgba(38,17,74,.12);
+      box-sizing:border-box;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+      width:100%;padding:8px 16px;background:var(--bg);color:var(--ink);
+      font-family:Inter,-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+      font-size:13px;font-weight:400;
+      border-bottom:2px solid var(--accent);box-shadow:0 2px 10px var(--shadow);}
     .brand{display:flex;align-items:center;gap:7px;font-weight:700;white-space:nowrap;}
-    .brand .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.25);}
-    .brand .src{font-weight:500;opacity:.6;}
+    .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--positive);box-shadow:0 0 0 3px var(--halo);}
+    .brand .src{font-weight:500;color:var(--muted);}
     .rows{display:flex;align-items:center;gap:18px;flex-wrap:wrap;flex:1;min-width:0;}
     .row{display:flex;align-items:center;gap:7px;min-width:0;}
-    .ico{opacity:.65;flex:0 0 auto;}
+    .ico{color:var(--muted);flex:0 0 auto;}
     .val{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch;}
     .pill{flex:0 0 auto;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;
-      background:rgba(255,255,255,.12);color:#cbd5e1;}
-    .pill.ok{background:rgba(34,197,94,.18);color:#4ade80;}
+      background:transparent;border:1px solid var(--line);color:var(--muted);}
+    .pill.ok{background:var(--positive-bg);border-color:transparent;color:var(--positive-fg);}
     .meta{display:flex;align-items:center;gap:10px;margin-left:auto;white-space:nowrap;}
-    .age{font-size:11px;opacity:.55;}
-    .x{cursor:pointer;border:0;background:transparent;color:#fff;opacity:.5;font-size:16px;line-height:1;padding:2px 4px;}
-    .x:hover{opacity:1;}
+    .age{font-size:11px;color:var(--muted);}
+    .x{cursor:pointer;border:0;border-radius:6px;background:transparent;color:var(--muted);
+      font-size:16px;line-height:1;padding:2px 4px;}
+    .x:hover{background:var(--accent-wash);color:var(--ink);}
+    .x:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
   `;
   const PANEL_HTML = `
     <div class="bar" role="status" aria-live="polite">

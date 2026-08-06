@@ -291,7 +291,6 @@
   // ==========================================================================
   const auth = self.EB && self.EB.hubspotAuth;
 
-  const hsDotEl = document.getElementById("hs-dot");
   const hsPillEl = document.getElementById("hs-pill");
   const hsHintEl = document.getElementById("hs-hint");
   const hsAccountEl = document.getElementById("hs-account");
@@ -309,30 +308,37 @@
     connected: "Connected",
   };
 
-  // What the header dot says on hover — the only connection detail visible
-  // without opening the popover.
-  function hsDotTitle() {
-    if (hs.status === "connected") {
-      return hs.email ? `HubSpot connected as ${hs.email}` : "HubSpot connected";
-    }
-    if (hs.status === "connecting") return "Connecting to HubSpot…";
-    if (hs.status === "setup-needed") return "HubSpot isn't set up in this build";
-    return "HubSpot not connected — open Settings to connect";
-  }
+  // The tone each connection state carries. Semantic, not decorative: connected
+  // is the only good outcome, "connecting" is in-flight, and both of the other
+  // two mean the CRM sections below have nothing to show — so neither may read
+  // as neutral.
+  const HS_PILL_TONE = {
+    "setup-needed": "tone-negative",
+    "signed-out": "tone-caution",
+    connecting: "tone-info",
+    connected: "tone-positive",
+  };
 
   function renderHubSpot() {
     const connected = hs.status === "connected";
     const connecting = hs.status === "connecting";
     const setupNeeded = hs.status === "setup-needed";
 
-    hsDotEl.className = "hs-dot " + (connected ? "on" : "off");
-    const dotTitle = hsDotTitle();
-    hsDotEl.title = dotTitle;
-    hsDotEl.setAttribute("aria-label", dotTitle);
-
+    // The header's connection dot is gone (it was a 7px signal nobody read), so
+    // this badge is the panel's explicit statement of connection state: a tone
+    // and a dot of its own, on a line that names what it is about.
     hsPillEl.textContent = HS_PILL_TEXT[hs.status] || HS_PILL_TEXT["signed-out"];
-    // Green (the default .pill) only when actually connected.
-    hsPillEl.className = "pill" + (connected ? "" : setupNeeded ? " warn" : " off");
+    hsPillEl.className =
+      "pill conn " + (HS_PILL_TONE[hs.status] || HS_PILL_TONE["signed-out"]);
+    hsPillEl.title = connected
+      ? hs.email
+        ? `HubSpot connected as ${hs.email}`
+        : "HubSpot connected"
+      : connecting
+        ? "Connecting to HubSpot…"
+        : setupNeeded
+          ? "HubSpot isn't set up in this build"
+          : "HubSpot not connected — connect below to see CRM context";
 
     hsHintEl.style.display = connected ? "none" : "";
     hsHintEl.textContent = setupNeeded
@@ -470,7 +476,7 @@
   // product data, Deals, Activity.
   //
   // Phase 8 added the dialing-decision bits: labelled ownership (outbound owner
-  // first — see ownershipBlock), one-click LinkedIn, sequence state, the account
+  // first — see the owner rows in renderIdentitySection), one-click LinkedIn, sequence state, the account
   // context section, and the closed-deal outcome line. Phase 9 added the
   // colleague list ("who else are we touching here"). All of it renders from
   // view-models on the same bundle; nothing here fetches.
@@ -598,7 +604,9 @@
   // The separators are aria-hidden: they are punctuation between values, and a
   // screen reader announcing "middle dot" six times is noise.
   function factLine(entries, className) {
-    const kept = (entries || []).filter((e) => e && e.text != null && e.text !== "");
+    const kept = (entries || []).filter(
+      (e) => e && (e.node || (e.text != null && e.text !== ""))
+    );
     if (!kept.length) return null;
     const row = el("div", className ? `fact-line ${className}` : "fact-line");
     kept.forEach((entry, i) => {
@@ -607,10 +615,12 @@
         sep.setAttribute("aria-hidden", "true");
         row.appendChild(sep);
       }
-      const span = el("span", null, entry.label ? `${entry.label} ` : null);
-      if (entry.label) {
+      // An entry may carry a prebuilt node (e.g. a toned status pill) instead
+      // of plain text.
+      const span = entry.node || el("span", null, entry.label ? `${entry.label} ` : null);
+      if (!entry.node && entry.label) {
         span.appendChild(el("span", "fact-n", entry.text));
-      } else {
+      } else if (!entry.node) {
         span.textContent = entry.text;
       }
       if (entry.title) span.title = entry.title;
@@ -685,9 +695,10 @@
     body.appendChild(note);
   }
 
-  // `variant` picks the colour (see the .pill rules in sidepanel.html); it is a
-  // class name we choose, never a value from HubSpot. Omit it for the default
-  // muted outline; pass "" for the plain (green) pill.
+  // `variant` picks the pill's tone (see the .pill rules in sidepanel.html); it
+  // is a class name we choose, never a value from HubSpot. Omit it for the
+  // neutral outline — which is what a count gets, because a count is not a
+  // state — or pass "" for the bare pill, i.e. the positive tone.
   function setPill(pillEl, text, variant) {
     pillEl.style.display = text ? "" : "none";
     pillEl.className = ("pill " + (variant === undefined ? "info" : variant)).trim();
@@ -774,60 +785,6 @@
   // was the same name on three lines. Roles are grouped by name now — one name
   // for everything collapses to a single "Owner <name>" line whose title spells
   // out the roles it covers, and only genuinely different names get a line.
-  const OWN_ROLES = [
-    ["outbound", "Outbound owner"],
-    ["csm", "CSM"],
-    ["companyOwner", "Company owner"],
-    ["contactOwner", "Contact owner"],
-  ];
-
-  function ownershipBlock(own) {
-    if (!own || !own.hasData) return null;
-    const block = el("div", "own");
-
-    // name -> the roles that name holds, in OWN_ROLES order.
-    const groups = [];
-    for (const [key, label] of OWN_ROLES) {
-      const name = own[key];
-      if (!name) continue;
-      const hit = groups.find((g) => g.name === name);
-      if (hit) hit.roles.push(label);
-      else groups.push({ name, roles: [label] });
-    }
-    if (!groups.length) return null;
-
-    // When ownership last moved is context for "why haven't they been called",
-    // not a headline — hover detail on the row it belongs to.
-    const changed = own.changedAt ? `Outbound ownership changed ${fmt.date(own.changedAt)}` : null;
-    const rolesTitle = (roles) => roles.join(", ");
-
-    const primary = el("div", "own-primary");
-    const lead = groups[0];
-    // "Owner" once the one name covers more than one role; the specific role
-    // when it is the only thing that name is.
-    primary.appendChild(el("span", "own-label", lead.roles.length > 1 ? "Owner" : lead.roles[0]));
-    primary.appendChild(el("span", "own-name", lead.name));
-    primary.title = [lead.roles.length > 1 ? rolesTitle(lead.roles) : null, changed]
-      .filter(Boolean)
-      .join(" · ");
-    if (!primary.title) primary.removeAttribute("title");
-    block.appendChild(primary);
-
-    // Anyone else, one dense wrapping line. Each is labelled, because an
-    // unlabelled name next to a phone number is exactly the ambiguity this
-    // block replaces.
-    const more = el("div", "own-more");
-    for (const group of groups.slice(1)) {
-      const span = el("span", null, `${group.roles[0]}: `);
-      span.appendChild(el("span", "own-who", group.name));
-      if (group.roles.length > 1) span.title = rolesTitle(group.roles);
-      more.appendChild(span);
-    }
-    if (more.childElementCount) block.appendChild(more);
-
-    return block;
-  }
-
   // Sequence context (Phase 8): whether this contact is already being worked,
   // and when anyone last touched them. `line` is null when the portal doesn't
   // say — no line is better than a guess.
@@ -1394,35 +1351,59 @@
     setPill(crmEls.identityPill, c ? null : "No contact record");
     clearNode(body);
 
-    const block = el("div", "ident");
+    // Two columns, contact | company, separated by a hairline. Owners are the
+    // load-bearing rows: all three are ALWAYS drawn (missing/unresolved states
+    // say so honestly), and an outbound or contact owner who is a *named
+    // someone else* is flagged red — a rep must know before dialing that the
+    // record isn't theirs. isMine === null (can't tell) is never flagged:
+    // falsely telling a rep an account isn't theirs is worse than silence.
+    const roles = (bundle.ownership && bundle.ownership.byKey) || {};
+    const ownChanged =
+      bundle.ownership && bundle.ownership.changedAt
+        ? `Outbound ownership changed ${fmt.date(bundle.ownership.changedAt)}`
+        : null;
+    const ownerRow = (role, flaggable) => {
+      if (!role) return null;
+      const row = el("div", "own-row");
+      row.appendChild(el("span", "own-label", role.label));
+      if (role.name) {
+        const flagged = flaggable && role.isMine === false;
+        const who = el("span", flagged ? "own-name own-alert" : "own-name", role.name);
+        if (flagged) who.title = "Owned by someone else";
+        row.appendChild(who);
+      } else {
+        row.appendChild(
+          el("span", "own-name own-unset", role.missing ? "Not set" : "Unknown")
+        );
+      }
+      // When ownership last moved: context for "why haven't they been called",
+      // kept as hover detail on the outbound row it belongs to.
+      if (role.key === "outbound" && ownChanged) row.title = ownChanged;
+      return row;
+    };
 
+    const cols = el("div", "ident-cols");
+
+    // --- Contact column ---
+    const colC = el("div", "ident-col");
+    colC.appendChild(el("div", "col-head", "Contact"));
     const line1 = el("div", "ident-line");
     line1.appendChild(recordLink(c ? c.name : bundle.email, c && c.url, "rec-name"));
     if (c && c.lifecycleStage) {
-      line1.appendChild(el("span", "pill stage tiny", c.lifecycleStage));
+      line1.appendChild(
+        el(
+          "span",
+          data && data.status
+            ? `pill tiny tone-${data.status.tone("lifecyclestage", c.lifecycleStage)}`
+            : "pill stage tiny",
+          c.lifecycleStage
+        )
+      );
     }
-    block.appendChild(line1);
+    colC.appendChild(line1);
+    if (c && c.title) colC.appendChild(el("div", "ident-role", c.title));
 
-    const role = el("div", "ident-role");
-    if (c && c.title) role.appendChild(el("span", null, c.title));
-    if (co) {
-      if (c && c.title) role.appendChild(el("span", "at", " @ "));
-      const link = recordLink(co.name, co.url, "link");
-      const about = [co.domain, co.industry, co.employees != null ? `${fmt.number(co.employees)} employees` : null]
-        .filter(Boolean)
-        .join(" · ");
-      if (about) link.title = about;
-      role.appendChild(link);
-    }
-    if (role.childElementCount) block.appendChild(role);
-
-    // Owner used to sit here, unlabelled — and it was the wrong field for the
-    // question reps were using it to answer. It now lives in ownershipBlock
-    // below, labelled, with the outbound owner first.
-    //
-    // Phase 10 turned this into the *phone row*: all three writable numbers when
-    // the record has them (labelled, because an unlabelled second number is a
-    // guess), and the "Wrong number?" affordance that opens the editor.
+    // Phase 10 phone row + wrong-number editor, unchanged behavior.
     const meta = el("div", "ident-meta");
     const hasAnyPhone = !!(c && (c.phone || c.mobilePhone || c.phone2));
     appendAll(meta, [
@@ -1431,29 +1412,42 @@
       c && c.leadStatus ? el("span", null, c.leadStatus) : null,
       wnOpenButton(c),
     ]);
-    if (meta.childElementCount) block.appendChild(meta);
-
-    // Phase 10: the editor sits directly under the numbers it edits (state was
-    // reset above if this is a different contact).
+    if (meta.childElementCount) colC.appendChild(meta);
     const wnHost = wnMount(c);
-    if (wnHost) block.appendChild(wnHost);
+    if (wnHost) colC.appendChild(wnHost);
 
-    const own = ownershipBlock(bundle.ownership);
-    if (own) block.appendChild(own);
-
-    // One-click LinkedIn (Phase 8). Both hrefs come from safeUrl'd CRM values in
-    // hubspot-data.js, so a javascript:/data: property value is already gone.
-    const links = el("div", "ident-links");
-    appendAll(links, [
+    appendAll(colC, [
+      ownerRow(roles.contact, true),
       extLink("LinkedIn", c && c.linkedinUrl),
+      sequenceLine(bundle.sequence),
+    ]);
+
+    // --- Company column ---
+    const colCo = el("div", "ident-col ident-col-co");
+    colCo.appendChild(el("div", "col-head", "Company"));
+    if (co) {
+      const coLine = el("div", "ident-line");
+      const link = recordLink(co.name, co.url, "rec-name");
+      colCo.appendChild(coLine).appendChild(link);
+      const about = [co.domain, co.industry, co.employees != null ? `${fmt.number(co.employees)} employees` : null]
+        .filter(Boolean)
+        .join(" · ");
+      if (about) colCo.appendChild(el("div", "ident-role", about));
+    } else {
+      colCo.appendChild(el("div", "ident-role", "No company record"));
+    }
+    appendAll(colCo, [
+      ownerRow(roles.outbound, true),
+      ownerRow(roles.company, false),
+      bundle.ownership && bundle.ownership.csmRole && bundle.ownership.csmRole.name
+        ? ownerRow(bundle.ownership.csmRole, false)
+        : null,
       extLink("Company LinkedIn", co && co.linkedinUrl),
     ]);
-    if (links.childElementCount) block.appendChild(links);
 
-    const seq = sequenceLine(bundle.sequence);
-    if (seq) block.appendChild(seq);
-
-    body.appendChild(block);
+    cols.appendChild(colC);
+    cols.appendChild(colCo);
+    body.appendChild(cols);
   }
 
   // --- Account context (Phase 8) -------------------------------------------
@@ -1474,7 +1468,13 @@
     crmEls.accountSection.hidden = false;
     // The grade is the single most scannable "worth calling" signal, so it goes
     // in the section head where a rep sees it without reading the card.
-    setPill(crmEls.accountPill, ctx.grade ? `Grade ${ctx.grade}` : null);
+    setPill(
+      crmEls.accountPill,
+      ctx.grade ? `Grade ${ctx.grade}` : null,
+      // Grade is a status, so it carries a semantic tone (A/B positive,
+      // C caution, D/F negative) via the data layer's mapping.
+      ctx.grade && data && data.status ? `tone-${data.status.tone("account_grade_v1", ctx.grade)}` : undefined
+    );
     clearNode(body);
 
     // The Wiza section already shows ICP and industry for companies that have
@@ -1487,7 +1487,19 @@
     // labels above them was spending five lines on nothing a rep hadn't read.
     // Each label survives as the item's hover title.
     const classify = factLine([
-      { text: ctx.status, title: ctx.status ? "Company status" : null },
+      // Company status is a status datapoint → a toned pill, not plain text.
+      ctx.status
+        ? {
+            node: el(
+              "span",
+              data && data.status
+                ? `pill tiny tone-${data.status.tone("company_lifecycle_stage", ctx.status)}`
+                : "pill tiny",
+              ctx.status
+            ),
+            title: "Company status",
+          }
+        : null,
       // "Strong" on its own could be anything; two words make it self-evident.
       { text: ctx.icpFit ? `${ctx.icpFit} ICP fit` : null, title: "ICP fit" },
       dupWiza ? null : { text: ctx.icp, title: ctx.icp ? "ICP" : null },
@@ -1523,15 +1535,56 @@
     const blurb = proseBlock(ctx.snippetFull || ctx.snippet, null, "the company description");
     if (blurb) body.appendChild(blurb);
 
-    // Tech stack: a delimited property parsed into a capped, de-duplicated list
-    // in hubspot-data.js. One line — the label is the only thing that makes a
-    // list of product names legible, so it stays, inline.
-    if (ctx.tech) {
+    // Tech stack: comma-separated, competitors highlighted, MORE/LESS toggle.
+    // Prefers the rich techStack view-model (labels cleaned of underscores,
+    // competitors partitioned to the front so they can never hide behind MORE);
+    // falls back to the legacy string list for a stale cached bundle.
+    const stack = ctx.techStack;
+    if (stack && stack.items && stack.items.length) {
+      const row = el("div", "fact-line tech-line");
+      const value = el("span");
+      value.appendChild(el("span", null, "Tech: "));
+
+      // Rebuilt on every toggle: item spans joined by plain ", " text nodes,
+      // competitor names in the accent style (decoration = purple scale).
+      const list = el("span");
+      const renderItems = (expanded) => {
+        while (list.firstChild) list.removeChild(list.firstChild);
+        const shown = expanded ? stack.items : stack.items.slice(0, stack.visibleCount);
+        shown.forEach((item, i) => {
+          if (i > 0) list.appendChild(document.createTextNode(", "));
+          const piece = el("span", item.isCompetitor ? "tech-comp" : null, item.label);
+          if (item.isCompetitor) piece.title = "Wiza competitor";
+          list.appendChild(piece);
+        });
+      };
+      renderItems(false);
+      value.appendChild(list);
+
+      if (stack.hiddenCount > 0) {
+        let expanded = false;
+        const toggle = el("button", "prose-more", `More (${stack.hiddenCount})`);
+        toggle.type = "button";
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.setAttribute("aria-label", `Show ${stack.hiddenCount} more technologies`);
+        toggle.addEventListener("click", () => {
+          expanded = !expanded;
+          renderItems(expanded);
+          toggle.textContent = expanded ? "Less" : `More (${stack.hiddenCount})`;
+          toggle.setAttribute("aria-expanded", String(expanded));
+        });
+        value.appendChild(document.createTextNode(" "));
+        value.appendChild(toggle);
+      }
+      row.appendChild(value);
+      body.appendChild(row);
+    } else if (ctx.tech) {
+      // Legacy shape (pre-v11 cached bundle): plain strings, no competitor info.
       const row = el("div", "fact-line");
-      const value = el("span", null, `Tech: ${ctx.tech.items.join(" · ")}`);
+      const value = el("span", null, `Tech: ${ctx.tech.items.join(", ")}`);
       if (ctx.tech.more > 0) {
         value.appendChild(el("span", "ctx-more", ` +${ctx.tech.more} more`));
-        value.title = ctx.tech.all.join(" · ");
+        value.title = ctx.tech.all.join(", ");
       }
       row.appendChild(value);
       body.appendChild(row);
@@ -1594,16 +1647,22 @@
   }
 
   function colleagueRow(row, hideOwner) {
-    const node = el("div", "peer");
+    // A colleague owned by a NAMED someone else gets the red treatment the
+    // user asked for — outline + highlight. isMine === null (can't tell) is
+    // never flagged: same rule as the identity owners.
+    const notMine = row.isMine === false;
+    const node = el("div", notMine ? "peer peer-alert" : "peer");
+    if (notMine) node.title = "Owned by someone else";
 
     const top = el("div", "peer-top");
     top.appendChild(recordLink(row.name, row.url, "peer-name"));
 
     // Compact sequence state. Enrolled is the signal the rep is scanning for, so
-    // it gets the purple treatment; a definite "no" is muted; an unknown gets no
-    // badge at all rather than a placeholder — the portal simply didn't say.
+    // it gets the positive tone; a definite "no" is the neutral tone; an unknown
+    // gets no badge at all rather than a placeholder — the portal simply didn't
+    // say. Tones, not decoration: this is state.
     if (row.inSequence === true) {
-      const badge = el("span", "pill stage tiny", "In sequence");
+      const badge = el("span", "pill tone-positive tiny", "In sequence");
       // The sequence name and start date are useful but not row-worthy at 320px.
       const which = [
         row.sequenceName ? `In sequence: ${row.sequenceName}` : "In sequence",
@@ -1614,7 +1673,7 @@
       if (which) badge.title = which;
       top.appendChild(badge);
     } else if (row.inSequence === false) {
-      top.appendChild(el("span", "pill info tiny", "Not sequenced"));
+      top.appendChild(el("span", "pill tone-neutral tiny", "Not sequenced"));
     }
 
     // One-click LinkedIn per colleague: this is the tab-out the section exists to
@@ -1711,9 +1770,11 @@
     for (const row of rows) body.appendChild(colleagueRow(row, !!shared));
   }
 
-  // active → green (the default pill), closed → muted outline, anything else a
-  // portal admin adds later → the neutral "info" treatment.
+  // active → the positive tone (the bare pill), closed → the neutral outline,
+  // anything else a portal admin adds later → the same neutral treatment: an
+  // unrecognised status must not be coloured as if we understood it.
   function wizaStatusVariant(status) {
+    if (data && data.status) return `tone-${data.status.tone("wiza_status", status)}`;
     if (status === "active") return "";
     if (status === "closed") return "closed";
     return "info";

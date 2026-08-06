@@ -3,197 +3,114 @@
   <head>
     <meta charset="utf-8" />
     <title>Dialer Helper Pro</title>
-    <!-- First script on the page, and the only one in <head>: it puts the saved
-         theme on the root element before the body exists, so an explicit Light
-         or Dark choice does not flash the OS theme first. -->
-    <script src="theme.js"></script>
     <style>
-      /* ===== Palette =====================================================
-         Wiza's own colours, straight off wiza.co: #0C3380 primary navy (the
-         brand anchor), #123769 mid navy, #091948 deep navy, #310C80 violet,
-         #1A1B25 near-black, #615E6E gray, #E6E2E3 light gray. Everything
-         else below is a tint derived from one of those, and only exists
-         where a brand hex cannot carry WCAG AA on the ground it has to sit
-         on: a saturated navy is unreadable as text on near-black, and a navy
-         tint light enough to read there is far too pale to fill a button.
-         Every pair in the panel is checked at 4.5:1 (text) / 3:1 (large text
-         and control edges) — see the contrast table in the PR notes.
+      /* ===== Palette ======================================================
+         The brand spec, verbatim. LIGHT ONLY — there is no dark set, no
+         prefers-color-scheme rule and no theme switch; `color-scheme: light`
+         below keeps the UA's own chrome (scrollbars, the <select> popup,
+         autofill) light even when the OS is in dark mode.
 
-         Each value is declared EXACTLY ONCE, here: --lt-* is the light set,
-         --dk-* the dark one. The three blocks after this one carry no colour
-         literals at all — they only say which set is live. So a colour is
-         one edit, in one place, no matter how the theme was chosen. */
+         Every colour value in this file is declared EXACTLY ONCE, here. Every
+         rule past this block references a token — so a colour is one edit, in
+         one place. Tokens whose value is another token (--on-accent, --sep,
+         --field-line, the neutral tone) exist so the ROLE has a name without
+         restating the hex.
+
+         Contrast: every text/background pair the panel can paint is measured
+         on painted pixels and held to WCAG AA — 4.5:1 for body and small
+         text, 3:1 for large text, control edges and graphical marks. Three
+         values below are NOT from the spec sheet and say so: the spec's own
+         semantic text-on-tint pairings (#EA384C/#FCE6EA 3.41:1,
+         #9B6D27/#FDEAB9 3.83:1, #1E7F5C/#E3F4EC 4.34:1) all fail AA at pill
+         type sizes, so each tone carries a slightly darkened -fg for TEXT
+         while the spec hex stays the tone's solid fill / graphical mark. Same
+         shape as the brief's own #7E43FF-fill / #4C24A3-text split. */
       :root {
-        /* -- Light. Wiza's own site is light-first, so this is the base. -- */
-        --lt-bg: #fff;
-        --lt-surface: #f6f4f5;
-        --lt-line: #e1dcde; /* hairline: dividers, card and pill edges */
-        --lt-sep: #8e8a95; /* the "·" between facts — punctuation, not text */
-        --lt-field-line: #86828e; /* textarea / input / select edges, 3:1 */
-        --lt-ink: #1a1b25;
-        --lt-muted: #615e6e;
-        --lt-accent: #0c3380; /* links, accent text, focus rings */
-        --lt-accent-fill: #0c3380; /* filled buttons */
-        --lt-accent-edge: transparent; /* see the note on `button` */
-        --lt-on-accent: #fff;
-        --lt-accent-soft: #dbe3f4; /* selected tab */
-        --lt-accent-2: #310c80; /* the one violet: the lifecycle pill */
-        --lt-accent-2-soft: #e2daf4;
-        --lt-header-bg: #0c3380;
-        --lt-header-fg: #fff;
-        --lt-green-bg: #e0f0e6;
-        --lt-green-fg: #0c6b3c;
-        --lt-amber-fg: #8a5200;
-        --lt-amber-fill: #8a5200;
-        --lt-on-amber: #fff;
-        --lt-danger-fg: #b02318;
-        --lt-disabled-bg: #dcd8db;
-        --lt-disabled-fg: #5f5d68;
-        --lt-scheme: light;
+        /* ---- Type ------------------------------------------------------
+           Inter when the machine has it, the platform UI face otherwise. No
+           @font-face: MV3's CSP blocks a remote font and there is no font
+           pipeline in this extension, so a webfont would just fail quietly.
 
-        /* -- Dark. Same brand, tinted for a near-black ground. -- */
-        --dk-bg: #171923;
-        --dk-surface: #1f2130;
-        --dk-line: #2e3140;
-        --dk-sep: #6e7488;
-        --dk-field-line: #767c90;
-        --dk-ink: #e8eaf2;
-        --dk-muted: #a2a6b8;
-        --dk-accent: #a6c0f2; /* navy lightened until it reads on near-black */
-        --dk-accent-fill: #0c3380; /* the brand navy, kept for filled surfaces */
-        --dk-accent-edge: #4c72c9; /* draws the fill's edge against the page */
-        --dk-on-accent: #fff;
-        --dk-accent-soft: #23315c;
-        --dk-accent-2: #beaaf6;
-        --dk-accent-2-soft: #2a2158;
-        --dk-header-bg: #091948;
-        --dk-header-fg: #f4f6fc;
-        --dk-green-bg: #123321;
-        --dk-green-fg: #5fd08d;
-        --dk-amber-fg: #f0b44a;
-        --dk-amber-fill: #e0a03c;
-        --dk-on-amber: #14161e; /* amber is bright here, so the label is dark */
-        --dk-danger-fg: #f58a80;
-        --dk-disabled-bg: #303341;
-        --dk-disabled-fg: #9ba1b5;
-        --dk-scheme: dark;
+           Four weights in the whole panel, one per role, and nothing else:
+             --fw-head    700  ALL-CAPS section labels, record titles
+             --fw-value   600  values, names, emphasis, buttons, links
+             --fw-caption 500  11px/10px caption lines
+             --fw-body    400  running text, prose, activity summaries */
+        --font: Inter, -apple-system, system-ui, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        --fw-body: 400;
+        --fw-caption: 500;
+        --fw-value: 600;
+        --fw-head: 700;
 
-        /* -- Theme-independent. The header is a navy bar in both themes, so
-              its white overlays and its status dots have one value each,
-              declared once here rather than once per theme. -- */
-        --header-overlay: rgba(255, 255, 255, 0.14);
-        --header-overlay-on: rgba(255, 255, 255, 0.28);
-        --header-overlay-off: rgba(255, 255, 255, 0.06);
-        --header-fg-off: rgba(255, 255, 255, 0.35);
-        --dot-idle: #9ca3af; /* no prospect / not connected yet */
-        --dot-live: #22c55e;
-        --dot-live-halo: rgba(34, 197, 94, 0.25);
-        --dot-warn: #f59e0b;
-        --pop-shadow: rgba(0, 0, 0, 0.22);
-      }
+        /* ---- Neutrals -------------------------------------------------- */
+        --bg: #ffffff; /* page */
+        --surface: #f6f8fa; /* cards and section fills */
+        --line: #dfe1e6; /* card, pill and divider hairlines */
+        --rule: #eceff3; /* minimal gridlines, skeletons, disabled fills */
+        --ink: #26114a; /* every heading and every body line */
+        --muted: #615e6e; /* muted / secondary text */
+        /* The spec's tertiary/caption grey. It carries NO TEXT here: 3.08:1 on
+           white and 2.89:1 on the card fill, so it fails AA for small text and
+           fails even the 3:1 floor inside a card. It is used only where 3:1
+           against the page is the bar — control edges and the idle dot. Caption
+           TEXT uses --muted. */
+        --tertiary: #9491a1;
 
-      /* Which set is live. Light is the base; the OS preference swaps it; and
-         an explicit data-theme — written by the Theme control in Settings, and
-         absent for "System" — beats both, in either direction. The
-         :not([data-theme="light"]) is what lets an explicit Light win under a
-         dark OS; the [data-theme="dark"] block below the media query is what
-         lets an explicit Dark win under a light one.
-         MAPPING ONLY: no colour value belongs past this line. */
-      :root,
-      :root[data-theme="light"] {
-        --bg: var(--lt-bg);
-        --surface: var(--lt-surface);
-        --line: var(--lt-line);
-        --sep: var(--lt-sep);
-        --field-line: var(--lt-field-line);
-        --ink: var(--lt-ink);
-        --muted: var(--lt-muted);
-        --accent: var(--lt-accent);
-        --accent-fill: var(--lt-accent-fill);
-        --accent-edge: var(--lt-accent-edge);
-        --on-accent: var(--lt-on-accent);
-        --accent-soft: var(--lt-accent-soft);
-        --accent-2: var(--lt-accent-2);
-        --accent-2-soft: var(--lt-accent-2-soft);
-        --header-bg: var(--lt-header-bg);
-        --header-fg: var(--lt-header-fg);
-        --green-bg: var(--lt-green-bg);
-        --green-fg: var(--lt-green-fg);
-        --amber-fg: var(--lt-amber-fg);
-        --amber-fill: var(--lt-amber-fill);
-        --on-amber: var(--lt-on-amber);
-        --danger-fg: var(--lt-danger-fg);
-        --disabled-bg: var(--lt-disabled-bg);
-        --disabled-fg: var(--lt-disabled-fg);
-        --scheme: var(--lt-scheme);
-      }
-      @media (prefers-color-scheme: dark) {
-        :root:not([data-theme="light"]) {
-          --bg: var(--dk-bg);
-          --surface: var(--dk-surface);
-          --line: var(--dk-line);
-          --sep: var(--dk-sep);
-          --field-line: var(--dk-field-line);
-          --ink: var(--dk-ink);
-          --muted: var(--dk-muted);
-          --accent: var(--dk-accent);
-          --accent-fill: var(--dk-accent-fill);
-          --accent-edge: var(--dk-accent-edge);
-          --on-accent: var(--dk-on-accent);
-          --accent-soft: var(--dk-accent-soft);
-          --accent-2: var(--dk-accent-2);
-          --accent-2-soft: var(--dk-accent-2-soft);
-          --header-bg: var(--dk-header-bg);
-          --header-fg: var(--dk-header-fg);
-          --green-bg: var(--dk-green-bg);
-          --green-fg: var(--dk-green-fg);
-          --amber-fg: var(--dk-amber-fg);
-          --amber-fill: var(--dk-amber-fill);
-          --on-amber: var(--dk-on-amber);
-          --danger-fg: var(--dk-danger-fg);
-          --disabled-bg: var(--dk-disabled-bg);
-          --disabled-fg: var(--dk-disabled-fg);
-          --scheme: var(--dk-scheme);
-        }
-      }
-      :root[data-theme="dark"] {
-        --bg: var(--dk-bg);
-        --surface: var(--dk-surface);
-        --line: var(--dk-line);
-        --sep: var(--dk-sep);
-        --field-line: var(--dk-field-line);
-        --ink: var(--dk-ink);
-        --muted: var(--dk-muted);
-        --accent: var(--dk-accent);
-        --accent-fill: var(--dk-accent-fill);
-        --accent-edge: var(--dk-accent-edge);
-        --on-accent: var(--dk-on-accent);
-        --accent-soft: var(--dk-accent-soft);
-        --accent-2: var(--dk-accent-2);
-        --accent-2-soft: var(--dk-accent-2-soft);
-        --header-bg: var(--dk-header-bg);
-        --header-fg: var(--dk-header-fg);
-        --green-bg: var(--dk-green-bg);
-        --green-fg: var(--dk-green-fg);
-        --amber-fg: var(--dk-amber-fg);
-        --amber-fill: var(--dk-amber-fill);
-        --on-amber: var(--dk-on-amber);
-        --danger-fg: var(--dk-danger-fg);
-        --disabled-bg: var(--dk-disabled-bg);
-        --disabled-fg: var(--dk-disabled-fg);
-        --scheme: var(--dk-scheme);
-      }
-      /* One declaration, wherever --scheme came from: it makes the UA's own
-         chrome (scrollbars, the select popup, form-control internals) match
-         the theme the panel is actually painting. */
-      :root {
-        color-scheme: var(--scheme);
+        /* ---- Purple scale. All decoration comes from here. ------------- */
+        --accent: #7e43ff; /* primary: fills, focus rings, key metrics */
+        --accent-ink: #4c24a3; /* series 3, and accent TEXT on tinted ground */
+        --accent-2: #9371f0; /* series 2, and the "·" between facts */
+        --accent-soft: #b5aeff; /* soft accents */
+        --accent-tint: #e4d8fd; /* highlight tints: selected tab, stage pill */
+        --accent-wash: #f5f0ff; /* faint washes and hovers */
+
+        /* ---- Semantic tones. MEANING ONLY, never decoration. -----------
+           Five tone names, matching the tone helper in hubspot-data.js:
+           positive | caution | negative | neutral | info. Each has -fg
+           (text), -bg (tint) and, for the four coloured ones, a solid for
+           fills and graphical marks (--tone-positive is the capture dot,
+           --tone-caution the armed-confirm fill, --tone-info the stage pill's
+           text; --tone-negative's solid is declared for the tone API and has
+           no graphical mark in the panel yet). See the .tone-* classes below. */
+        --tone-positive: #1e7f5c;
+        --tone-positive-fg: #1d7b59; /* AA on the tint; not from the spec */
+        --tone-positive-bg: #e3f4ec;
+        --tone-caution: #9b6d27;
+        --tone-caution-fg: #8c6223; /* AA on the tint; not from the spec */
+        --tone-caution-bg: #fdeab9;
+        --tone-negative: #ea384c;
+        --tone-negative-fg: #c22e3f; /* AA on the tint; not from the spec */
+        --tone-negative-bg: #fce6ea;
+        --tone-info: #3671a8; /* also the spec's ice-blue pastel pairing */
+        --tone-info-bg: #ebf2fc;
+
+        /* ---- Roles that borrow a value above ---------------------------- */
+        --on-accent: var(--bg); /* label on any saturated fill */
+        --tone-info-fg: var(--tone-info); /* passes AA on its own tint as-is */
+        --tone-neutral-fg: var(--muted); /* "no state", not a colour of its own */
+        --tone-neutral-bg: transparent;
+        --sep: var(--accent-2); /* the "·" is decoration → purple scale */
+        --field-line: var(--tertiary); /* input / select / textarea edges, 3:1 */
+        --disabled-bg: var(--rule);
+        --disabled-fg: var(--muted);
+        --dot-idle: var(--tertiary); /* nothing captured yet */
+        --dot-live: var(--tone-positive); /* a prospect is loaded — a status */
+
+        /* ---- The two places a colour needs an alpha channel ------------- */
+        --dot-live-halo: rgba(30, 127, 92, 0.18); /* --tone-positive, 18% */
+        --pop-shadow: rgba(38, 17, 74, 0.16); /* --ink, 16% */
+
+        /* Light, always. Not var(--something): there is no other value it
+           could take, and the OS being dark must not change it. */
+        color-scheme: light;
       }
 
       * { box-sizing: border-box; }
       html, body { height: 100%; }
       body {
-        font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+        font-family: var(--font);
+        font-weight: var(--fw-body);
         /* The panel is user-resizable with a ~320px floor; never fix a width. */
         width: 100%;
         min-width: 0;
@@ -204,19 +121,25 @@
         background: var(--bg);
       }
 
+      /* A white bar with a hairline under it, not a coloured slab: the page
+         background is #FFFFFF everywhere, and the wordmark carries the brand in
+         ink rather than the header carrying it in fill. */
       header {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 12px 14px;
-        background: var(--header-bg);
-        color: var(--header-fg);
+        padding: 9px 12px;
+        background: var(--bg);
+        color: var(--ink);
+        border-bottom: 1px solid var(--line);
         flex: 0 0 auto;
         /* Anchor for the settings popover, which hangs off the header's bottom
            edge and has to paint over the scrolling body below it. */
         position: relative;
         z-index: 20;
       }
+      /* Capture status: idle grey until a prospect is loaded, then the positive
+         tone with a halo. A state, so it is a semantic colour, not decoration. */
       header .dot {
         width: 8px;
         height: 8px;
@@ -231,55 +154,50 @@
       header h1 {
         font-size: 12px;
         margin: 0;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.06em;
         text-transform: uppercase;
+        color: var(--ink);
       }
       /* Pushes the settings control to the right edge at any panel width. */
       header .spacer { flex: 1 1 auto; }
-      header .hdr-btn {
-        margin: 0;
-        width: auto;
-        flex: 0 0 auto;
-        padding: 4px 9px;
-        font-size: 11px;
-        font-weight: 600;
-        border-radius: 999px;
-        background: var(--header-overlay);
-        box-shadow: none;
-        color: var(--header-fg);
-      }
-      header .hdr-btn:disabled {
-        background: var(--header-overlay-off);
-        color: var(--header-fg-off);
-        cursor: default;
-      }
-      /* The gear: square-ish, glyph-only, same pill treatment as any header
-         button so it doesn't read as a different class of control. */
-      header .hdr-btn.icon {
-        padding: 3px 7px;
-        font-size: 13px;
-        line-height: 16px;
-        border-radius: 8px;
-      }
-      header .hdr-btn[aria-expanded="true"] { background: var(--header-overlay-on); }
-      header .hdr-btn:focus-visible {
-        outline: 2px solid var(--header-fg);
-        outline-offset: 1px;
-      }
 
-      /* Connection state as a second, smaller dot: green connected, amber not.
-         The full connection UI lives in the settings popover, so this is the
-         only always-visible signal — hence the title/aria-label. */
-      header .hs-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
+      /* The gear. An inline SVG in the markup, not a glyph: ⚙ renders at a
+         different size and weight on every platform and was invisible here.
+         30x30 hit box round a 20px wheel, ink stroke, purple-wash hover, and
+         the tint while the popover is open so the control shows its own state.
+         Overrides the `button` base rule below, which is full-width. */
+      header .gear {
+        margin: 0;
         flex: 0 0 auto;
-        background: var(--dot-idle);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border-radius: 8px;
+        background: transparent;
+        box-shadow: none;
+        color: var(--ink);
+        cursor: pointer;
       }
-      header .hs-dot.on { background: var(--dot-live); }
-      header .hs-dot.off { background: var(--dot-warn); }
+      header .gear svg {
+        width: 20px;
+        height: 20px;
+        display: block;
+        /* So a press lands on the button, never on a path inside it. */
+        pointer-events: none;
+      }
+      header .gear:hover { background: var(--accent-wash); color: var(--accent-ink); }
+      header .gear[aria-expanded="true"] {
+        background: var(--accent-tint);
+        color: var(--accent-ink);
+      }
+      header .gear:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
 
       /* ---- Settings popover -------------------------------------------- */
       /* Anchored under the header's right edge, capped so it always fits the
@@ -306,7 +224,7 @@
       }
       .pop-title {
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
@@ -325,7 +243,7 @@
       }
       .pop-label {
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
@@ -354,40 +272,32 @@
         outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
-      /* Theme choice: three native radios in one row, same type scale as the
-         checkbox row above. Native inputs on purpose — the arrow-key handling,
-         the group semantics and the "one of these" announcement are the
-         platform's, and the popover's focus trap already collects `input`. */
-      .pop-radios {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px 12px;
-      }
-      .pop-radio {
-        display: flex;
+      /* Connection status. With the header's second dot gone this line is the
+         only place the panel states it outright, so it is a full-size badge with
+         its own status dot rather than a 10px pill: bigger type, the tone's
+         tint behind it, and the tone's solid as the dot. (The CRM sections
+         carry the same information in prose — see crmSignedOut in
+         sidepanel.js — but this is the one that is always one click away.) */
+      .pill.conn {
+        display: inline-flex;
         align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        line-height: 1.35;
-        color: var(--ink);
-        cursor: pointer;
+        gap: 5px;
+        font-size: 11px;
+        line-height: 15px;
+        padding: 2px 9px;
       }
-      .pop-radio input {
+      .pill.conn::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
         flex: 0 0 auto;
-        width: 14px;
-        height: 14px;
-        margin: 0;
-        accent-color: var(--accent);
-        cursor: pointer;
-      }
-      .pop-radio input:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 1px;
       }
       .popover .hint { font-size: 12px; color: var(--muted); margin: 0; }
       .popover button:focus-visible, .popover a:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 1px;
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
       }
 
       /* The panel is full-height; only this region scrolls. The 12px gutter is
@@ -421,7 +331,7 @@
       .section-title {
         font-size: 10px;
         line-height: 14px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
@@ -445,22 +355,37 @@
         overflow-wrap: anywhere;
       }
 
+      /* ---- Pills -------------------------------------------------------
+         A pill always carries STATE, so every variant resolves to one of the
+         five tones — never to a decorative colour. The bare .pill is the
+         positive tone (Wiza active, deal won, notes synced, HubSpot connected);
+         the legacy variant names below are kept because they are what
+         sidepanel.js already writes, and each is defined purely as "which tone
+         is this". `tone-*` can be used directly instead, and is what the tone
+         helper's names map onto.
+             .pill            → positive
+             .pill.warn       → caution
+             .pill.stage      → info   (lifecycle stage, an open deal's stage)
+             .pill.won        → positive
+             .pill.off/.closed/.info/.soon → neutral
+         Counts (Activity "12", Deals "3") ride on .pill.info, i.e. the neutral
+         outline: a count is decoration and must not borrow a tone. */
       .pill {
         font-size: 10px;
         /* Locked so a pill never makes a section head taller than its title. */
         line-height: 12px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         padding: 1px 7px;
         border-radius: 999px;
-        background: var(--green-bg);
-        color: var(--green-fg);
+        background: var(--tone-positive-bg);
+        color: var(--tone-positive-fg);
         flex: 0 0 auto;
       }
       .pill.soon {
-        background: transparent;
-        color: var(--muted);
+        background: var(--tone-neutral-bg);
+        color: var(--tone-neutral-fg);
         border: 1px solid var(--line);
-        font-weight: 600;
+        font-weight: var(--fw-value);
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
@@ -473,7 +398,7 @@
       .bk[title] { cursor: help; }
       .bk-email {
         font-size: 13px;
-        font-weight: 600;
+        font-weight: var(--fw-value);
         line-height: 1.3;
         overflow-wrap: anywhere;
       }
@@ -491,7 +416,7 @@
         min-width: 0;
         overflow-wrap: anywhere;
       }
-      .bk-tz .bk-local { color: var(--ink); font-weight: 600; }
+      .bk-tz .bk-local { color: var(--ink); font-weight: var(--fw-value); }
       /* Not full-width: filling the form is one action among several on this
          screen, and a 292px purple slab said otherwise. */
       .bk-fill {
@@ -509,30 +434,44 @@
         color: var(--muted);
         margin-top: 4px;
       }
-      .bk-meta.stale { color: var(--amber-fg); font-weight: 600; }
+      .bk-meta.stale { color: var(--tone-caution-fg); font-weight: var(--fw-value); }
 
       .empty { text-align: center; padding: 8px 4px 4px; }
-      .empty .big { font-size: 13px; font-weight: 600; color: var(--danger-fg); }
+      .empty .big { font-size: 13px; font-weight: var(--fw-value); color: var(--tone-negative-fg); }
       .empty .small { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
-      /* The filled action. The rim is how the fill's edge clears 3:1 against
-         the page: the brand navy is 11.7:1 against white but only 1.5:1 against
-         the dark ground, and a navy light enough to fix that stops looking like
-         Wiza. It is `transparent` in light, where the fill does the job itself.
-         Inset, not a border, so no button changes size. Every button below that
-         replaces this background has to turn the rim off too. */
+      /* The primary action: the accent violet filled, white label. 5.08:1 for
+         the label and 5.08:1 for the fill's own edge against the page, so it
+         needs no rim of its own — the previous pass's inset ring existed only
+         because a navy fill vanished into the dark ground. */
       button {
         margin-top: 12px;
         width: 100%;
         padding: 9px;
         border: 0;
         border-radius: 7px;
-        background: var(--accent-fill);
+        background: var(--accent);
         color: var(--on-accent);
-        box-shadow: inset 0 0 0 1px var(--accent-edge);
-        font-weight: 600;
+        box-shadow: none;
+        font-weight: var(--fw-value);
         font-size: 13px;
         cursor: pointer;
+      }
+      /* Hover for the FILLED actions only. Every ghost and text button below
+         replaces this background outright and brings its own hover, so they are
+         excluded by name: a bare `button:hover` repainted the gear, the tabs and
+         every "Disconnect"-style link violet, and turned the gear's own stroke
+         invisible against it. `.armed` is excluded because its fill is a warning
+         and must not flip to the accent under the pointer. */
+      button:hover:not(:disabled):not(.gear):not(.tab):not(.linkish):not(.prose-more):not(.wn-open):not(.wn-cancel):not(.armed) {
+        background: var(--accent-ink);
+      }
+      /* Ink rather than the accent: on a filled button an accent-coloured ring
+         is the same colour as what it is ringing. Ghost and text buttons below
+         override this with the accent, which is what they sit on white for. */
+      button:focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
       }
       button:disabled {
         background: var(--disabled-bg);
@@ -571,18 +510,18 @@
       }
       .card .hint { font-size: 12px; color: var(--muted); margin: 0; }
       .pill.off {
-        background: transparent;
-        color: var(--muted);
+        background: var(--tone-neutral-bg);
+        color: var(--tone-neutral-fg);
         border: 1px solid var(--line);
       }
-      .pill.warn { background: transparent; color: var(--amber-fg); border: 1px solid currentColor; }
+      .pill.warn { background: var(--tone-caution-bg); color: var(--tone-caution-fg); }
       .account {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: 8px;
       }
-      .account .who { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+      .account .who { font-size: 13px; font-weight: var(--fw-value); overflow-wrap: anywhere; }
       /* A text-button, so "Disconnect" never competes with a primary action. */
       .linkish {
         margin: 0;
@@ -593,7 +532,7 @@
         border: 0;
         color: var(--muted);
         font-size: 11px;
-        font-weight: 600;
+        font-weight: var(--fw-value);
         text-decoration: underline;
         cursor: pointer;
         flex: 0 0 auto;
@@ -604,11 +543,11 @@
       .linkish.inline {
         color: var(--accent);
         font-size: 12px;
-        font-weight: 600;
+        font-weight: var(--fw-value);
       }
       .error {
         font-size: 12px;
-        color: var(--danger-fg);
+        color: var(--tone-negative-fg);
         margin: 10px 0 0;
         overflow-wrap: anywhere;
       }
@@ -618,7 +557,7 @@
          widths, no multi-column grids, and every long value wraps. */
       .crm-body { display: flex; flex-direction: column; gap: 6px; }
       .crm-note { font-size: 12px; color: var(--muted); margin: 0; }
-      .crm-note.bad { color: var(--danger-fg); }
+      .crm-note.bad { color: var(--tone-negative-fg); }
 
       /* One dense, wrapping line of `·`-joined facts, in place of a grid of
          labelled cells. Used where the values name themselves ("Cool down",
@@ -635,7 +574,7 @@
         overflow-wrap: anywhere;
       }
       .fact-line > span[title] { cursor: help; }
-      .fact-line .fact-n { color: var(--ink); font-weight: 700; }
+      .fact-line .fact-n { color: var(--ink); font-weight: var(--fw-head); }
       /* The separator is decoration, not content: it must never be read out or
          land in a copied selection as a word. */
       .fact-sep { color: var(--sep); }
@@ -678,7 +617,7 @@
         border: 0;
         color: var(--muted);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.04em;
         text-transform: uppercase;
         text-decoration: underline;
@@ -687,6 +626,70 @@
       .prose-more:hover { color: var(--accent); }
       .prose-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+      /* Tech stack: competitor names get the accent treatment. Decoration, so
+         it draws from the purple scale (accent-ink is the AA-safe text tint),
+         never the semantic colors. */
+      .tech-comp {
+        color: var(--accent-ink);
+        font-weight: var(--fw-value);
+      }
+      .tech-line .prose-more { display: inline; vertical-align: baseline; }
+
+      /* Contact | Company: two separated columns. Values wrap rather than
+         truncate — at the 320px floor each column is ~130px, which is tight
+         but explicit: the split is the requirement, wrapping is the cost. */
+      .ident-cols {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 4px 0;
+      }
+      .ident-col {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding-right: 10px;
+      }
+      .ident-col-co {
+        border-left: 1px solid var(--line);
+        padding-left: 10px;
+        padding-right: 0;
+      }
+      .ident-col .ident-line,
+      .ident-col .ident-role,
+      .ident-col .own-row { overflow-wrap: anywhere; }
+      /* --muted, not --tertiary: the spec's caption grey is 2.89:1 on the card
+         fill, which is below even the 3:1 non-text floor. See the note on
+         --tertiary in the palette. */
+      .col-head {
+        font-size: 10px;
+        font-weight: var(--fw-head);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .own-row { font-size: 12px; }
+      .own-row .own-label { margin-right: 5px; }
+      /* Meaning, not decoration: this owner is a named someone-else. */
+      .own-alert {
+        color: var(--tone-negative-fg);
+        background: var(--tone-negative-bg);
+        border-radius: 4px;
+        padding: 0 4px;
+        font-weight: var(--fw-value);
+      }
+      .own-unset { color: var(--muted); }
+      /* A colleague owned by a named someone-else: outline + tint. Meaning,
+         not decoration, so it draws from the negative tone. */
+      .peer.peer-alert {
+        outline: 1px solid var(--tone-negative);
+        outline-offset: -1px;
+        background: var(--tone-negative-bg);
+        border-radius: 6px;
+        padding: 4px 6px;
+      }
+      .peer.peer-alert + .peer { border-top: 0; }
+
       /* Record title line: a link plus any number of pills, wrapping. */
       .rec-head {
         display: flex;
@@ -694,20 +697,31 @@
         align-items: center;
         gap: 6px;
       }
-      .rec-name { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+      .rec-name { font-size: 14px; font-weight: var(--fw-head); overflow-wrap: anywhere; }
       a.rec-name, a.link { color: var(--accent); text-decoration: none; }
+      /* Part of the type scale, not a layout tweak: most links sit in a context
+         that sets a size (.ident-role, .ident-links, .wiza-links, .rec-head),
+         but a renderer that drops one straight into a card gets the 16px UA
+         default — the largest type on the screen at the 320px floor. This is
+         the floor for a link anywhere. */
+      a.link { font-size: 12px; }
       a.rec-name:hover, a.link:hover { text-decoration: underline; }
 
       .pill.info {
-        background: transparent;
-        color: var(--muted);
+        background: var(--tone-neutral-bg);
+        color: var(--tone-neutral-fg);
         border: 1px solid var(--line);
-        font-weight: 600;
+        font-weight: var(--fw-value);
       }
-      /* The one place the brand violet appears: the lifecycle stage. */
-      .pill.stage { background: var(--accent-2-soft); color: var(--accent-2); }
-      .pill.closed { background: transparent; color: var(--muted); border: 1px solid var(--line); }
-      .pill.won { background: var(--green-bg); color: var(--green-fg); }
+      /* Lifecycle stage and an open deal's stage: informational, not a win or a
+         loss, so the info tone rather than the purple scale. */
+      .pill.stage { background: var(--tone-info-bg); color: var(--tone-info-fg); }
+      .pill.closed {
+        background: var(--tone-neutral-bg);
+        color: var(--tone-neutral-fg);
+        border: 1px solid var(--line);
+      }
+      .pill.won { background: var(--tone-positive-bg); color: var(--tone-positive-fg); }
       /* Smaller pill for the dense rows (identity line, Wiza subsections). */
       .pill.tiny { font-size: 9px; padding: 1px 6px; }
 
@@ -733,7 +747,7 @@
          recessive separator colour would put a 3:1 glyph inside a 4.5:1 line.
          (It used to be opacity 0.55, which computed to 2.6:1.) */
       .ident-role .at { color: inherit; }
-      .ident-role a.link { font-weight: 600; }
+      .ident-role a.link { font-weight: var(--fw-value); }
       .ident-meta {
         display: flex;
         flex-wrap: wrap;
@@ -755,7 +769,7 @@
         border: 0;
         color: var(--accent);
         font-size: 11px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         text-decoration: underline;
         cursor: pointer;
         flex: 0 0 auto;
@@ -773,7 +787,7 @@
       }
       .wn-title {
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
@@ -782,7 +796,7 @@
       .wn-row label {
         display: block;
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
@@ -813,7 +827,7 @@
         color: var(--muted);
         overflow-wrap: anywhere;
       }
-      .wn-current .wn-was { font-weight: 700; color: var(--ink); }
+      .wn-current .wn-was { font-weight: var(--fw-head); color: var(--ink); }
       .wn-note { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
       /* Cancel and the write action share a row; the write action is the wide
          one, and neither shrinks below tappable at 320px. */
@@ -842,14 +856,14 @@
          in light mode and bright in dark mode, so a single white label would
          pass on one theme (6.4:1) and fail badly on the other (1.9:1). */
       .wn-save.armed {
-        background: var(--amber-fill);
-        color: var(--on-amber);
+        background: var(--tone-caution);
+        color: var(--on-accent);
         box-shadow: none;
       }
       .wn-result { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
-      .wn-result.ok { color: var(--green-fg); font-weight: 600; }
-      .wn-result.err { color: var(--danger-fg); font-weight: 600; }
-      .wn-result .wn-sub { display: block; font-weight: 500; color: var(--muted); margin-top: 2px; }
+      .wn-result.ok { color: var(--tone-positive-fg); font-weight: var(--fw-value); }
+      .wn-result.err { color: var(--tone-negative-fg); font-weight: var(--fw-value); }
+      .wn-result .wn-sub { display: block; font-weight: var(--fw-caption); color: var(--muted); margin-top: 2px; }
 
       /* ---- Ownership, links, sequence (Phase 8) ------------------------- */
       /* Ownership is the block a rep reads before dialing, so it gets its own
@@ -864,7 +878,7 @@
         gap: 1px;
         margin-top: 3px;
         padding-top: 4px;
-        border-top: 1px solid var(--line);
+        border-top: 1px solid var(--rule);
       }
       .own-primary {
         display: flex;
@@ -875,13 +889,13 @@
       .own-primary[title] { cursor: help; }
       .own-label {
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
         flex: 0 0 auto;
       }
-      .own-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+      .own-name { font-size: 12px; font-weight: var(--fw-head); overflow-wrap: anywhere; }
       .own-more {
         display: flex;
         flex-wrap: wrap;
@@ -890,7 +904,7 @@
         line-height: 1.35;
         color: var(--muted);
       }
-      .own-more .own-who { font-weight: 600; color: var(--ink); }
+      .own-more .own-who { font-weight: var(--fw-value); color: var(--ink); }
       /* Compact one-click LinkedIn row: kills the tab-out to search for them. */
       .ident-links {
         display: flex;
@@ -899,7 +913,7 @@
         margin-top: 3px;
         font-size: 12px;
         line-height: 1.35;
-        font-weight: 600;
+        font-weight: var(--fw-value);
       }
       /* "In sequence: Outbound Q3 · contacted 3d ago" — the enrolment date is
          hover detail, not a second line. */
@@ -912,11 +926,11 @@
         line-height: 1.35;
         color: var(--muted);
       }
-      .ident-seq .seq-on { color: var(--accent); font-weight: 600; }
+      .ident-seq .seq-on { color: var(--tone-positive-fg); font-weight: var(--fw-value); }
       .ident-seq [title] { cursor: help; }
 
       /* ---- Account context (Phase 8) ----------------------------------- */
-      .ctx-more { color: var(--muted); font-weight: 600; }
+      .ctx-more { color: var(--muted); font-weight: var(--fw-value); }
 
       /* ---- Others at this account (Phase 9) ----------------------------- */
       /* The section head doubles as the <details> toggle. It keeps the exact
@@ -943,7 +957,7 @@
         max-height: max(150px, 26vh);
         overflow-y: auto;
       }
-      .peer + .peer { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 5px; }
+      .peer + .peer { margin-top: 5px; border-top: 1px solid var(--rule); padding-top: 5px; }
       /* Wide panel: colleagues are the one list where reading order doesn't
          matter much, so they take the horizontal space the panel gained instead
          of a second screen of vertical space. The row separators go with the
@@ -963,7 +977,7 @@
         align-items: baseline;
         gap: 0 6px;
       }
-      .peer-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+      .peer-name { font-size: 12px; font-weight: var(--fw-value); overflow-wrap: anywhere; }
       a.peer-name { color: var(--accent); text-decoration: none; }
       a.peer-name:hover { text-decoration: underline; }
       /* Icon-link, not a word: at 320px the row is already carrying a name, a
@@ -971,15 +985,16 @@
       a.peer-li {
         flex: 0 0 auto;
         padding: 0 4px;
-        border: 1px solid var(--field-line);
+        border: 1px solid currentColor;
         border-radius: 4px;
-        color: var(--muted);
+        color: var(--accent-ink);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         line-height: 15px;
         text-decoration: none;
       }
-      a.peer-li:hover { color: var(--accent); border-color: currentColor; }
+      a.peer-li:hover { background: var(--accent-wash); }
+      a.peer-li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
       .peer-meta {
         display: flex;
         flex-wrap: wrap;
@@ -991,12 +1006,12 @@
       }
       .peer-title { color: var(--ink); }
       .peer-when { cursor: help; }
-      .peer-owner .peer-who { font-weight: 600; color: var(--ink); }
+      .peer-owner .peer-who { font-weight: var(--fw-value); color: var(--ink); }
 
       /* ---- Wiza section ------------------------------------------------- */
       .wiza-sub + .wiza-sub {
         margin-top: 6px;
-        border-top: 1px solid var(--line);
+        border-top: 1px solid var(--rule);
         padding-top: 6px;
       }
       .wiza-head {
@@ -1008,7 +1023,7 @@
       }
       .wiza-label {
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--muted);
@@ -1020,11 +1035,11 @@
         margin-top: 4px;
         font-size: 12px;
         line-height: 1.35;
-        font-weight: 600;
+        font-weight: var(--fw-value);
       }
 
       /* Deal rows */
-      .deal + .deal { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+      .deal + .deal { margin-top: 8px; border-top: 1px solid var(--rule); padding-top: 8px; }
       .deal-meta {
         display: flex;
         flex-wrap: wrap;
@@ -1033,7 +1048,7 @@
         font-size: 12px;
         color: var(--muted);
       }
-      .deal-amount { font-weight: 700; color: var(--ink); }
+      .deal-amount { font-weight: var(--fw-head); color: var(--ink); }
       /* Why a closed deal ended — the re-approach talk track (Phase 8). Only
          ever rendered on closed rows, and only when the portal says something. */
       .deal-outcome {
@@ -1043,7 +1058,7 @@
         overflow-wrap: anywhere;
       }
       .deal-outcome[title] { cursor: help; }
-      .deal-outcome.lost { color: var(--danger-fg); }
+      .deal-outcome.lost { color: var(--tone-negative-fg); }
 
       /* ---- Activity tabs + scroller ------------------------------------- */
       /* The bar scrolls sideways instead of wrapping: at 320px six tabs don't
@@ -1056,7 +1071,7 @@
         overflow-x: auto;
         scrollbar-width: none;
         padding-bottom: 4px;
-        border-bottom: 1px solid var(--line);
+        border-bottom: 1px solid var(--rule);
       }
       .tabs::-webkit-scrollbar { display: none; }
       .tab {
@@ -1069,16 +1084,19 @@
         box-shadow: none;
         color: var(--muted);
         font-size: 11px;
-        font-weight: 600;
+        font-weight: var(--fw-value);
         white-space: nowrap;
       }
-      .tab:hover:not([aria-disabled="true"]) { background: var(--line); color: var(--ink); }
+      .tab:hover:not([aria-disabled="true"]) { background: var(--accent-wash); color: var(--accent-ink); }
+      /* Decoration, not state: the selected tab is the purple scale. The
+         label is --accent-ink, because the accent violet on the tint is 3.76:1
+         and this is 11px text. */
       .tab[aria-selected="true"] {
-        background: var(--accent-soft);
-        color: var(--accent);
+        background: var(--accent-tint);
+        color: var(--accent-ink);
       }
       .tab[aria-disabled="true"] { color: var(--disabled-fg); cursor: default; }
-      .tab-count { font-weight: 700; margin-left: 4px; }
+      .tab-count { font-weight: var(--fw-head); margin-left: 4px; }
       .tab:focus-visible, .act-list:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 1px;
@@ -1100,7 +1118,7 @@
          Line 1 = glyph · title · relative time (right-aligned).
          Line 2 = outcome/status, plus the owner only when it just changed. */
       .act { display: flex; gap: 6px; }
-      .act + .act { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 5px; }
+      .act + .act { margin-top: 5px; border-top: 1px solid var(--rule); padding-top: 5px; }
       .act-icon {
         flex: 0 0 auto;
         width: 14px;
@@ -1118,7 +1136,7 @@
       }
       .act-summary {
         font-size: 12px;
-        font-weight: 500;
+        font-weight: var(--fw-body);
         line-height: 1.35;
         min-width: 0;
         overflow-wrap: anywhere;
@@ -1143,14 +1161,14 @@
         color: var(--muted);
         overflow-wrap: anywhere;
       }
-      .act-detail .act-owner { font-weight: 600; }
+      .act-detail .act-owner { font-weight: var(--fw-value); }
 
       /* Loading skeletons — per section, so a slow Activity fetch doesn't hide
          a Contact card that already arrived. */
       .skel {
         height: 11px;
         border-radius: 4px;
-        background: var(--line);
+        background: var(--accent-soft);
         animation: pulse 1.2s ease-in-out infinite;
       }
       .skel.wide { width: 100%; }
@@ -1184,6 +1202,11 @@
         line-height: 1.45;
       }
       #notes-text:disabled { background: var(--surface); color: var(--muted); }
+      /* The one field that was still taking Chrome's own blue focus ring. */
+      #notes-text:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 0;
+      }
       .notes-meta {
         display: flex;
         align-items: baseline;
@@ -1193,7 +1216,7 @@
         font-size: 11px;
         color: var(--muted);
       }
-      .notes-meta .over { color: var(--danger-fg); font-weight: 700; }
+      .notes-meta .over { color: var(--tone-negative-fg); font-weight: var(--fw-head); }
       #notes-sync { margin-top: 7px; padding: 7px; }
       #notes-saved { margin-top: 6px; font-size: 12px; }
       #notes-saved summary { color: var(--muted); cursor: pointer; }
@@ -1211,7 +1234,7 @@
       #notes-saved-body .saved-label {
         display: block;
         font-size: 10px;
-        font-weight: 700;
+        font-weight: var(--fw-head);
         letter-spacing: 0.05em;
         text-transform: uppercase;
         margin-bottom: 2px;
@@ -1220,10 +1243,50 @@
       #notes-blockers { font-size: 11px; color: var(--muted); margin: 5px 0 0; }
       #notes-blockers:empty { display: none; }
       #notes-result { font-size: 12px; margin: 6px 0 0; overflow-wrap: anywhere; }
-      #notes-result.ok { color: var(--green-fg); font-weight: 600; }
-      #notes-result.err { color: var(--danger-fg); font-weight: 600; }
+      #notes-result.ok { color: var(--tone-positive-fg); font-weight: var(--fw-value); }
+      #notes-result.err { color: var(--tone-negative-fg); font-weight: var(--fw-value); }
       #notes-result a { color: inherit; }
-      .pill.synced { background: var(--green-bg); color: var(--green-fg); }
+      .pill.synced { background: var(--tone-positive-bg); color: var(--tone-positive-fg); }
+      /* ===== Tone classes ==================================================
+         The five tone names the tone helper in hubspot-data.js returns. Put
+         `tone-<name>` on a .pill for a filled badge, or on any text node for a
+         coloured line — nothing here sets layout, so it composes with the
+         existing pill and text rules. These exist so a renderer can hand a
+         tone NAME straight to the DOM and never touch a colour value.
+
+         Reserved for meaning: a delta, a status, an alert. Decoration uses the
+         purple scale.
+
+         LAST in the file on purpose. A tone class is applied on top of whatever
+         a node already is, and several of those bases set a colour of their own
+         at the same specificity (.pill, .crm-note, .fact-line) — so the tone
+         has to be the later rule to win without an !important or an id. */
+      .tone-positive { color: var(--tone-positive-fg); }
+      .tone-caution { color: var(--tone-caution-fg); }
+      .tone-negative { color: var(--tone-negative-fg); }
+      .tone-info { color: var(--tone-info-fg); }
+      .tone-neutral { color: var(--tone-neutral-fg); }
+      .pill.tone-positive {
+        background: var(--tone-positive-bg);
+        color: var(--tone-positive-fg);
+      }
+      .pill.tone-caution {
+        background: var(--tone-caution-bg);
+        color: var(--tone-caution-fg);
+      }
+      .pill.tone-negative {
+        background: var(--tone-negative-bg);
+        color: var(--tone-negative-fg);
+      }
+      .pill.tone-info {
+        background: var(--tone-info-bg);
+        color: var(--tone-info-fg);
+      }
+      .pill.tone-neutral {
+        background: var(--tone-neutral-bg);
+        color: var(--tone-neutral-fg);
+        border: 1px solid var(--line);
+      }
     </style>
   </head>
   <body>
@@ -1231,12 +1294,14 @@
       <span class="dot"></span>
       <h1>Dialer Helper Pro</h1>
       <span class="spacer"></span>
-      <!-- Connection state, always visible. The controls behind it live in the
-           popover below; this is the at-a-glance signal. -->
-      <span class="hs-dot off" id="hs-dot" role="img" aria-label="HubSpot not connected"></span>
+      <!-- The gear. Static inline SVG: MV3's CSP rules out a remote asset, there
+           is no icon pipeline in this extension, and the ⚙ glyph this replaces
+           rendered too small and too light to find. Never injected from JS —
+           it is markup, so no innerHTML is involved. aria-hidden because the
+           button already carries the accessible name. -->
       <button
         type="button"
-        class="hdr-btn icon"
+        class="gear"
         id="settings-btn"
         aria-label="Settings"
         title="Settings"
@@ -1244,7 +1309,21 @@
         aria-expanded="false"
         aria-controls="settings-pop"
       >
-        ⚙
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <circle cx="12" cy="12" r="3.2" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+          />
+        </svg>
       </button>
 
       <!-- Settings: refresh + the whole HubSpot connection UI. Anchored to the
@@ -1292,42 +1371,15 @@
           </p>
         </div>
 
-        <!-- Appearance: the panel's own light/dark choice. The markup lives
-             here; the behavior belongs to theme.js, which is loaded in <head>
-             so the saved theme is applied as early as the page can apply it. -->
-        <div class="pop-sec">
-          <div class="pop-sec-head">
-            <span class="pop-label" id="setting-theme-label">Appearance</span>
-          </div>
-          <div class="pop-radios" role="radiogroup" aria-labelledby="setting-theme-label">
-            <label class="pop-radio" for="setting-theme-system">
-              <input
-                type="radio"
-                name="setting-theme"
-                id="setting-theme-system"
-                value="system"
-                checked
-              />
-              <span>System</span>
-            </label>
-            <label class="pop-radio" for="setting-theme-light">
-              <input type="radio" name="setting-theme" id="setting-theme-light" value="light" />
-              <span>Light</span>
-            </label>
-            <label class="pop-radio" for="setting-theme-dark">
-              <input type="radio" name="setting-theme" id="setting-theme-dark" value="dark" />
-              <span>Dark</span>
-            </label>
-          </div>
-          <p class="pop-note" id="setting-theme-note">
-            System follows your computer's light or dark setting.
-          </p>
-        </div>
-
+        <!-- HubSpot. With the header's connection dot gone this is the panel's
+             one explicit statement of connection state, so the pill is a
+             full-size tone badge with its own dot (see .pill.conn) rather than a
+             10px label. The CRM sections say the same thing in prose when they
+             have nothing to show. -->
         <div class="pop-sec">
           <div class="pop-sec-head">
             <span class="pop-label">HubSpot</span>
-            <span class="pill off" id="hs-pill">Not connected</span>
+            <span class="pill conn tone-caution" id="hs-pill">Not connected</span>
           </div>
           <p class="hint" id="hs-hint">
             Connect your HubSpot account to see CRM context here.

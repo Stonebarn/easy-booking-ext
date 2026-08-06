@@ -6,35 +6,151 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed — the side panel wears Wiza's colours, and you can pick light or dark
+### Fixed — the tech stack reads like English again
 
-A re-theme, not a redesign: no layout, spacing or section order changed, and the
-density pass's heights are untouched (**1,210px at 320px, 1,093px at 580px**, same
-to the pixel in both themes).
+`web_technologies` holds HubSpot *enum* values, so the panel was printing them raw:
+`google_analytics`, `hubspot_crm`, `salesforce_crm`. Every value now goes through a
+label pass — separators become spaces, words are Title Cased, and a lookup table
+keeps vendor casing the way the vendor writes it (**HubSpot**, not Hubspot;
+**ZoomInfo**, **LeadIQ**, **Apollo.io**, **Seamless.AI**, **jQuery**, **reCAPTCHA**,
+**PostgreSQL**, **Node.js**, **X (Twitter)**, ~150 entries). Matching is per *run of
+words*, so one entry per vendor fixes every compound it appears in: `hubspot` →
+HubSpot covers `hubspot_crm` and `hubspot_forms`, and `crm` → CRM covers every
+`*_crm`. Unknown values still Title Case instead of breaking, and a value that is
+only punctuation is dropped rather than rendered as a stray delimiter.
+See **Configuration → `TECH_LABELS`** for how to add a vendor.
 
-- **Wiza's palette, from wiza.co.** `#0C3380` primary navy carries links, accent
-  text, focus rings and every filled button; `#310C80` violet appears exactly
-  once, on the lifecycle pill; `#1A1B25` is body text and `#615E6E` muted text in
-  light mode, over white and `#E6E2E3`-family grounds. The panel header is a navy
-  bar in both themes. The old lavender `#9371F0` — which appears nowhere in
-  Wiza's brand — is gone.
-- **Light mode you can choose.** **gear → Appearance → System / Light / Dark**.
-  **System** stays the default and follows your computer; Light and Dark pin the
-  panel either way. Saved per rep in `eb:settings.theme`, applied to every open
-  panel window at once, and applied from `<head>` on load so an explicit choice
-  does not flash the other theme first.
-- **Contrast is now checked, not eyeballed.** Every text/background pair the panel
-  renders meets WCAG AA in both themes (4.5:1 body, 3:1 large text and control
-  edges), including three that did not before: the armed **Save** button's label
-  on its amber fill (white-on-bright-amber was 1.9:1 in dark mode — the label is
-  now dark there), the textarea and phone-editor borders, and the `@` in
-  "title @ company" (an `opacity: 0.55` that computed to 2.6:1).
-- Native scrollbars, select popups and focus rings now match the panel's theme
-  (`color-scheme`), instead of a light scrollbar on a dark panel.
-- The header wordmark drops the redundant **"· from dialer"** suffix; the
-  connection dots and the gear are unchanged. (The on-page scheduler banner still
-  carries the old suffix and its near-black bar — `content-scheduler.js` was out
-  of scope for this pass.)
+### Added — competitors in the tech stack are flagged, and never hidden
+
+Wiza sells B2B contact data, so a competitor already in the account's stack is the
+most useful thing in that row: it makes the call a displacement conversation
+instead of a cold pitch. Each tech item now carries `isCompetitor`, matched
+case-insensitively against `CONFIG.COMPETITORS` (Apollo.io, ZoomInfo, LeadIQ,
+People Data Labs, Lusha, Cognism, Seamless.AI, RocketReach, Hunter.io, Clearbit,
+UpLead, Snov.io, Kaspr, ContactOut, Datanyze, SalesIntel, Adapt.io, Prospeo,
+Findymail, Dropcontact, Clay, Amplemarket) with **word-boundary** semantics — the
+entry has to be a whole word of the value, so `Clearbit` does not match
+`clearbitmap`. HubSpot, Salesforce, Outreach, Salesloft, Nooks, Gong, Intercom,
+Segment, Mixpanel, Zendesk and Marketo are integrations and are listed as
+`NON_COMPETITORS`, which can never be flagged.
+
+Flagged items are sorted to the front of the row and the suggested visible count
+grows to fit them, so **a competitor is never the thing hidden behind "+N more"** —
+surfacing one is the whole reason the row earns its space.
+
+- **Known ambiguity:** a bare `apollo` may be Apollo GraphQL (a framework) rather
+  than Apollo.io. It is flagged anyway — Apollo.io dominates this portal's data,
+  and a missed displacement opening costs more than one wrong pill. The explicit
+  GraphQL spellings are excepted, and deleting the single `"apollo"` line from
+  `CONFIG.COMPETITORS` turns the bare match off.
+
+### Added — every ownership row says whether the account is yours
+
+`ownership` now returns **all three** owner rows — Outbound owner, Company owner,
+Contact owner — on every render, each as
+`{ label, name, ownerId, isMine, missing, unresolved }`. Rows used to be omitted
+when the property was unset, which made "nobody owns this" indistinguishable from
+"the section didn't load"; an unset owner is now an explicit `missing: true` with a
+null name. The pre-existing rule holds: a numeric owner ID that the owner-name
+cache cannot resolve shows **no name**, never the bare number.
+
+`isMine` is three-state, and the third state is the point:
+
+- `true` — the connected rep's own owner ID
+- `false` — a different owner, and we can name them
+- `null` — **we cannot say**, and the renderer must not flag it. No connected owner
+  ID, no owner ID on the record (a property holding a *name* is not comparable to
+  an ID), or an owner ID that resolved to no name. Falsely telling a rep an account
+  isn't theirs is worse than saying nothing.
+
+Colleague rows in **Others at this account** use the same helper and the same
+semantics.
+
+### Added — semantic tones for status pills
+
+`EB.hubspotData.status.tone(kind, value)` maps a datapoint kind plus a raw CRM
+value to one of five tone **names** — `positive`, `caution`, `negative`, `neutral`,
+`info` — and `status.pill(kind, value)` returns `{ kind, slug, label, tone }` with
+the humanized label alongside it. Covered: account grade (A/B → positive, C →
+caution, D/F → negative), Company Status, contact lifecycle stage, `wiza_status`,
+`icp_fit`, deal state (open / closed-won / closed-lost, from a deal row or a slug)
+and sequence enrolment. Unmapped kinds and values are `neutral` — a status nobody
+mapped is not evidence of anything, and a confidently wrong colour is worse than
+grey. No colour appears anywhere in `hubspot-data.js`; the theme owns those.
+
+All of the above is pure and covered by the view-model harness (2,201 assertions),
+which runs `hubspot-data.js` in `node:vm` with no DOM and no network.
+`CACHE_VERSION` is bumped to `11` for the new bundle shape.
+
+### Changed — the side panel is on brand, and light only
+
+A re-theme, not a redesign: no section moved, and the restyle itself does not
+change the panel's height (measured against the same page rendered with the
+previous type: **1,270px at 320px / 1,092px at 580px**, a −0.24% / −0.27%
+difference that comes entirely from one typography fix, below). This **replaces**
+the navy palette of the previous pass, which was derived by scraping `wiza.co`
+rather than taken from the brand sheet.
+
+- **The brand palette, verbatim.** White page, `#F6F8FA` cards, `#DFE1E6`
+  borders, `#26114A` for every heading and body line, `#615E6E` muted, and
+  `#7E43FF` violet as the primary accent — links, filled buttons, focus rings —
+  backed by the supporting purple scale (`#9371F0`, `#4C24A3`, `#B5AEFF`,
+  `#E4D8FD`, `#F5F0FF`). `#0C3380`/`#123769`/`#091948` navy is gone from the
+  panel *and* from the on-page scheduler banner, which was still a near-black
+  bar. Every value is declared exactly once, in one `:root` block; no rule below
+  it contains a colour literal.
+- **Dark mode is gone, not hidden.** No dark token set, no
+  `@media (prefers-color-scheme: dark)`, no `data-theme`, and no
+  System/Light/Dark control — `theme.js` and the `eb:settings.theme` key are
+  deleted. `color-scheme: light` keeps Chrome's own scrollbars, `<select>` popups
+  and autofill light as well, so the panel is fully light with the OS in dark
+  mode (asserted at both widths under both OS preferences). A `theme` value left
+  in a rep's `eb:settings` from the old build is ignored; the auto-sync toggle is
+  unaffected and still round-trips.
+- **Semantic colour means something now.** The four semantic pairs — positive
+  `#1E7F5C`/`#E3F4EC`, caution `#9B6D27`/`#FDEAB9`, negative `#EA384C`/`#FCE6EA`,
+  informational `#3671A8`/`#EBF2FC` — are reserved for state: lifecycle stage,
+  company and Wiza status, sequence enrolment, deal open/won/lost, a stale
+  capture, error and success lines, and the armed confirm step on a destructive
+  write. Everything decorative — counts, the selected tab, hovers, skeletons, the
+  `·` between facts — draws from the purple scale instead. The five tone names
+  `hubspot-data.js` returns (`positive` / `caution` / `negative` / `neutral` /
+  `info`) each have a matching `tone-*` CSS class, so a renderer hands over a
+  tone name and never a colour.
+- **A gear you can actually see.** The header's `⚙` glyph — small, low-contrast
+  and platform-dependent — is now an inline SVG wheel: a 30×30 hit box round a
+  20px glyph, ink stroke, `#F5F0FF` on hover and `#E4D8FD` while the popover is
+  open, with a visible focus ring. Static markup, not injected, and no remote
+  asset (MV3 CSP). Its ARIA contract is unchanged.
+- **The connection dot beside the gear is removed.** It was 7px of colour with no
+  label. Connection state now reads as a full status badge in the settings
+  popover — **Connected** / **Connecting…** / **Not connected** / **Setup
+  needed**, on the matching tone, with its own dot — and the CRM sections still
+  say so in prose with a **Connect** link. The dot to the left of the wordmark is
+  a different signal (prospect captured) and stays.
+- **Header:** a white bar with a hairline under it instead of a coloured slab.
+- **Type: Inter, four weights, one per role.** Inter with a platform-UI fallback
+  and no webfont request (CSP, and the panel must work offline). **700** for
+  structural ALL-CAPS labels, record titles and in-line emphasis; **600** for
+  values, names, links and buttons; **500** for caption lines; **400** for
+  running text. Ad-hoc weights are gone. One fix came out of this: a link with no
+  size context was falling back to the 16px UA default, which made "Company
+  LinkedIn" the largest type on a 320px panel.
+- **Contrast is a gate.** Every text/background pair the panel can paint is
+  measured on the painted pixels and meets WCAG AA (4.5:1 body and small text,
+  3:1 large text, control edges and graphical marks) — 55 distinct pairs, at both
+  widths, under both OS preferences.
+  - **Three brand pairings do not clear AA at pill type sizes** and are called
+    out where they are declared: `#EA384C` on `#FCE6EA` is 3.41:1, `#9B6D27` on
+    `#FDEAB9` is 3.83:1, `#1E7F5C` on `#E3F4EC` is 4.34:1. Each tone therefore
+    carries a slightly darkened value for **text** (`#C22E3F`, `#8C6223`,
+    `#1D7B59`) while the brand value stays the tone's fill and graphical mark —
+    the same split the accent already uses (`#7E43FF` fills, `#4C24A3` text on a
+    tint).
+  - **`#9491A1`, the sheet's caption grey, carries no text.** It is 3.08:1 on
+    white and 2.89:1 on a card fill, below AA for small text and below even the
+    3:1 non-text floor inside a card. Caption text uses `#615E6E` (5.9–6.3:1);
+    `#9491A1` is left to control edges and the idle dot, where 3:1 is the bar.
 
 ### Changed — density pass on the side panel (no data lost)
 

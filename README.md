@@ -176,20 +176,77 @@ header:
   popover so you're looking at the sections it just reloaded.
 - **Notes** — **Auto-sync saved notes to HubSpot** (on by default). See
   [auto-sync on save](#auto-sync-on-save).
-- **Appearance** — **System / Light / Dark**. **System** (the default) follows
-  your computer's light-or-dark setting; **Light** and **Dark** pin the panel
-  regardless of it. Per rep, remembered across restarts (`eb:settings` in
-  `chrome.storage.local`), and applied to every panel window you have open.
-- **HubSpot** — **Connect HubSpot**, or, once connected, your HubSpot email and a
-  **Disconnect** link. Connection problems are reported here.
+- **HubSpot** — a status badge saying **Connected** / **Not connected** /
+  **Connecting…** / **Setup needed**, then **Connect HubSpot**, or, once
+  connected, your HubSpot email and a **Disconnect** link. Connection problems
+  are reported here.
 
 The popover closes on **Escape** or a click anywhere outside it, and while it's
 open **Tab** cycles inside it.
 
-Next to the gear is a small **connection dot**: **green** when HubSpot is
-connected, **amber** when it isn't. Hover it for the detail ("HubSpot connected as
-you@wiza.com"). Signed-out CRM sections also carry a **Connect** link straight to
-the popover.
+There is no Appearance control: the panel is **light only** (see
+[Look and feel](#look-and-feel)).
+
+**Where connection state is shown.** The **HubSpot** badge in this popover is the
+panel's explicit statement of it — one click from anywhere, coloured by state and
+carrying its own dot. Signed-out CRM sections say so in prose and carry a
+**Connect** link straight to the popover. (There used to be a second 7px dot
+beside the gear; it is gone. The dot to the *left of the wordmark* is unrelated —
+that one is **capture** status: grey until a prospect is loaded in the dialer,
+green once one is.)
+
+### Look and feel
+
+The panel is **light only, always** — it does not follow your computer's dark
+mode, and there is no theme switch. `color-scheme: light` keeps Chrome's own
+scrollbars, `<select>` popups and autofill light too, so a rep running macOS or
+Windows in dark mode still gets a fully light panel rather than a half-converted
+one.
+
+The palette is the brand sheet, and every value is declared exactly once, in the
+`:root` block at the top of `sidepanel.html`:
+
+| Role | Value |
+| --- | --- |
+| Page | `#FFFFFF` |
+| Cards, section fills | `#F6F8FA` |
+| Borders | `#DFE1E6`, inner gridlines `#ECEFF3` |
+| Headings and body | `#26114A` |
+| Muted / secondary | `#615E6E` |
+| Primary accent | `#7E43FF` — links, filled buttons, focus rings |
+| Purple scale | `#9371F0` `#4C24A3` `#B5AEFF` `#E4D8FD` `#F5F0FF` |
+| Positive | `#1E7F5C` on `#E3F4EC` |
+| Caution | `#9B6D27` on `#FDEAB9` |
+| Negative | `#EA384C` on `#FCE6EA` |
+| Informational | `#3671A8` on `#EBF2FC` |
+
+Two rules govern which of those a thing gets:
+
+1. **The four semantic colours mean something.** They are only ever used for
+   state — a lifecycle stage, a deal outcome, sequence enrolment, a stale
+   capture, an error, the armed confirm step on a destructive write. A count, a
+   selected tab, a hover, a skeleton or a separator is decoration and takes the
+   **purple scale** instead.
+2. **Contrast is a gate, not a preference.** Every text/background pair the panel
+   can paint is measured on the painted pixels and meets WCAG AA — 4.5:1 for body
+   and small text, 3:1 for large text, control edges and graphical marks. Where
+   the brand sheet's own pairing does not clear that bar, the fill keeps the brand
+   value and the **text** takes a slightly darker one; the three cases are
+   commented in `sidepanel.html` next to the tokens. `#9491A1` (the sheet's
+   caption grey) carries no text at all here — it is 3.08:1 on white and 2.89:1
+   on a card — so caption text uses `#615E6E` and `#9491A1` is left to do control
+   edges and the idle dot, where 3:1 is the bar.
+
+Type is **Inter**, falling back to the platform UI face; there is no webfont
+request (MV3's CSP would block it, and the panel has to work offline). Four
+weights, one per role, and nothing else: **700** structural ALL-CAPS labels,
+record titles and in-line emphasis; **600** values, names, links and buttons;
+**500** caption lines; **400** running text.
+
+For a renderer, the five tone names `hubspot-data.js` returns
+(`positive` / `caution` / `negative` / `neutral` / `info`) each have a matching
+CSS class — `tone-positive`, `tone-caution`, and so on — that works on a `.pill`
+or on any text node. Hand it the tone name; never a colour.
 
 #### Connecting HubSpot
 
@@ -480,7 +537,7 @@ email does not disturb the booking tab.
 | `ACTIVITY_PER_TYPE_LIMIT` | Rows kept **per engagement type** (newest first) — what one Activity tab can hold | `25` |
 | `BATCH_MAX` | Objects per `batch/read` and IDs per association read (HubSpot's own ceiling) | `100` |
 | `RETRY_AFTER_FALLBACK_S` | Wait used when a `429` carries no usable `Retry-After` header | `10` |
-| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `9` |
+| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `11` |
 | `NOTE_PREVIEW_CHARS` | Characters of a note body kept for its one-line activity row | `120` |
 | `SNIPPET_CHARS` | Characters of the company blurb shown inline in **Account context** (the full text becomes the row's hover) | `200` |
 | `REASONING_CHARS` | Ceiling on the ICP rationale kept for its hover title | `400` |
@@ -494,7 +551,53 @@ email does not disturb the booking tab.
 | `DEAL_PROPERTIES` | Deal properties requested | dealname, dealstage, pipeline, amount, closedate, hubspot_owner_id, *closed_lost_reason, closed_loss_category, closed_lost_category\_\_secondary\_, hs_is_closed_lost, closed_won_reason* |
 | `ACTIVITY_TYPES` | The five engagement types, their display + tab labels and per-type properties (every type also asks for `hubspot_owner_id` and `hs_created_by`, which is how rows get attributed) | calls, emails, meetings, notes, tasks |
 | `FREE_EMAIL_DOMAINS` | Domains the company-by-domain fallback refuses to search on (a `gmail.com` search matches something irrelevant) | gmail, outlook, yahoo, … |
+| `TECH_LABELS` | Slug → the exact casing to print for a `web_technologies` value. See **Tech-stack labels** below | ~150 vendors + acronyms |
+| `TECH_LABEL_MAX_WORDS` | Longest run of words looked up in `TECH_LABELS` at once (the longest entry is 3 words) | `4` |
+| `COMPETITORS` | Slugs flagged as Wiza competitors in the tech row. See **Competitors** below | Apollo.io, ZoomInfo, LeadIQ, People Data Labs, Lusha, Cognism, Seamless.AI, RocketReach, Hunter.io, Clearbit, UpLead, Snov.io, Kaspr, ContactOut, Datanyze, SalesIntel, Adapt.io, Prospeo, Findymail, Dropcontact, Clay, Amplemarket |
+| `COMPETITOR_EXCEPTIONS` | Exact slugs that match a `COMPETITORS` entry but are not the competitor | `apollo_graphql`, `apollo_server`, `apollo_client`, `apollo_federation` |
+| `NON_COMPETITORS` | Integrations and partners that must never be flagged. A guard with a name: if a future `COMPETITORS` entry ever collides with one of these, the partner wins | HubSpot, Salesforce, Outreach, Salesloft, Nooks, Gong, Intercom, Segment, Mixpanel, Zendesk, Marketo |
+| `STATUS_TONES` | Datapoint kind → value slug → tone **name** (`positive` / `caution` / `negative` / `neutral` / `info`) for status pills. Never a colour — the theme owns those. Unmapped kind or value is `neutral` | grade, Company Status, contact lifecycle stage, `wiza_status`, `icp_fit`, deal state, sequence enrolment |
+| `STATUS_KINDS` | Aliases → the `STATUS_TONES` key they mean, so a caller can pass either the HubSpot property name or the panel's own word for it | `company_status` → `company_lifecycle_stage`, `grade` → `account_grade_v1`, … |
 | `CURRENCY` / `LOCALE` | Currency and locale used to format deal amounts and dates | `USD` / `en-US` |
+
+**Tech-stack labels.** `web_technologies` holds HubSpot *enum* values, so it
+arrives as snake_case slugs (`google_analytics`, `hubspot_crm`) — which the panel
+used to print with the underscores still in. Each value now goes through
+`EB.hubspotData.tech.label()`: slug it (lowercase, runs of non-alphanumerics →
+`_`), look the whole slug up in `TECH_LABELS`, else walk the words left to right
+matching the **longest** run that has an entry, else Title Case the word. Because
+matching is per-run, one entry per vendor covers every compound the portal spells
+it in — `hubspot` → `HubSpot` fixes `hubspot`, `hubspot_crm` and `hubspot_forms`,
+and the acronym entries (`crm` → `CRM`, `api` → `API`) fix every `*_crm` at once.
+
+> **To add a vendor:** one entry keyed on its slug (lowercase, words joined by
+> `_`), valued with the exact casing to print — `zoominfo: "ZoomInfo"`. Alternate
+> spellings get their own key pointing at the same label. Unknown values keep
+> working; they just Title Case. A word that is *already* mixed-case (`iPhone`) is
+> left alone rather than mangled.
+
+**Competitors.** Wiza sells B2B contact data, so a competitor already in the
+account's stack is the most useful thing in the tech row — it turns a cold pitch
+into a displacement conversation. `COMPETITORS` is matched case-insensitively
+against each value's slug with **word-boundary** semantics: the entry must appear
+as a contiguous run of the slug's `_`-separated words (plus an exact match on the
+separator-collapsed form, so `zoom_info` and `snovio` are caught too). Plain
+substring matching is deliberately not used — it would flag `Clearbit` inside
+`clearbitmap`. Flagged items are also pulled into the visible set, so a competitor
+can never be the thing hidden behind the tech row's **MORE** toggle.
+
+> **To add one:** add its slug, plus any alternate spelling the portal uses. **To
+> stop flagging one:** delete its entries, or add the exact value to
+> `COMPETITOR_EXCEPTIONS` when only that spelling is innocent.
+
+> **Known ambiguity — bare `apollo`.** A bare `apollo` in `web_technologies` may
+> be **Apollo GraphQL** (a web framework, not a competitor) rather than
+> **Apollo.io**. It is flagged as a competitor today, because Apollo.io dominates
+> this portal's data and a missed displacement opening costs more than a rep
+> glancing at one wrong pill. The explicit GraphQL spellings (`apollo_graphql`,
+> `apollo_server`, `apollo_client`, `apollo_federation`) are already excepted. To
+> stop flagging the bare value, delete the single `"apollo"` line from
+> `CONFIG.COMPETITORS` — `apollo_io` keeps working on its own.
 
 **`hubspot-config.js` → `EB.hubspotConfig`:**
 
@@ -556,7 +659,7 @@ easy-booking-ext/
 ├── background.js          # service worker: toolbar badge + side-panel-on-click
 ├── content-nooks.js       # captures prospect email + timezone, identity + HubSpot record IDs, call notes
 ├── content-scheduler.js   # fills email, selects timezone, shows on-page panel
-├── sidepanel.html         # side panel UI (prospect, settings popover, CRM sections, notes)
+├── sidepanel.html         # side panel UI + the whole palette/type token block (light only)
 ├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", settings popover, CRM rendering, notes sync
 ├── hubspot-config.js      # HubSpot OAuth app config (client id, scopes — no secret)
 ├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
@@ -778,8 +881,10 @@ the next time. No other user's identity is ever sent.
   and notes do live in `chrome.storage.local` (`eb:currentProspect`,
   `eb:prospectContext`, `eb:notes`, `eb:notes:lastSynced`) and are overwritten or
   cleared as the prospect changes. `eb:settings` holds the rep's own preferences
-  (the notes auto-sync toggle and the light/dark choice) and contains no
-  prospect data.
+  (currently just the notes auto-sync toggle) and contains no prospect data. A
+  profile that still has a `theme` key from an earlier build is harmless — it is
+  ignored, and writes to `eb:settings` are read-modify-write so nothing else in
+  the object is dropped.
 
 ### Revoking access (offboarding)
 
