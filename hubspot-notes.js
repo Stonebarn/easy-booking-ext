@@ -137,8 +137,17 @@
       hs_timestamp: new Date(opts.timestamp || Date.now()).toISOString(),
       hs_note_body: body,
     };
+    // Attribution. Two different HubSpot IDs, and mixing them up silently
+    // mis-attributes the note, so each is validated and set independently:
+    //   hubspot_owner_id — the SDR's *owner* ID ("Activity assigned to")
+    //   hs_created_by    — the SDR's *user* ID ("Activity created by"), which is
+    //                      a different number entirely
+    // hs_created_by_user_id is deliberately never sent: HubSpot sets it itself
+    // and it stays "No user" for app writes.
     const ownerId = idString(opts.ownerId);
     if (ownerId) properties.hubspot_owner_id = ownerId;
+    const userId = idString(opts.userId);
+    if (userId && !opts.omitCreatedBy) properties.hs_created_by = userId;
 
     return { properties, associations: associationsFor(contactId, companyId) };
   }
@@ -273,8 +282,55 @@
     );
   }
 
+  // --- hs_created_by fallback ----------------------------------------------
+  // Property metadata in the live portal says hs_created_by is writable, but
+  // HubSpot has been known to refuse it for app (OAuth) writes anyway. Losing a
+  // rep's note over an attribution field would be a bad trade, so a rejection
+  // that names *that* property is treated as "send it without" rather than as a
+  // failure — once, and only for that property.
+  //
+  // Every string HubSpot might have put the property name in: the top-level
+  // message, per-error messages, and per-error context values (where the
+  // validation errors carry propertyName / name).
+  function errorText(body) {
+    const parts = [];
+    const push = (value) => {
+      if (typeof value === "string" && value) parts.push(value);
+      else if (Array.isArray(value)) value.forEach(push);
+    };
+    if (!body || typeof body !== "object") return "";
+    push(body.message);
+    push(body.errorType);
+    push(body.category);
+    const errors = Array.isArray(body.errors) ? body.errors : [];
+    errors.forEach((e) => {
+      if (!e || typeof e !== "object") return;
+      push(e.message);
+      push(e.errorType);
+      push(e.name);
+      push(e.propertyName);
+      const context = e.context;
+      if (context && typeof context === "object") Object.keys(context).forEach((k) => push(context[k]));
+    });
+    return parts.join(" | ").toLowerCase();
+  }
+
+  // Word-boundary match so a complaint about hs_created_by_user_id — a property
+  // we never send — can't be mistaken for one about hs_created_by.
+  const CREATED_BY_RE = /hs_created_by(?![a-z0-9_])/;
+  const UNWRITABLE_RE = /read[\s-]?only|not\s+writ|cannot be (?:set|modified|updated)|isn't writable|is not writable|immutable|invalid|unknown|does\s?n[o']t exist|not\s+(?:a\s+)?valid/;
+
+  function isCreatedByRejection(parsed) {
+    const status = Number(parsed && parsed.status);
+    if (!(status >= 400 && status < 500)) return false;
+    const text = errorText(parsed.body);
+    if (!CREATED_BY_RE.test(text)) return false;
+    return UNWRITABLE_RE.test(text);
+  }
+
   // --- Public API ----------------------------------------------------------
-  // createNote({ text, contactId, companyId, ownerId }) -> { noteId, url, ... }
+  // createNote({ text, contactId, companyId, ownerId, userId })
+  //   -> { noteId, url, contactId, companyId, timestamp, attributed, createdByDowngraded }
   async function createNote(input) {
     const opts = input || {};
     const auth = ebGlobal.hubspotAuth;
@@ -282,29 +338,44 @@
       throw noteError("AUTH", "HubSpot isn't connected yet — connect it in Settings, then sync.");
     }
 
-    const payload = buildCreatePayload(opts);
+    let payload = buildCreatePayload(opts);
     const contactId = idString(opts.contactId);
     const companyId = idString(opts.companyId);
 
-    let res;
-    try {
-      res = await auth.apiFetch(CONFIG.NOTES_PATH, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch (e) {
-      if (e && e.code && ERROR_CODES.indexOf(e.code) !== -1) throw e;
-      // eslint-disable-next-line no-console
-      console.debug("[EasyBooking] note request failed before a response:", (e && e.message) || e);
-      throw noteError(
-        "TRANSIENT",
-        "Couldn't reach HubSpot. Check your connection and try again.",
-        { cause: e || null }
-      );
-    }
+    const post = async (bodyPayload) => {
+      let res;
+      try {
+        res = await auth.apiFetch(CONFIG.NOTES_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bodyPayload),
+        });
+      } catch (e) {
+        if (e && e.code && ERROR_CODES.indexOf(e.code) !== -1) throw e;
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] note request failed before a response:", (e && e.message) || e);
+        throw noteError(
+          "TRANSIENT",
+          "Couldn't reach HubSpot. Check your connection and try again.",
+          { cause: e || null }
+        );
+      }
+      return readResponse(res);
+    };
 
-    const parsed = await readResponse(res);
+    let parsed = await post(payload);
+    let createdByDowngraded = false;
+    if (!parsed.ok && payload.properties.hs_created_by && isCreatedByRejection(parsed)) {
+      // Exactly one retry, without the field. Never surfaced to the rep: the
+      // note still lands, only "Activity created by" is left to HubSpot.
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[EasyBooking] HubSpot refused hs_created_by on this note; retrying once without it"
+      );
+      payload = buildCreatePayload({ ...opts, omitCreatedBy: true });
+      createdByDowngraded = true;
+      parsed = await post(payload);
+    }
     if (!parsed.ok) throw errorFromResponse(parsed);
 
     const body = parsed.body || {};
@@ -314,6 +385,8 @@
     console.debug("[EasyBooking] note created in HubSpot:", noteId, {
       contact: contactId,
       company: companyId,
+      owner: payload.properties.hubspot_owner_id || null,
+      createdBy: payload.properties.hs_created_by || null,
     });
     return {
       noteId,
@@ -321,6 +394,8 @@
       contactId,
       companyId,
       timestamp: payload.properties.hs_timestamp,
+      attributed: !!payload.properties.hubspot_owner_id,
+      createdByDowngraded,
     };
   }
 
@@ -377,6 +452,7 @@
     MAX_BODY_CHARS: CONFIG.MAX_BODY_CHARS,
     createNote,
     buildCreatePayload,
+    isCreatedByRejection,
     buildNoteBody,
     escapeHtml,
     timelineUrl,

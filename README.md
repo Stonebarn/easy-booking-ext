@@ -172,6 +172,8 @@ header:
 - **Refresh CRM data** — discards this prospect's cached HubSpot data and
   refetches. (Otherwise it's cached for 5 minutes.) Clicking it closes the
   popover so you're looking at the sections it just reloaded.
+- **Notes** — **Auto-sync saved notes to HubSpot** (on by default). See
+  [auto-sync on save](#auto-sync-on-save).
 - **HubSpot** — **Connect HubSpot**, or, once connected, your HubSpot email and a
   **Disconnect** link. Connection problems are reported here.
 
@@ -253,7 +255,39 @@ matched HubSpot **contact and company** timelines, attributed to you.
 3. Trim or add anything you want — editing here never changes the note in the
    dialer, and your edits are kept even if the dialer draft changes underneath
    you (the panel tells you when that happens).
-4. Click **Sync to HubSpot**.
+4. Click **Sync to HubSpot** — or let **auto-sync** do it (see below).
+
+Every note is attributed to **you**: the HubSpot account you connected shows up
+as the note's *Activity assigned to*, so a rep's notes read as their own work.
+
+#### Auto-sync on save
+
+By default, **saving a note in the dialer syncs it to HubSpot for you** — no
+click needed. The Notes section then shows a passive line: *"Auto-synced to
+contact + company just now ✓"* with an **Open in HubSpot** link, and the pill
+reads **Auto-synced ✓**.
+
+What it will and won't do:
+
+- It only ever syncs a note you actually **saved**. A draft you're still typing
+  is never sent on its own — that's what the button is for. (Clicking **Cancel**
+  in the note dialog is not a save, and never triggers anything.)
+- **One save, one sync.** The same note can't land twice: a save that follows a
+  manual sync of the same text is recognised and skipped, and so is a repeated
+  signal from the dialer.
+- It won't sync a note for a prospect you've since moved off, a prospect with no
+  matched HubSpot record, or when HubSpot isn't connected. In each case the
+  **Sync to HubSpot** button is still there with the reason underneath.
+- If an auto-sync fails, it says so (*"Couldn't auto-sync that note…"*) and hands
+  you back the button with your note text intact. It never retries by itself and
+  never drops a note silently.
+- A note saved while the panel was closed syncs when you next open the panel, as
+  long as it's recent (within 30 minutes).
+
+**Turning it off:** **gear → Notes → "Auto-sync saved notes to HubSpot"**. The
+setting is per rep, remembered across restarts (`eb:settings` in
+`chrome.storage.local`), and with it off the behavior is exactly the manual flow
+described above.
 
 The button only lights up when all three of these are true; when it doesn't, the
 line underneath says exactly what's missing:
@@ -323,6 +357,7 @@ email does not disturb the booking tab.
 | `TICK_MS` | How often the "captured Nm ago" line is refreshed | `30 * 1000` (30 s) |
 | `NOTICE_MS` | How long a transient status message ("Fill triggered.") replaces the age line | `4000` |
 | `CRM_DEBOUNCE_MS` | Coalesces the burst of `eb:prospectContext` writes a prospect change produces into one CRM fetch | `500` |
+| `AUTO_MAX_AGE_MS` | How old a saved note may be and still auto-sync when the panel opens (older ones wait for the button) | `30 * 60 * 1000` (30 min) |
 
 **`hubspot-data.js` → `EB.hubspotData.CONFIG`:**
 
@@ -371,6 +406,9 @@ key `eb:notes`):
 | `TAB_LABELS` | The note scopes, in tab order (map 1:1 to HubSpot contact/company notes) | `["Prospect", "Account"]` |
 | `DEFAULT_TAB` | Assumed scope when the active tab can't be determined | `"prospect"` |
 | `EXCLUDE_TEXTS` | Card chrome to ignore when reading saved notes (exact leaf matches) | `Notes`, `Add note`, `No notes`, tab labels |
+| `SAVE_BUTTON_TEXTS` | Labels that count as the note dialog's **Save** control. A click on one of these is half of a save detection (the other half is the note appearing in the saved list) | `Save`, `Save note`, … |
+| `CANCEL_BUTTON_TEXTS` | Labels that positively **cancel** a pending save. Cancel never produces a save signal | `Cancel`, `Close`, `Discard`, `Delete` |
+| `SAVE_CONFIRM_WINDOW_MS` | How long a clicked Save waits to be confirmed by the saved list before it is dropped (Save shows a progressbar while it persists) | `20000` |
 | `DEBOUNCE_MS` | Debounce for note rescans — longer than the prospect scan's `300`, because this also runs while the rep types | `600` |
 | `MAX_CHARS` | Cap on note text carried in storage | `20000` |
 | `CLEAR_DRAFT_ON_CLOSE` | Drop the draft when the dialog closes. Off by default: after Save the dialog unmounts and the rep still needs that text to sync it. A prospect change clears it either way | `false` |
@@ -475,6 +513,11 @@ DOM**, not the static HTML snapshots:
 | Wiza section says "Not a Wiza user yet" for someone you know signed up | The Wiza properties live on the HubSpot record — if the sync hasn't written `wiza_status` / `signed_up_at` / `wiza_id` to this contact, the panel has nothing to show. Check the contact in HubSpot first. |
 | An activity row has no "by …" attribution | The engagement has no owner, or its owner/creator no longer exists in the portal (a deactivated user). The panel would rather show nothing than a raw ID. |
 | An Activity tab is dimmed | That type has nothing logged for this prospect. |
+| Activity says "No activity found" | Exactly what it says — nothing is logged on that contact in HubSpot. It is not an error state, and it never means your sign-in is broken. |
+| "Can't read activity — your HubSpot permissions don't cover it." | HubSpot refused the read (403). The app's permissions are fixed and there is nothing for a rep to change — tell the team. The console logs the failing engagement type and its status. |
+| A synced note shows "No owner" / "Activity assigned to: No owner" in HubSpot | The owner lookup hadn't succeeded when that note was created. It now resolves itself on the next sync with no reconnect needed — notes created from then on are attributed. Older notes can be re-assigned in HubSpot. |
+| A synced note shows "Created by user ID: No user" | Expected. HubSpot sets that field itself and leaves it empty for app writes; *Activity created by* is the one the extension fills. |
+| A note you saved in the dialer didn't auto-sync | Check the toggle (**gear → Notes**), that HubSpot is connected, and that the prospect matched a HubSpot record — the Notes section names whichever is missing. Drafts never auto-sync, and neither does a note you saved more than 30 minutes before opening the panel. Use **Sync to HubSpot**. |
 
 Open the page's DevTools console and look for `[EasyBooking]` debug logs. The panel
 deliberately shows plain-English errors with the next step to take; the code,
@@ -563,8 +606,18 @@ tab through `chrome.storage.local` and nowhere else. Everything that reaches Hub
 goes to the portal that already holds that prospect's record.
 
 Reads are read-only. **The only write this extension ever makes** is the note
-created when a rep clicks **Sync to HubSpot** — one note on the matched contact and
-company, attributed to that rep.
+created when a rep clicks **Sync to HubSpot**, or when a note they *saved in the
+dialer* is auto-synced (gear → Notes, on by default) — one note on the matched
+contact and company, attributed to that rep.
+
+**Notes are attributed to the connected rep, by design.** Each note carries the
+HubSpot **owner ID** and **user ID** of the account that authorised the
+connection, so it shows up in HubSpot as that rep's activity (*Activity assigned
+to* / *Activity created by*) rather than as an anonymous integration write. The
+owner ID is looked up once from the rep's own HubSpot email
+(`GET /crm/v3/owners/?email=…`) and cached in `eb:hs:auth`; if that lookup ever
+fails, the note is still created — just unattributed — and the lookup is retried
+the next time. No other user's identity is ever sent.
 
 ### Where credentials live
 
@@ -585,7 +638,8 @@ company, attributed to that rep.
   or until the panel closes). It is never written to disk. Captured prospect data
   and notes do live in `chrome.storage.local` (`eb:currentProspect`,
   `eb:prospectContext`, `eb:notes`, `eb:notes:lastSynced`) and are overwritten or
-  cleared as the prospect changes.
+  cleared as the prospect changes. `eb:settings` holds the rep's own preferences
+  (currently just the notes auto-sync toggle) and contains no prospect data.
 
 ### Revoking access (offboarding)
 

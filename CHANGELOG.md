@@ -6,6 +6,76 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — note attribution was blank
+
+- **Notes synced to HubSpot came out with "Activity assigned to: No owner".** The
+  owner lookup ran exactly once, at connect time, as best-effort enrichment — so a
+  single failure there left `ownerId` null in `eb:hs:auth` permanently, and every
+  note that connection ever created was unattributed. `hubspot-auth.js` now
+  resolves the owner ID **lazily and self-healingly** (`ensureOwnerId()`): cached
+  value if present, else one single-flight `GET /crm/v3/owners/?email=…` patched
+  into the stored record. **Existing connections heal themselves on the next
+  sync — no reconnect.** A failure still returns `null` and is logged rather than
+  blocking the write: an unattributed note beats a lost one.
+- Notes now also set **`hs_created_by`** (the rep's HubSpot *user* ID, which is a
+  different number from their owner ID) so *"Activity created by"* is populated.
+  Both IDs are digit-validated independently. If HubSpot refuses `hs_created_by`
+  as read-only for app writes, the note is retried **once** without it and still
+  lands; the downgrade is logged and never shown to the rep.
+  `hs_created_by_user_id` is deliberately never sent — HubSpot owns it and leaves
+  it empty for OAuth-app writes.
+- `getAuthState()` now exposes `userId` alongside `ownerId`.
+
+### Added — auto-sync notes on save
+
+- **Saving a note in the dialer syncs it to HubSpot on its own.**
+  `content-nooks.js` detects a *save transition* in two positive steps and
+  publishes it as a distinct `lastSaved: { text, scope, savedAt, id }` field on
+  `eb:notes`: (1) a click on the note dialog's **Save** control arms a pending
+  save, capturing the draft at that instant; (2) a later scan confirms it only
+  when the dialog is gone **and** the saved list for that scope carries the text
+  (or grew). A **Cancel** click never arms one and actively disarms a pending
+  one, and "the draft disappeared" is never itself treated as a save — Cancel does
+  that too. Unconfirmed saves expire after 20s. One save produces exactly one
+  signal, with an id the panel dedupes on.
+- **The side panel auto-syncs that signal** through the *same* path as the Sync
+  button, so the existing idempotency hash covers both: a save after a manual
+  sync of the same text, or a repeated signal, cannot double-post. The result is a
+  passive, timestamped state in the Notes section — *"Auto-synced to contact +
+  company just now ✓"* with the HubSpot link, and an **Auto-synced ✓** pill.
+- **Guardrails**: only positively-saved notes (never a draft), never when the
+  prospect changed after capture (the bleed guard is honored), never without a
+  matched contact/company, never when signed out, one attempt per save signal (no
+  retry storms), and nothing older than 30 minutes syncs on panel open. Each skip
+  is logged with its reason. On failure the rep sees *"Couldn't auto-sync that
+  note…"* and gets the manual button back with their text intact — a note is
+  never dropped silently.
+- **New setting**: gear → **Notes** → *"Auto-sync saved notes to HubSpot"*,
+  default **on**, persisted per rep in `chrome.storage.local` under `eb:settings`.
+  Off = exactly the previous manual flow.
+
+### Fixed — "sign-in expired" on an empty Activity section
+
+- **A 403 no longer claims the rep's sign-in expired.** `hubspot-data.js` mapped
+  both 401 and 403 to `AUTH`, whose copy is *"HubSpot sign-in expired — connect
+  again in Settings"* — wrong and un-actionable for a permissions problem, since
+  the app's scope set is fixed (HubSpot rejects the granular engagement scope
+  names outright on the current platform version, so engagement reads ride on
+  `crm.objects.contacts.read`). 401 keeps `AUTH`; 403 is now its own `FORBIDDEN`
+  code carrying the status and HubSpot's message **for the console only**, and
+  renders as *"Can't read activity — your HubSpot permissions don't cover it."*
+- **An empty result now always reads as empty.** Activity's genuinely-empty state
+  says **"No activity found"** (was "No activity logged yet") and wins over any
+  section error code; the same rule was applied to Deals ("No open deals"). No
+  section implies an auth problem for what is actually an empty list.
+- **Activity is fetched per engagement type resiliently**: one type the token
+  can't read no longer blanks the four it can, and every per-type failure logs its
+  engagement type and HTTP status so the real cause is visible in the panel
+  console. Only a total failure is reported as a section error. The CRM bundle log
+  now also prints the per-section error codes.
+- Hardened the notes panel's signed-in check: an authoritative `connected: false`
+  can no longer read as signed-in because of a cached owner ID.
+
 ## [0.3.0] - 2026-08-05
 
 The side-panel release: the popup is gone, the panel is the product, and it now

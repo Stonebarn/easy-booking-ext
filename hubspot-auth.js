@@ -240,17 +240,73 @@
     }
   }
 
-  // Owner ID ≠ user ID, and note attribution needs the owner ID. Still done
+  // --- Owner identity ------------------------------------------------------
+  // Owner ID ≠ user ID. Note attribution needs both, for different fields:
+  // hubspot_owner_id wants the *owner* ID (this lookup), hs_created_by wants the
+  // *user* ID (which the exchange already handed us as `userId`). Still done
   // client-side: it is an ordinary CRM read, no secret involved.
   async function lookupOwnerId(email) {
-    const url = `${CFG.API_BASE}/crm/v3/owners/?email=${encodeURIComponent(email)}`;
-    const res = await apiFetch(url);
+    const res = await apiFetch(`/crm/v3/owners/?email=${encodeURIComponent(email)}`);
     if (!res.ok) {
       throw new HubSpotAuthError("API_ERROR", `HTTP ${res.status}`, res.status);
     }
     const body = await res.json();
     const owner = body && Array.isArray(body.results) ? body.results[0] : null;
     return owner ? String(owner.id) : null;
+  }
+
+  // Lazy, self-healing owner resolution.
+  //
+  // The lookup used to run exactly once, at login, as best-effort enrichment —
+  // so a single failure there (offline for a second, a 429, owners scope not yet
+  // granted) left `ownerId` null in eb:hs:auth *forever*, and every note that
+  // connection ever created came out unattributed. That is what happened live.
+  // Resolving on demand instead means an already-broken connection fixes itself
+  // the next time it needs an owner, with no reconnect and nothing for the rep
+  // to do.
+  //
+  // Returns the owner ID, or null when it genuinely can't be resolved — callers
+  // are expected to carry on unattributed rather than lose the write.
+  let inFlightOwnerLookup = null;
+
+  async function ensureOwnerId() {
+    const auth = await readAuth();
+    if (!auth || !auth.refreshToken) {
+      log("owner id requested while not connected");
+      return null;
+    }
+    if (auth.ownerId) return String(auth.ownerId);
+    if (!auth.userEmail) {
+      log("no HubSpot email stored for this connection — cannot resolve an owner id");
+      return null;
+    }
+    // Single-flight, same reason as the token refresh: a prospect change can ask
+    // for this from several places at once, and one CRM round trip is enough.
+    // The assignment is synchronous with the check above, so no second caller
+    // can slip past it.
+    if (inFlightOwnerLookup) return inFlightOwnerLookup;
+    const email = auth.userEmail;
+    const p = (async () => {
+      try {
+        const ownerId = await lookupOwnerId(email);
+        if (!ownerId) {
+          log("HubSpot has no owner record for", email, "— notes will be unattributed");
+          return null;
+        }
+        await patchAuth({ ownerId });
+        log("resolved HubSpot owner id for", email, "->", ownerId);
+        return ownerId;
+      } catch (e) {
+        log("owner lookup failed; notes will be unattributed this time:", (e && e.message) || e);
+        return null;
+      }
+    })();
+    inFlightOwnerLookup = p;
+    try {
+      return await p;
+    } finally {
+      if (inFlightOwnerLookup === p) inFlightOwnerLookup = null;
+    }
   }
 
   async function login() {
@@ -313,15 +369,10 @@
     });
     log("HubSpot connected as", tok.user_email || "(email unknown)");
 
-    if (tok.user_email) {
-      try {
-        const ownerId = await lookupOwnerId(tok.user_email);
-        await patchAuth({ ownerId });
-        log("HubSpot owner id for", tok.user_email, "->", ownerId);
-      } catch (e) {
-        log("owner lookup failed (note attribution will need it later):", e && e.message);
-      }
-    }
+    // Resolve the owner ID now so the first note of the session doesn't pay for
+    // it — but through the same lazy path, which swallows its own failures and
+    // will simply try again when a note needs it.
+    await ensureOwnerId();
 
     return getAuthState();
   }
@@ -446,7 +497,12 @@
       configured: !!(CFG && CFG.isConfigured()),
       userEmail: (auth && auth.userEmail) || null,
       hubId: (auth && auth.hubId) || null,
+      // Two different IDs, deliberately both exposed: ownerId attributes a note
+      // ("Activity assigned to"), userId is what hs_created_by wants
+      // ("Activity created by"). ownerId may legitimately be null here — call
+      // ensureOwnerId() when you actually need it.
       ownerId: (auth && auth.ownerId) || null,
+      userId: (auth && auth.userId) || null,
       connectedAt: (auth && auth.connectedAt) || null,
     };
   }
@@ -456,6 +512,7 @@
     logout,
     getAuthState,
     getAccessToken,
+    ensureOwnerId,
     apiFetch,
     HubSpotAuthError,
     AUTH_KEY,

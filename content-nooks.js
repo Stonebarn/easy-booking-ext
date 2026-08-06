@@ -560,6 +560,15 @@
       "Prospect",
       "Account",
     ],
+    // The note dialog's two controls, matched by their own label text (they carry
+    // no testids — see docs/nooks-dom-recon.md). Exact, trimmed,
+    // case-insensitive. Save ARMS a pending save; Cancel positively disarms one.
+    SAVE_BUTTON_TEXTS: ["Save", "Save note", "Save Note", "Save & close", "Save changes"],
+    CANCEL_BUTTON_TEXTS: ["Cancel", "Close", "Discard", "Delete"],
+    // How long an armed save waits for the saved list to confirm it. Save shows a
+    // progressbar while it persists, so this has to outlast a slow write — but
+    // an unconfirmed save is dropped rather than assumed.
+    SAVE_CONFIRM_WINDOW_MS: 20000,
     // Debounce for note rescans. Deliberately longer than the prospect scan's
     // 300ms: this also runs on every keystroke in the note editor.
     DEBOUNCE_MS: 600,
@@ -730,6 +739,10 @@
     savedAccountNotes: null,
     activeTab: null,
     prospectEmail: null,
+    // The last note the rep positively SAVED in the dialer (see the save-detection
+    // block below). Distinct from `draft` on purpose: the panel may auto-sync this,
+    // and must never auto-sync a draft.
+    lastSaved: null,
   };
   let lastNotesSignature = null;
   let notesEverStored = false;
@@ -751,8 +764,132 @@
     notesState.savedAccountNotes = null;
     notesState.activeTab = null;
     notesState.prospectEmail = email || null;
+    notesState.lastSaved = null;
+    pendingSave = null;
     lastNotesSignature = null;
     return notesState;
+  }
+
+  // --- Save-transition detection ------------------------------------------
+  // The side panel can auto-sync a saved note to HubSpot, so "the rep saved this"
+  // has to be a fact, not a guess. It is detected in two positive steps:
+  //
+  //   1. ARM     — a click lands on the note dialog's Save control (the click
+  //                target is inside the dialog that holds the note editor). The
+  //                draft text is captured at that instant, before React unmounts
+  //                anything.
+  //   2. CONFIRM — a later scan finds the dialog gone AND the saved list for that
+  //                note's scope now carrying the text (or, if the structure-
+  //                agnostic reader can't match it exactly, that bucket having
+  //                changed and grown).
+  //
+  // Both steps are required, which is what keeps Cancel out: a Cancel click never
+  // arms anything (and actively disarms), and "the draft disappeared" is never
+  // itself evidence of a save — Cancel does that too, as does the dialog being
+  // torn down for any other reason. A save that is armed but never confirmed
+  // expires silently inside SAVE_CONFIRM_WINDOW_MS.
+  //
+  // One save produces exactly one signal: confirming clears the pending save and
+  // publishes an id the panel can dedupe on.
+  let pendingSave = null; // { text, scope, armedAt }
+  let saveSeq = 0;
+
+  const collapse = (text) => String(text || "").replace(/\s+/g, " ").trim();
+
+  function isWithin(node, root) {
+    for (let n = node; n && n.nodeType === 1; n = n.parentElement) {
+      if (n === root) return true;
+    }
+    return false;
+  }
+
+  // The clickable thing the rep actually hit — the label may be a <span> inside
+  // the button.
+  function controlAncestor(target, root) {
+    for (let n = target; n && n.nodeType === 1; n = n.parentElement) {
+      const tag = tagOf(n);
+      if (tag === "BUTTON" || tag === "A" || attr(n, "role") === "button") return n;
+      if (n === root) return null;
+    }
+    return null;
+  }
+
+  // "save" | "cancel" | null. Text first, aria-label as the fallback for a
+  // control whose label is an icon.
+  function classifyControl(el) {
+    if (!el) return null;
+    const candidates = [collapse(noteTextOf(el)), collapse(attr(el, "aria-label"))];
+    const matches = (list) =>
+      candidates.some((c) => !!c && list.some((label) => label.toLowerCase() === c.toLowerCase()));
+    if (matches(NOTES_CONFIG.CANCEL_BUTTON_TEXTS)) return "cancel";
+    if (matches(NOTES_CONFIG.SAVE_BUTTON_TEXTS)) return "save";
+    return null;
+  }
+
+  // Step 1. Returns the pending save it armed, or null. Split out from the
+  // listener so the DOM-fixture harness can drive it without a live document.
+  function armSaveFromClick(dialog, target, card) {
+    if (!dialog || !target) return null;
+    if (!isWithin(target, dialog)) return null;
+    const kind = classifyControl(controlAncestor(target, dialog));
+    if (kind === "cancel") {
+      if (pendingSave) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] note dialog cancelled — no save to sync");
+      }
+      pendingSave = null;
+      return null;
+    }
+    if (kind !== "save") return null;
+    const text = extractDraft(dialog);
+    if (!text) return null; // nothing typed: Nooks disables Save anyway
+    const scope =
+      (card && detectActiveTab(card)) || notesState.activeTab || NOTES_CONFIG.DEFAULT_TAB;
+    pendingSave = { text, scope, armedAt: Date.now() };
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] note save clicked; waiting for it to appear in the dialer");
+    return pendingSave;
+  }
+
+  // Step 2. Called once per scan, after the saved buckets have been refreshed.
+  // `before` is a snapshot of both buckets from the start of this pass.
+  function settlePendingSave(dialogOpen, before) {
+    if (!pendingSave) return null;
+    if (Date.now() - pendingSave.armedAt > NOTES_CONFIG.SAVE_CONFIRM_WINDOW_MS) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] a note save was never confirmed in the dialer; ignoring it");
+      pendingSave = null;
+      return null;
+    }
+    // Still open: either mid-save (Save shows a progressbar) or the save failed.
+    if (dialogOpen) return null;
+
+    const bucket = pendingSave.scope === "account" ? "savedAccountNotes" : "savedProspectNotes";
+    const after = collapse(notesState[bucket]).toLowerCase();
+    const needle = collapse(pendingSave.text).toLowerCase();
+    const prev = collapse(before && before[bucket]).toLowerCase();
+    const appeared = !!needle && !!after && after.indexOf(needle) !== -1;
+    const grew = !!after && after !== prev && after.length > prev.length;
+    if (!appeared && !grew) return null;
+
+    saveSeq += 1;
+    const signal = {
+      text: pendingSave.text,
+      scope: pendingSave.scope,
+      savedAt: Date.now(),
+      id: `save-${pendingSave.armedAt}-${saveSeq}`,
+    };
+    pendingSave = null;
+    notesState.lastSaved = signal;
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[EasyBooking] note save confirmed:",
+      signal.id,
+      `scope=${signal.scope}`,
+      `${signal.text.length}ch`,
+      appeared ? "(text matched in the dialer)" : "(saved list grew)"
+    );
+    return signal;
   }
 
   // One scan pass. Roots and email can be injected (that's the unit-test seam);
@@ -789,6 +926,13 @@
       notesState.draft = null;
     }
 
+    // Snapshot both buckets before this pass rewrites one of them: confirming a
+    // save may need to know that the saved list changed.
+    const savedBefore = {
+      savedProspectNotes: notesState.savedProspectNotes,
+      savedAccountNotes: notesState.savedAccountNotes,
+    };
+
     if (card) {
       const tab = detectActiveTab(card);
       if (tab) notesState.activeTab = tab;
@@ -800,12 +944,20 @@
       notesState[bucket] = saved;
     }
 
+    // Second half of save detection (the first half is the Save click). Runs
+    // after the buckets are current, and only ever with the dialog gone.
+    settlePendingSave(!!dialog, savedBefore);
+
     const payload = {
       draft: notesState.draft,
       savedProspectNotes: notesState.savedProspectNotes,
       savedAccountNotes: notesState.savedAccountNotes,
       activeTab: notesState.activeTab,
       prospectEmail: notesState.prospectEmail,
+      // Sticky, so a panel that opens after the save still sees it. Its `id`
+      // changes only when a genuinely new save is confirmed, which is what makes
+      // "one save, one auto-sync" enforceable on the panel side.
+      lastSaved: notesState.lastSaved,
       capturedAt: Date.now(),
     };
 
@@ -815,11 +967,17 @@
       payload.savedAccountNotes,
       payload.activeTab,
       payload.prospectEmail,
+      payload.lastSaved && payload.lastSaved.id,
     ]);
     if (signature === lastNotesSignature) return payload;
     lastNotesSignature = signature;
 
-    const hasContent = !!(payload.draft || payload.savedProspectNotes || payload.savedAccountNotes);
+    const hasContent = !!(
+      payload.draft ||
+      payload.savedProspectNotes ||
+      payload.savedAccountNotes ||
+      payload.lastSaved
+    );
     // Don't write an all-empty record before there's ever been anything to say;
     // do write it afterwards, so a reset actually clears the panel.
     if (!hasContent && !notesEverStored) return payload;
@@ -832,7 +990,8 @@
         payload.prospectEmail || "(no prospect)",
         `tab=${payload.activeTab || "?"}`,
         `draft=${payload.draft ? payload.draft.length + "ch" : "none"}`,
-        `saved=${(payload.savedProspectNotes || payload.savedAccountNotes) ? "yes" : "none"}`
+        `saved=${(payload.savedProspectNotes || payload.savedAccountNotes) ? "yes" : "none"}`,
+        `lastSaved=${payload.lastSaved ? payload.lastSaved.id : "none"}`
       );
     });
     return payload;
@@ -872,6 +1031,28 @@
     true
   );
 
+  // Save / Cancel in the note dialog. Capture phase, so the draft is still
+  // readable no matter how fast the page's own handler tears the dialog down.
+  document.addEventListener(
+    "click",
+    (event) => {
+      try {
+        const target = event && event.target;
+        // Cheap first: classify the control the rep hit, and only go looking for
+        // the dialog when it's a Save or Cancel. This runs on every click in the
+        // dialer, so it must not cost a document query each time.
+        if (!classifyControl(controlAncestor(target, null))) return;
+        const dialog = findNoteDialog();
+        if (!dialog) return;
+        if (armSaveFromClick(dialog, target, findNotesCard())) scheduleNotesScan();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("[EasyBooking] note save detection failed:", (e && e.message) || e);
+      }
+    },
+    true
+  );
+
   scheduleNotesScan();
 
   // Exposed for the throwaway DOM-fixture harness and for console debugging.
@@ -888,5 +1069,9 @@
     extractSavedNotes,
     detectActiveTab,
     findNoteTextarea,
+    // Save-transition seams (harness + console debugging).
+    armSaveFromClick,
+    classifyControl,
+    pendingSaveState: () => pendingSave,
   };
 })();

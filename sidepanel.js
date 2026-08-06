@@ -629,17 +629,28 @@
       return `HubSpot rate limit — retrying in ${secs}s`;
     }
     if (code === "AUTH") return "HubSpot sign-in expired — connect again in Settings.";
+    // Connected fine, just not allowed to read it. Reconnecting would not help,
+    // so the copy must not send the rep round that loop — and the reason is a
+    // portal/app permission, which only the team can change.
+    if (code === "FORBIDDEN") {
+      return "Your HubSpot permissions don't cover this. Tell the team if you need it here.";
+    }
     if (code === "NOT_FOUND") return "Nothing to look up for this prospect.";
     return "Couldn't reach HubSpot. Use Refresh in Settings to try again.";
   }
 
-  // Deals and activity can fail on their own without sinking the bundle.
-  function sectionErrorText(code, retryAfterMs) {
+  // Deals and activity can fail on their own without sinking the bundle. `what`
+  // names the section, so a permissions message can say what it is the rep can't
+  // see instead of leaving them to guess.
+  function sectionErrorText(code, retryAfterMs, what) {
     if (code === "RATE_LIMITED") {
       const secs = Math.max(1, Math.round((Number(retryAfterMs) || 10000) / 1000));
       return `HubSpot rate limit — retrying in ${secs}s`;
     }
     if (code === "AUTH") return "HubSpot sign-in expired — connect again in Settings.";
+    if (code === "FORBIDDEN") {
+      return `Can't read ${what || "this"} — your HubSpot permissions don't cover it.`;
+    }
     return "Couldn't load this section. Use Refresh in Settings to try again.";
   }
 
@@ -821,9 +832,13 @@
   function renderDealsSection(bundle) {
     const body = crmEls.deals;
     const errors = bundle.errors || {};
-    if (errors.deals) {
+    // Same rule as Activity: rows (or a clean empty result) win over an error
+    // line, so "no deals" never reads as "something's broken".
+    if (errors.deals && !(bundle.deals || []).length) {
       setPill(crmEls.dealsPill, null);
-      setNote(body, sectionErrorText(errors.deals, errors.dealsRetryAfterMs), true);
+      setNote(body, sectionErrorText(errors.deals, errors.dealsRetryAfterMs, "deals"), true);
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] deals section unavailable:", errors.deals);
       return;
     }
     const deals = bundle.deals || [];
@@ -929,15 +944,20 @@
     const body = crmEls.activity;
     const errors = bundle.errors || {};
     hideActivityTabs();
-    if (errors.activity) {
+    const items = bundle.activity || [];
+    // Order matters: a fetch that came back with nothing is an EMPTY result, not
+    // a failure, and it says so even if a stale error code is hanging around. An
+    // error line only ever appears when the fetch produced no rows *and* failed.
+    if (errors.activity && !items.length) {
       setPill(crmEls.activityPill, null);
-      setNote(body, sectionErrorText(errors.activity, errors.activityRetryAfterMs), true);
+      setNote(body, sectionErrorText(errors.activity, errors.activityRetryAfterMs, "activity"), true);
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] activity section unavailable:", errors.activity);
       return;
     }
-    const items = bundle.activity || [];
     setPill(crmEls.activityPill, items.length ? String(items.length) : null);
     if (!items.length) {
-      setNote(body, "No activity logged yet");
+      setNote(body, "No activity found");
       return;
     }
     // Keep the rep's tab if it still has rows for this prospect, else "All".
@@ -1126,7 +1146,11 @@
         "deals:",
         (bundle.deals || []).length,
         "activity:",
-        (bundle.activity || []).length
+        (bundle.activity || []).length,
+        // Which sections came back short, and why — the first thing to look at
+        // when a rep says a section is empty or complaining.
+        "section errors:",
+        JSON.stringify(bundle.errors || {})
       );
     } catch (e) {
       if (seq !== crmSeq) return;
@@ -1234,10 +1258,18 @@
 // Notes → HubSpot sync (Phase 4). Its own IIFE so it shares nothing with the
 // prospect card above except the document.
 //
-// Reads two capture keys and writes one: "eb:notes" (draft + saved notes,
-// written by content-nooks.js) and "eb:prospectContext" (HubSpot record IDs,
-// written by content-nooks.js from the CRM panes) in; "eb:notes:lastSynced"
-// (idempotency record) out. Never touches "eb:currentProspect".
+// Reads two capture keys and writes one: "eb:notes" (draft + saved notes + the
+// last positively-saved note, written by content-nooks.js) and
+// "eb:prospectContext" (HubSpot record IDs, written by content-nooks.js from the
+// CRM panes) in; "eb:notes:lastSynced" (idempotency record) out. It also owns the
+// "eb:settings" auto-sync preference, whose checkbox lives in the settings
+// popover. Never touches "eb:currentProspect".
+//
+// Two ways a note reaches HubSpot, one code path (runSync):
+//   - the Sync button, for anything in the editor including a draft, and
+//   - auto-sync, only ever for a note the scraper saw the rep SAVE.
+// Both write the same idempotency record, so a save that follows a manual sync of
+// the same text — or a repeated save signal — cannot post twice.
 //
 // Note text is untrusted scraped input: it only ever reaches the DOM through
 // .value / .textContent, never innerHTML.
@@ -1248,6 +1280,7 @@
   const NOTES_KEY = "eb:notes";
   const CONTEXT_KEY = "eb:prospectContext";
   const SYNCED_KEY = "eb:notes:lastSynced";
+  const SETTINGS_KEY = "eb:settings";
   // Auth state lives under the OAuth module's own keys; any change there means
   // the sign-in state may have flipped.
   const AUTH_KEY_PREFIX = "eb:hs";
@@ -1263,6 +1296,9 @@
   const syncBtn = document.getElementById("notes-sync");
   const blockersEl = document.getElementById("notes-blockers");
   const resultEl = document.getElementById("notes-result");
+  // Lives in the settings popover (see sidepanel.html); owned here because this
+  // is the only place the preference means anything.
+  const autoSyncEl = document.getElementById("setting-autosync");
 
   // The section is optional: if the markup isn't there, do nothing at all.
   if (!textEl || !syncBtn) return;
@@ -1273,12 +1309,16 @@
     notes: null, // eb:notes payload
     ctx: null, // eb:prospectContext payload
     lastSynced: null, // eb:notes:lastSynced record
-    auth: { signedIn: false, ownerId: null, available: false },
+    auth: { signedIn: false, ownerId: null, userId: null, available: false },
+    settings: { autoSyncNotes: true }, // default ON until storage says otherwise
     text: "",
     userEdited: false, // the rep has typed: don't clobber their text
     syncing: false,
     confirmArmed: false, // re-sync confirmation is one click in
     result: null, // { kind: "ok"|"err", message, url }
+    // The id of the last save signal this panel acted on (or deliberately
+    // skipped). Set before any await, so one save can never start two syncs.
+    autoHandledId: null,
   };
 
   // --- Derived values ------------------------------------------------------
@@ -1405,9 +1445,10 @@
     renderSaved();
 
     // Pill + button state machine.
+    const autoSynced = !!(synced && state.lastSynced && state.lastSynced.auto);
     pillEl.hidden = !synced;
     pillEl.className = "pill synced";
-    if (synced) pillEl.textContent = "Already synced ✓";
+    if (synced) pillEl.textContent = autoSynced ? "Auto-synced ✓" : "Already synced ✓";
 
     const gate = api
       ? api.syncGate({
@@ -1430,13 +1471,16 @@
       ? "Creates a HubSpot note on the matched contact and company, attributed to you."
       : gate.reasons.join(" ");
 
-    // A standing "already synced" line when there's no fresher result to show.
+    // A standing synced line when there's no fresher result to show. An
+    // auto-sync has no click behind it, so this passive, timestamped line *is*
+    // how the rep learns it happened.
     let display = state.result;
     if (!display && synced && state.lastSynced) {
       const targets = state.lastSynced.targets || "HubSpot";
+      const verb = autoSynced ? "Auto-synced" : "Already synced";
       display = {
         kind: "ok",
-        message: `Already synced to ${targets} ${ago(state.lastSynced.syncedAt)} ✓`,
+        message: `${verb} to ${targets} ${ago(state.lastSynced.syncedAt)} ✓`,
         url: state.lastSynced.url,
       };
     }
@@ -1468,6 +1512,9 @@
       state.text = captureText(next);
     }
     render();
+    // A capture can carry a "the rep just saved this" signal; that's the only
+    // thing auto-sync ever acts on.
+    maybeAutoSync(next);
   }
 
   function applyContext(next) {
@@ -1483,26 +1530,144 @@
   async function refreshAuth() {
     const auth = window.EB && window.EB.hubspotAuth;
     if (!auth || typeof auth.getAuthState !== "function") {
-      state.auth = { signedIn: false, ownerId: null, available: false };
+      state.auth = { signedIn: false, ownerId: null, userId: null, available: false };
       render();
       return;
     }
     try {
       const info = (await Promise.resolve(auth.getAuthState())) || {};
+      // `connected` is authoritative when present. It is checked before the loose
+      // fallback because a *disconnected* state can still carry a cached ownerId
+      // or email, and treating that as signed in would let auto-sync fire against
+      // a connection that no longer exists.
       const signedIn =
         info.signedIn !== undefined
           ? !!info.signedIn
-          : !!(info.connected || info.ownerId || info.email || info.accessToken);
-      state.auth = { signedIn, ownerId: info.ownerId || null, available: true };
+          : info.connected !== undefined
+            ? !!info.connected
+            : !!(info.ownerId || info.email || info.accessToken);
+      state.auth = {
+        signedIn,
+        ownerId: info.ownerId || null,
+        userId: info.userId || null,
+        available: true,
+      };
     } catch (e) {
       // eslint-disable-next-line no-console
       console.debug("[EasyBooking] notes: could not read HubSpot auth state:", (e && e.message) || e);
-      state.auth = { signedIn: false, ownerId: null, available: true };
+      state.auth = { signedIn: false, ownerId: null, userId: null, available: true };
     }
     render();
   }
 
+  // The owner ID is what attributes the note ("Activity assigned to"). It can be
+  // missing on a connection whose one-shot lookup failed at login, so ask the auth
+  // module to resolve it on demand — that heals the stored record for good. A
+  // failure here never blocks the sync: an unattributed note beats a lost one.
+  async function resolveOwnerId() {
+    if (state.auth.ownerId) return state.auth.ownerId;
+    const auth = window.EB && window.EB.hubspotAuth;
+    if (!auth || typeof auth.ensureOwnerId !== "function") return null;
+    try {
+      const ownerId = await auth.ensureOwnerId();
+      if (ownerId) {
+        state.auth.ownerId = ownerId;
+        return ownerId;
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] notes: owner lookup failed:", (e && e.message) || e);
+      return null;
+    }
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[EasyBooking] notes: no HubSpot owner id available — syncing the note unattributed"
+    );
+    return null;
+  }
+
   // --- Sync ---------------------------------------------------------------
+  // The one path to HubSpot. `source` is "manual" or "auto" and changes nothing
+  // but the copy and the flag stored on the idempotency record — so an auto-sync
+  // and a click are indistinguishable to HubSpot, and to the duplicate check.
+  async function runSync(text, source) {
+    const api = notesApi();
+    if (!api) return false;
+    const targets = api.targetSummary(contactId(), companyId());
+    const auto = source === "auto";
+
+    state.syncing = true;
+    state.result = null;
+    render();
+
+    try {
+      const ownerId = await resolveOwnerId();
+      const res = await api.createNote({
+        text,
+        contactId: contactId(),
+        companyId: companyId(),
+        ownerId,
+        // The SDR's HubSpot *user* id, which is not their owner id — it's what
+        // hs_created_by ("Activity created by") wants.
+        userId: state.auth.userId,
+      });
+      const record = {
+        hash: api.syncHash(text, prospectEmail()),
+        noteId: res.noteId,
+        url: res.url,
+        prospectEmail: prospectEmail(),
+        targets,
+        syncedAt: Date.now(),
+        auto,
+      };
+      await chrome.storage.local.set({ [SYNCED_KEY]: record });
+      state.lastSynced = record;
+      // An auto-sync normally leaves `result` null so render()'s standing line
+      // ("Auto-synced to … just now ✓") owns the message and keeps its timestamp
+      // honest. That line only appears when the editor still holds the synced
+      // text, though — if the rep has typed something else, say it explicitly
+      // rather than let a successful sync go unmentioned.
+      state.result =
+        auto && alreadySynced()
+          ? null
+          : {
+              kind: "ok",
+              message: `${auto ? "Auto-synced" : "Note added"} to ${targets || "HubSpot"} ✓`,
+              url: res.url,
+            };
+      // eslint-disable-next-line no-console
+      console.debug(
+        `[EasyBooking] notes ${auto ? "auto-" : ""}synced:`,
+        record.noteId,
+        `-> ${targets}`,
+        `owner=${ownerId || "none"}`,
+        res.createdByDowngraded ? "(created-by left to HubSpot)" : ""
+      );
+      return true;
+    } catch (e) {
+      // Never drop a note quietly: say so, and leave the manual button as the way
+      // out. On an auto-sync the rep didn't ask for anything, so the message says
+      // what failed before what to do.
+      const detail = errorMessage(e);
+      state.result = {
+        kind: "err",
+        message: auto ? `Couldn't auto-sync that note. ${detail}` : detail,
+        url: null,
+      };
+      // eslint-disable-next-line no-console
+      console.debug(
+        `[EasyBooking] notes ${auto ? "auto-" : ""}sync failed:`,
+        (e && e.code) || "?",
+        (e && e.message) || e
+      );
+      return false;
+    } finally {
+      state.syncing = false;
+      state.confirmArmed = false;
+      render();
+    }
+  }
+
   async function doSync() {
     const api = notesApi();
     if (!api || state.syncing) return;
@@ -1527,44 +1692,75 @@
       return;
     }
 
-    state.syncing = true;
-    state.result = null;
-    render();
+    await runSync(state.text, "manual");
+  }
 
-    const targets = api.targetSummary(contactId(), companyId());
-    try {
-      const res = await api.createNote({
-        text: state.text,
-        contactId: contactId(),
-        companyId: companyId(),
-        ownerId: state.auth.ownerId,
-      });
-      const record = {
-        hash: api.syncHash(state.text, prospectEmail()),
-        noteId: res.noteId,
-        url: res.url,
-        prospectEmail: prospectEmail(),
-        targets,
-        syncedAt: Date.now(),
-      };
-      await chrome.storage.local.set({ [SYNCED_KEY]: record });
-      state.lastSynced = record;
-      state.result = {
-        kind: "ok",
-        message: `Note added to ${targets || "HubSpot"} ✓`,
-        url: res.url,
-      };
-      // eslint-disable-next-line no-console
-      console.debug("[EasyBooking] notes synced:", record.noteId, `-> ${targets}`);
-    } catch (e) {
-      state.result = { kind: "err", message: errorMessage(e), url: null };
-      // eslint-disable-next-line no-console
-      console.debug("[EasyBooking] notes sync failed:", (e && e.code) || "?", (e && e.message) || e);
-    } finally {
-      state.syncing = false;
-      state.confirmArmed = false;
+  // --- Auto-sync on save --------------------------------------------------
+  // Only ever driven by content-nooks.js's `lastSaved` signal, which is emitted
+  // exclusively for a note the rep positively saved in the dialer. Everything
+  // here is a reason NOT to sync; the sync itself is the same runSync() the
+  // button uses, so the idempotency record covers both.
+  //
+  // A signal older than this is left to the button: it likely predates the panel
+  // being open, and silently posting an hours-old note is worse than not.
+  const AUTO_MAX_AGE_MS = 30 * 60 * 1000;
+
+  function autoSkip(reason) {
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] notes: not auto-syncing —", reason);
+  }
+
+  function maybeAutoSync(notes) {
+    const api = notesApi();
+    const saved = notes && notes.lastSaved;
+    const text = saved && typeof saved.text === "string" ? saved.text.trim() : "";
+    if (!saved || !text) return;
+
+    const id = saved.id || `${saved.savedAt || 0}-${text.length}`;
+    // One signal, one attempt — set before anything can await, so a burst of
+    // captures carrying the same save can't start a second sync.
+    if (state.autoHandledId === id) return;
+    state.autoHandledId = id;
+
+    if (!state.settings.autoSyncNotes) return autoSkip("auto-sync is off in Settings");
+    if (!api) return autoSkip("notes sync isn't available in this build");
+    if (!state.auth.signedIn) return autoSkip("HubSpot isn't connected");
+    if (state.syncing) return autoSkip("a sync is already in flight");
+    if (saved.savedAt && Date.now() - saved.savedAt > AUTO_MAX_AGE_MS) {
+      return autoSkip("that save is too old to sync on its own");
+    }
+    // Bleed guard: the note belongs to the prospect it was taken for. The scraper
+    // clears its own state on a prospect change; this catches the window where
+    // the capture and the CRM context disagree.
+    const ctxEmail = state.ctx && state.ctx.email;
+    if (notes.prospectEmail && ctxEmail && notes.prospectEmail !== ctxEmail) {
+      return autoSkip("the prospect changed after that note was captured");
+    }
+    if (!contactId() && !companyId()) {
+      return autoSkip("this prospect has no matched HubSpot record yet");
+    }
+    const hash = api.syncHash(text, prospectEmail());
+    if (state.lastSynced && state.lastSynced.hash === hash) {
+      return autoSkip("that exact note is already on the record");
+    }
+    const gate = api.syncGate({
+      signedIn: state.auth.signedIn,
+      text,
+      contactId: contactId(),
+      companyId: companyId(),
+      syncing: false,
+    });
+    if (!gate.enabled) return autoSkip(gate.reasons.join(" "));
+
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] notes: auto-syncing saved note", id, `(${text.length}ch)`);
+    // Make sure the editor holds what we're about to send, so that if it fails
+    // the Sync button is a real fallback rather than a different note.
+    if (!state.userEdited && state.text.trim() !== text) {
+      state.text = saved.text;
       render();
     }
+    runSync(saved.text, "auto");
   }
 
   // Typed errors from hubspot-notes.js carry their own rep-readable message; this
@@ -1590,7 +1786,40 @@
     }
   }
 
+  // --- Settings ------------------------------------------------------------
+  // One object under "eb:settings" so later preferences don't each need a key.
+  // Auto-sync defaults ON, which means "absent" and "true" must read the same.
+  function readSettings(stored) {
+    const raw = stored && typeof stored === "object" ? stored : {};
+    return { autoSyncNotes: raw.autoSyncNotes !== false };
+  }
+
+  function renderSettings() {
+    if (autoSyncEl) autoSyncEl.checked = !!state.settings.autoSyncNotes;
+  }
+
+  async function setAutoSync(on) {
+    state.settings = { ...state.settings, autoSyncNotes: !!on };
+    renderSettings();
+    try {
+      const res = (await chrome.storage.local.get(SETTINGS_KEY)) || {};
+      const merged = { ...(res[SETTINGS_KEY] || {}), autoSyncNotes: !!on };
+      await chrome.storage.local.set({ [SETTINGS_KEY]: merged });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] notes: could not save the auto-sync setting:", (e && e.message) || e);
+    }
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] notes: auto-sync on save is", on ? "on" : "off");
+  }
+
   // --- Wiring -------------------------------------------------------------
+  if (autoSyncEl) {
+    autoSyncEl.addEventListener("change", () => {
+      setAutoSync(autoSyncEl.checked);
+    });
+  }
+
   textEl.addEventListener("input", () => {
     state.text = textEl.value;
     state.userEdited = true;
@@ -1619,6 +1848,11 @@
       state.lastSynced = changes[SYNCED_KEY].newValue || null;
       render();
     }
+    // A second panel document (another window) may have flipped the toggle.
+    if (changes[SETTINGS_KEY]) {
+      state.settings = readSettings(changes[SETTINGS_KEY].newValue);
+      renderSettings();
+    }
     if (Object.keys(changes).some((k) => k.indexOf(AUTH_KEY_PREFIX) === 0)) refreshAuth();
   });
 
@@ -1629,12 +1863,17 @@
   });
 
   // Storage first — captures that happened while the panel was closed only
-  // exist there.
+  // exist there. Auth and the settings are read BEFORE the notes: applyNotes can
+  // trigger an auto-sync, and it must not skip one for "not connected" just
+  // because we hadn't looked yet.
   (async () => {
-    const res = (await chrome.storage.local.get([NOTES_KEY, CONTEXT_KEY, SYNCED_KEY])) || {};
+    const res =
+      (await chrome.storage.local.get([NOTES_KEY, CONTEXT_KEY, SYNCED_KEY, SETTINGS_KEY])) || {};
     state.lastSynced = res[SYNCED_KEY] || null;
     state.ctx = res[CONTEXT_KEY] || null;
-    applyNotes(res[NOTES_KEY]);
+    state.settings = readSettings(res[SETTINGS_KEY]);
+    renderSettings();
     await refreshAuth();
+    applyNotes(res[NOTES_KEY]);
   })();
 })();

@@ -233,10 +233,12 @@
   const OBJECT_TYPE = { contact: "0-1", company: "0-2", deal: "0-3" };
 
   // --- Errors --------------------------------------------------------------
-  // Four codes, because the panel renders four different things:
+  // Five codes, because the panel renders five different things:
   //   NOT_FOUND    — the lookup succeeded and there is no such record
   //   RATE_LIMITED — the shared pool is exhausted; carries retryAfterMs
-  //   AUTH         — not connected / token rejected / scope missing
+  //   AUTH         — not connected, or the token itself was rejected (401)
+  //   FORBIDDEN    — connected and allowed in, but not permitted to read this
+  //                  (403). Not a sign-in problem and not fixable by the rep.
   //   TRANSIENT    — network, 5xx, anything worth a retry
   class HubSpotDataError extends Error {
     constructor(code, message, extra) {
@@ -302,10 +304,22 @@
         status: 429,
       });
     }
-    if (res.status === 401 || res.status === 403) {
+    // 401 and 403 are different problems and must not share a message. A 401 is
+    // "your token was rejected" — reconnecting fixes it. A 403 is "this token
+    // isn't allowed to read that", which reconnecting does NOT fix: the app's
+    // scope set is fixed, and HubSpot rejects the granular engagement scope names
+    // outright on the current platform version, so there is nothing for a rep to
+    // do about it. Telling them their sign-in expired was both wrong and
+    // un-actionable.
+    if (res.status === 401) {
       const body = await readBody(res);
-      throw new HubSpotDataError("AUTH", describe(body) || `HTTP ${res.status}`, {
-        status: res.status,
+      throw new HubSpotDataError("AUTH", describe(body) || "HTTP 401", { status: 401 });
+    }
+    if (res.status === 403) {
+      const body = await readBody(res);
+      throw new HubSpotDataError("FORBIDDEN", describe(body) || "HTTP 403", {
+        status: 403,
+        hubspotMessage: describe(body) || null,
       });
     }
     if (res.status === 404) {
@@ -923,39 +937,62 @@
   // actually has associations — types with none cost exactly one association
   // read and no batch call. Worst case ~10 general-pool requests, cached per
   // contact for the bundle's TTL.
+  // Each type is fetched and failed independently: one engagement type the token
+  // can't read must not blank the four it can. Every per-type failure logs its
+  // HTTP status, because "which type, what status" is the only thing that makes a
+  // 403 here diagnosable from the panel's console. Only a total failure — every
+  // type erroring — is reported to the panel as a section error; anything less
+  // renders the rows that did come back, and a genuinely empty result stays
+  // empty rather than looking broken.
   async function getActivity(contactId) {
     if (!isId(contactId)) return [];
-    const found = await Promise.all(
+    const failures = [];
+    const perType = await Promise.all(
       CONFIG.ACTIVITY_TYPES.map(async (spec) => {
-        const body = await orNull(
-          request(
-            `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/${spec.type}?limit=${CONFIG.BATCH_MAX}`
-          )
-        );
-        return { spec, ids: v4Ids(body).slice(0, CONFIG.BATCH_MAX) };
-      })
-    );
-
-    const batches = await Promise.all(
-      found
-        .filter((f) => f.ids.length > 0)
-        .map(async (f) => {
-          const body = await post(`/crm/v3/objects/${f.spec.type}/batch/read`, {
-            properties: f.spec.properties,
-            inputs: f.ids.map((id) => ({ id })),
+        try {
+          const body = await orNull(
+            request(
+              `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/${spec.type}?limit=${CONFIG.BATCH_MAX}`
+            )
+          );
+          const ids = v4Ids(body).slice(0, CONFIG.BATCH_MAX);
+          if (!ids.length) return [];
+          const read = await post(`/crm/v3/objects/${spec.type}/batch/read`, {
+            properties: spec.properties,
+            inputs: ids.map((id) => ({ id })),
           });
-          const items = ((body && body.results) || []).map((obj) => activityItem(f.spec, obj));
+          const items = ((read && read.results) || []).map((obj) => activityItem(spec, obj));
           // Association reads come back in id order, not time order, so the cap
           // is applied *after* sorting — otherwise "25 most recent calls" would
           // really mean "25 oldest". Reading up to BATCH_MAX ids and keeping 25
           // costs the same one request either way.
           return sortActivity(items).slice(0, CONFIG.ACTIVITY_PER_TYPE_LIMIT);
-        })
+        } catch (e) {
+          failures.push(e);
+          log(
+            `activity: ${spec.type} could not be read — HTTP ${(e && e.status) || "?"}`,
+            (e && e.code) || "?",
+            (e && e.message) || e
+          );
+          return null;
+        }
+      })
     );
+
+    const usable = perType.filter((rows) => rows !== null);
+    if (!usable.length && failures.length) {
+      log("activity: every engagement type failed; reporting it to the panel");
+      throw failures[0];
+    }
+    if (failures.length) {
+      log(
+        `activity: ${failures.length} of ${CONFIG.ACTIVITY_TYPES.length} engagement types unavailable; showing the rest`
+      );
+    }
 
     // Attribution is part of a row, not a later decoration: callers of
     // getActivity always get rows they can render as-is.
-    return attributeActivity(sortActivity([].concat.apply([], batches)));
+    return attributeActivity(sortActivity([].concat.apply([], usable)));
   }
 
   // Puts a name on every activity row it can, in two batched passes over the
