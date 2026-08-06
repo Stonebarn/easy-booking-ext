@@ -1,6 +1,7 @@
-// package-store.mjs — builds the Chrome Web Store upload zip.
+// package-store.mjs — builds the Chrome Web Store upload zip (or a dev zip).
 //
-//   node scripts/package-store.mjs
+//   node scripts/package-store.mjs          -> store zip, "key" stripped
+//   node scripts/package-store.mjs --dev    -> dev zip, "key" KEPT
 //
 // The store zip differs from the repo in exactly one way: manifest.json's
 // "key" field is stripped. The key pins the extension ID for local unpacked
@@ -8,8 +9,14 @@
 // rejects manifests that carry it — the store manages identity itself, and
 // assigns the listing's ID from its own key at first upload.
 //
+// --dev keeps the key: that zip is for teammates loading the extension
+// UNPACKED (chrome://extensions -> Load unpacked). Without the key an
+// unpacked install gets a random per-machine ID and HubSpot sign-in breaks.
+// NEVER upload the -dev zip to the store; it will be rejected.
+//
 // Everything else ships byte-identical to the repo. Output:
-//   dist/dialer-helper-pro-v<version>.zip
+//   dist/dialer-helper-pro-v<version>.zip        (store)
+//   dist/dialer-helper-pro-v<version>-dev.zip    (--dev)
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -64,12 +71,13 @@ for (const f of FILES) {
 }
 for (const d of DIRS) cpSync(join(root, d), join(stage, d), { recursive: true });
 
-// The one transformation: strip the dev key.
+// The one transformation (store mode only): strip the dev key.
+const dev = process.argv.includes("--dev");
 const storeManifest = { ...manifest };
-delete storeManifest.key;
+if (!dev) delete storeManifest.key;
 writeFileSync(join(stage, "manifest.json"), JSON.stringify(storeManifest, null, 2) + "\n");
 
-const zipName = `dialer-helper-pro-v${manifest.version}.zip`;
+const zipName = `dialer-helper-pro-v${manifest.version}${dev ? "-dev" : ""}.zip`;
 execFileSync("zip", ["-r", "-X", join("..", zipName), "."], { cwd: stage, stdio: "pipe" });
 rmSync(stage, { recursive: true, force: true });
 
