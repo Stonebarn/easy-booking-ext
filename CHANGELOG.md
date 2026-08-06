@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — ownership tone: red retired, neutral in, flagged once per card
+
+Design critique P1 ("Neutral chip, red retired"): another rep's name on a
+shared account is a routine, benign state, not an error, and red was painted
+on every other-owned record — the per-row `.own-alert` highlight on Outbound
+and Contact owner, the `.peer-alert` outline+tint on every colleague row.
+Negative tone is now reserved for actual negatives (section errors, lost
+deals, `.crm-note.bad`); ownership renders in plain ink with a quiet, muted
+"(not you)" / "Owned by {name}" suffix — visible text, not a hover-only
+`title`, so it reaches screen readers too. The fact is stated **once** per
+identity card (on the most prominent flaggable role — outbound, then
+contact — never twice for the same person) and colleague rows drop their
+per-row alert styling entirely, relying on the section head's existing
+shared-owner note plus a quiet per-row "Owned by {name}" when owners differ.
+
+Also collapses the owner triplication the identity section always drew:
+Outbound owner / Company owner / Contact owner now render as one "Owner"
+row (with a quiet "(all roles)" suffix) whenever all three resolve to the
+same name; a divergent, missing or unresolved trio keeps the split rows,
+"Not set"/"Unknown" states and the outbound ownership-change hover intact.
+Dead CSS from an earlier, already-abandoned owner-row layout (`.own`,
+`.own-primary`, `.own-more`) is removed along with the retired alert rules.
+
 ## [0.4.0] - 2026-08-06
 
 ### Changed — the live capture lives in the Contact column

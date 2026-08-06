@@ -1607,24 +1607,35 @@
 
     // Two columns, contact | company, separated by a hairline. Owners are the
     // load-bearing rows: all three are ALWAYS drawn (missing/unresolved states
-    // say so honestly), and an outbound or contact owner who is a *named
-    // someone else* is flagged red — a rep must know before dialing that the
-    // record isn't theirs. isMine === null (can't tell) is never flagged:
-    // falsely telling a rep an account isn't theirs is worse than silence.
+    // say so honestly). isMine === null (can't tell) is never flagged: falsely
+    // telling a rep an account isn't theirs is worse than silence.
+    //
+    // Ownership tone fix (P1, design critique "Neutral chip, red retired"):
+    // another rep's name is a routine, benign state on a shared account, not
+    // an error — red is retired from ownership entirely, here and on the
+    // colleague rows below. The one fact a rep needs — "this isn't yours" —
+    // is stated ONCE per card, in plain visible text (never title-only, so a
+    // screen reader gets it too), on whichever role is most prominent:
+    // outbound first (HubSpot's own field for outbound ownership), contact
+    // otherwise. Company ownership was never flaggable and still isn't.
     const roles = (bundle.ownership && bundle.ownership.byKey) || {};
+    const flagRole =
+      roles.outbound && roles.outbound.isMine === false
+        ? roles.outbound
+        : roles.contact && roles.contact.isMine === false
+          ? roles.contact
+          : null;
     const ownChanged =
       bundle.ownership && bundle.ownership.changedAt
         ? `Outbound ownership changed ${fmt.date(bundle.ownership.changedAt)}`
         : null;
-    const ownerRow = (role, flaggable) => {
+    const ownerRow = (role, isFlagRow) => {
       if (!role) return null;
       const row = el("div", "own-row");
       row.appendChild(el("span", "own-label", role.label));
       if (role.name) {
-        const flagged = flaggable && role.isMine === false;
-        const who = el("span", flagged ? "own-name own-alert" : "own-name", role.name);
-        if (flagged) who.title = "Owned by someone else";
-        row.appendChild(who);
+        row.appendChild(el("span", "own-name", role.name));
+        if (isFlagRow) row.appendChild(el("span", "own-suffix", "(not you)"));
       } else {
         row.appendChild(
           el("span", "own-name own-unset", role.missing ? "Not set" : "Unknown")
@@ -1633,6 +1644,26 @@
       // When ownership last moved: context for "why haven't they been called",
       // kept as hover detail on the outbound row it belongs to.
       if (role.key === "outbound" && ownChanged) row.title = ownChanged;
+      return row;
+    };
+    // The promised collapse (old comment above this code, now made real):
+    // outbound, company and contact owner are the same person more often than
+    // not, and three rows saying one thing is noise. Only a fully resolved,
+    // identical trio collapses; a divergent, missing or unresolved name keeps
+    // the split rows — so "Not set"/"Unknown" states stay honest.
+    const ownerTriple = [roles.contact, roles.outbound, roles.company];
+    const sharedOwnerName =
+      ownerTriple.every((r) => r && r.name) &&
+      ownerTriple.every((r) => r.name === ownerTriple[0].name)
+        ? ownerTriple[0].name
+        : null;
+    const sharedOwnerRow = (name, isFlagRow) => {
+      const row = el("div", "own-row");
+      row.appendChild(el("span", "own-label", "Owner"));
+      row.appendChild(el("span", "own-name", name));
+      const clauses = isFlagRow ? "all roles, not you" : "all roles";
+      row.appendChild(el("span", "own-suffix", `(${clauses})`));
+      if (ownChanged) row.title = ownChanged;
       return row;
     };
 
@@ -1695,7 +1726,9 @@
     if (wnHost) colC.appendChild(wnHost);
 
     appendAll(colC, [
-      ownerRow(roles.contact, true),
+      // Suppressed here entirely when the trio collapses — the merged
+      // "Owner" row lands once, in the Company column, below.
+      sharedOwnerName ? null : ownerRow(roles.contact, roles.contact === flagRole),
       // The row link is suppressed when the glyph beside the name is already
       // showing: two links to the same person's profile is one row of the panel
       // spent twice. HubSpot's own hs_linkedin_url still carries it when the
@@ -1730,8 +1763,10 @@
       colCo.appendChild(el("div", "ident-role", "No company record"));
     }
     appendAll(colCo, [
-      ownerRow(roles.outbound, true),
-      ownerRow(roles.company, false),
+      sharedOwnerName
+        ? sharedOwnerRow(sharedOwnerName, !!flagRole)
+        : ownerRow(roles.outbound, roles.outbound === flagRole),
+      sharedOwnerName ? null : ownerRow(roles.company, false),
       bundle.ownership && bundle.ownership.csmRole && bundle.ownership.csmRole.name
         ? ownerRow(bundle.ownership.csmRole, false)
         : null,
@@ -1927,12 +1962,13 @@
   }
 
   function colleagueRow(row, hideOwner) {
-    // A colleague owned by a NAMED someone else gets the red treatment the
-    // user asked for — outline + highlight. isMine === null (can't tell) is
-    // never flagged: same rule as the identity owners.
-    const notMine = row.isMine === false;
-    const node = el("div", notMine ? "peer peer-alert" : "peer");
-    if (notMine) node.title = "Owned by someone else";
+    // Ownership tone fix (P1): no per-row alert outline/tint, even for a
+    // colleague owned by a named someone else — that's a routine, benign
+    // state on a shared account, not an error. The shared-owner note in the
+    // section head already carries the fact when every row matches; when
+    // owners differ, the quiet "Owned by {name}" text below (line two) is the
+    // only signal, and it is plain visible text, not a hover-only title.
+    const node = el("div", "peer");
 
     const top = el("div", "peer-top");
     // A row keeps the base 20px, and initials only: there is no captured photo
@@ -1982,8 +2018,14 @@
     const ownerLabel = colleagueOwnerLabel(row);
     let owner = null;
     if (!hideOwner && ownerLabel) {
-      owner = el("span", "peer-owner", "Owner: ");
-      owner.appendChild(el("span", "peer-who", ownerLabel));
+      // "You" stays as-is (it's not an ownership fact worth flagging); a
+      // named teammate gets the quiet "Owned by {name}" idiom — plain text,
+      // no alert styling, on the one row it applies to.
+      owner = el(
+        "span",
+        "peer-owner",
+        row.isMine === true ? "You" : `Owned by ${ownerLabel}`
+      );
     }
     // "contacted 4d ago" rather than "Last contacted 4d ago": in a list of
     // colleagues there is nothing else the time could be about, and the two
