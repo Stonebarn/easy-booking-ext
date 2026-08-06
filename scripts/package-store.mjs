@@ -49,8 +49,10 @@ const FILES = [
 ];
 const DIRS = ["icons"];
 
+// Clear only the staging dir and old zips — dist/store-assets (listing icon,
+// screenshots) is a sibling deliverable this script must not destroy.
 const stage = join(root, "dist", "store-pkg");
-rmSync(join(root, "dist"), { recursive: true, force: true });
+rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 
 for (const f of FILES) {
