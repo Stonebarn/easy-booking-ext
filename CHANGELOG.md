@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — Lovable token function reference: fixed introspection, added failure logging and a hub allowlist
+
+`lovable/hubspot-token-function.ts` (the reference source for the deployed
+`wiza-hs-connect.lovable.app` edge function) sent HubSpot's introspect
+endpoint the wrong form field (`access_token` instead of the required
+`token`), so identity lookup 400'd silently on every exchange. Not yet
+redeployed — see the file's own `## Deploying updates` note for how.
+
 ### Fixed — synced notes are attributed to the signed-in SDR again
 
 Notes reached HubSpot but landed as **"Activity created by: No user"** and
