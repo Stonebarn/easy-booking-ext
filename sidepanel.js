@@ -35,6 +35,7 @@
   const SCHEDULER_URL_RE = /^https:\/\/scheduler\.default\.com\//;
 
   const headerEl = document.getElementById("header");
+  const dotEl = document.getElementById("header-dot");
   const capturedEl = document.getElementById("captured");
   const emptyEl = document.getElementById("empty");
   // The booking cluster's fallback home and the rule under it. Both are hidden
@@ -118,6 +119,21 @@
     // the button stays live whenever there is a prospect at all.
     fillBtn.disabled = !hasProspect;
     headerEl.classList.toggle("live", view === "live");
+    // Design critique: the dot's colour alone reads as "connected" to anyone
+    // used to that convention; it actually means "a fresh prospect is loaded
+    // from the dialer" (a stale capture goes idle grey again, same as none at
+    // all). Named explicitly rather than left to colour, for a mouse hover
+    // and for a screen reader.
+    if (dotEl) {
+      const dotLabel =
+        view === "live"
+          ? "A prospect is loaded from the dialer"
+          : view === "stale"
+            ? "The loaded prospect's capture is stale"
+            : "No prospect loaded from the dialer";
+      dotEl.title = dotLabel;
+      dotEl.setAttribute("aria-label", dotLabel);
+    }
     if (!hasProspect) {
       capturedEl.removeAttribute("title");
       if (ageSrEl) ageSrEl.textContent = "";
@@ -566,6 +582,11 @@
     refreshNote: document.getElementById("crm-refresh-note"),
     identity: document.getElementById("crm-identity"),
     identityPill: document.getElementById("crm-identity-pill"),
+    // Contact & company never hid itself — it is the anchor every dedup
+    // message lands on — until the no-prospect state (see crmRender): the
+    // display headline above already carries that one fact, so this section
+    // defers to it instead of repeating it a line lower.
+    identitySection: document.getElementById("crm-identity-section"),
     // Account context (Phase 8). The section element itself is held because this
     // is the one section that hides entirely when the company has nothing worth
     // a card.
@@ -977,7 +998,11 @@
     const wrap = el("div", "chip-more-wrap");
     const row = chipRow(kept);
     row.hidden = true;
-    const toggle = el("button", "prose-more", `More (${kept.length})`);
+    // hit24, same as every other prose-more instance (tech stack, prose
+    // blocks): this toggle was missing it (a latent ≥24px-hit-area gap the
+    // ergonomics fix wave didn't reach because no fixture used before this
+    // pass ever exercised it — see the whole-path sweep).
+    const toggle = el("button", "prose-more hit24", `More (${kept.length})`);
     toggle.type = "button";
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-label", `Show ${kept.length} more ${noun}`);
@@ -1003,9 +1028,36 @@
   // no-innerHTML rule extends to "no interpolating untrusted text into SVG
   // markup either", and this satisfies it by construction — there is no text
   // in this SVG at all.
-  const SPARK_W = 64;
-  const SPARK_H = 18;
+  const SPARK_W = 72;
+  const SPARK_H = 16;
   const SPARK_PAD = 2;
+
+  // Polish pass (design critique, Wiza usage): a real property-history curve
+  // can carry up to HISTORY_MAX_POINTS (24) of genuine day-to-day noise, and
+  // straight segments between that many points in a 72×16 box drew a jagged,
+  // hand-scribbled line rather than a calm trend. The DATA is unchanged —
+  // still every downsampled point, still both endpoints — only how the line
+  // between them is drawn: a quadratic curve through each point's own
+  // midpoint softens the zigzag into one smooth stroke, the standard
+  // "smooth sparkline" construction (curve = Q at point i, ending at the
+  // midpoint of i and i+1; the final segment lands exactly on the last
+  // point, because a rep's eye should land exactly on "now").
+  function smoothSparkPath(coords) {
+    if (coords.length === 2) {
+      return `M${coords[0].x.toFixed(2)} ${coords[0].y.toFixed(2)} L${coords[1].x.toFixed(2)} ${coords[1].y.toFixed(2)}`;
+    }
+    let d = `M${coords[0].x.toFixed(2)} ${coords[0].y.toFixed(2)}`;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const cur = coords[i];
+      const next = coords[i + 1];
+      const midX = (cur.x + next.x) / 2;
+      const midY = (cur.y + next.y) / 2;
+      d += ` Q${cur.x.toFixed(2)} ${cur.y.toFixed(2)} ${midX.toFixed(2)} ${midY.toFixed(2)}`;
+    }
+    const last = coords[coords.length - 1];
+    d += ` L${last.x.toFixed(2)} ${last.y.toFixed(2)}`;
+    return d;
+  }
   function sparklineSvg(points) {
     if (!points || points.length < 2) return null;
     const min = Math.min.apply(null, points);
@@ -1014,6 +1066,10 @@
     const innerW = SPARK_W - SPARK_PAD * 2;
     const innerH = SPARK_H - SPARK_PAD * 2;
     const stepX = points.length > 1 ? innerW / (points.length - 1) : 0;
+    const coords = points.map((v, i) => ({
+      x: SPARK_PAD + i * stepX,
+      y: SPARK_PAD + innerH - ((v - min) / span) * innerH,
+    }));
     const svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("viewBox", `0 0 ${SPARK_W} ${SPARK_H}`);
     svg.setAttribute("width", String(SPARK_W));
@@ -1021,13 +1077,20 @@
     svg.setAttribute("aria-hidden", "true");
     svg.setAttribute("focusable", "false");
     svg.setAttribute("class", "spark");
-    const d = points
-      .map((v, i) => {
-        const x = SPARK_PAD + i * stepX;
-        const y = SPARK_PAD + innerH - ((v - min) / span) * innerH;
-        return (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2);
-      })
-      .join(" ");
+    const d = smoothSparkPath(coords);
+    // A subtle accent-tint fill under the line — decoration, not a second
+    // encoding of the trend (the line and the arrow already carry that) —
+    // only added once the line itself is smooth enough for a fill to read as
+    // calm rather than as more scribble.
+    const fill = document.createElementNS(SVG_NS, "path");
+    fill.setAttribute(
+      "d",
+      `${d} L${coords[coords.length - 1].x.toFixed(2)} ${SPARK_H} L${coords[0].x.toFixed(2)} ${SPARK_H} Z`
+    );
+    fill.setAttribute("fill", "currentColor");
+    fill.setAttribute("fill-opacity", "0.1");
+    fill.setAttribute("stroke", "none");
+    svg.appendChild(fill);
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", d);
     path.setAttribute("fill", "none");
@@ -1067,7 +1130,13 @@
     const row = el("div", "spark-row");
     row.appendChild(el("span", "spark-label", label));
     const line = el("div", "spark-line");
-    line.appendChild(el("span", "spark-value", format(historyVm.latest)));
+    // A zero is an absence, not a headline (design critique): "went quiet"
+    // is exactly what the line beside it (still drawn — see below) and a
+    // down arrow already show, so the number itself doesn't need to shout
+    // it in bold ink too.
+    line.appendChild(
+      el("span", historyVm.latest === 0 ? "spark-value zero" : "spark-value", format(historyVm.latest))
+    );
     if (historyVm.sparkline) {
       const svg = sparklineSvg(historyVm.points);
       if (svg) line.appendChild(svg);
@@ -1175,10 +1244,18 @@
   // is a class name we choose, never a value from HubSpot. Omit it for the
   // neutral outline — which is what a count gets, because a count is not a
   // state — or pass "" for the bare pill, i.e. the positive tone.
-  function setPill(pillEl, text, variant) {
+  function setPill(pillEl, text, variant, title) {
     pillEl.style.display = text ? "" : "none";
     pillEl.className = ("pill " + (variant === undefined ? "info" : variant)).trim();
     pillEl.textContent = text || "";
+    // Optional hover explanation for a pill whose value is a code a rep has
+    // to already know how to read (a letter grade, a status enum) — design
+    // critique H10: neither the grade scale nor the status convention is
+    // explained anywhere else in the panel, so this is the cheapest honest
+    // fix. Cleared whenever the pill is hidden or the caller has nothing to
+    // add, so a stale title never survives onto the next record.
+    if (title) pillEl.title = title;
+    else pillEl.removeAttribute("title");
   }
 
   function skeleton(body, rows) {
@@ -2061,7 +2138,11 @@
       ctx.grade ? `Grade ${ctx.grade}` : null,
       // Grade is a status, so it carries a semantic tone (A/B positive,
       // C caution, D/F negative) via the data layer's mapping.
-      ctx.grade && data && data.status ? `tone-${data.status.tone("account_grade_v1", ctx.grade)}` : undefined
+      ctx.grade && data && data.status ? `tone-${data.status.tone("account_grade_v1", ctx.grade)}` : undefined,
+      // The scale itself is explained nowhere else in the panel (design
+      // critique H10) — HubSpot's own account_grade_v1 property, A best
+      // through F worst, is the whole fact this hover adds.
+      ctx.grade ? "HubSpot account grade — A best, F worst" : undefined
     );
     clearNode(body);
 
@@ -2093,7 +2174,12 @@
       chip("Outbound", ctx.obTeamSize != null ? fmt.number(ctx.obTeamSize) : null, {
         title: "Outbound team",
       }),
-      chip("Leadership", ctx.leadershipTeamSize != null ? fmt.number(ctx.leadershipTeamSize) : null, {
+      // "Leadership" against a one-digit value drew a label 8x wider than
+      // its own value (design critique 3c) — the label alone sets a
+      // nowrap chip's width. "Leaders" says the same thing shorter; the
+      // full term stays one hover away in the title, same as every other
+      // chip's fuller wording.
+      chip("Leaders", ctx.leadershipTeamSize != null ? fmt.number(ctx.leadershipTeamSize) : null, {
         title: "Sales leadership team",
       }),
     ]);
@@ -2454,7 +2540,6 @@
     const accountObjectSplit = accountObj ? accountObjectChips(accountObj) : { headline: [], more: [] };
     const accountChips = (account.hasData
       ? [
-          chip("Account ID", mergedAccountId, { title: "Wiza account ID" }),
           chip(
             "Subscribed",
             // "0 of 1" is a zero; only a real subscription is worth the words.
@@ -2487,8 +2572,14 @@
         ]
       : []
     ).concat(accountObj ? accountObjectSplit.headline : []).filter(Boolean);
-    const accountMoreChips = accountObj ? accountObjectSplit.more : [];
-    const hasAccount = !!(accountChips.length || account.isTargetAccount || hasAccountObj);
+    // Account ID is a raw identifier, not a mid-call fact (design critique,
+    // item d) — it moves behind MORE with the rest of the billing/revenue
+    // detail; the admin/usage links above already carry the "find this
+    // account in Wiza" job a bare ID number doesn't.
+    const accountMoreChips = [chip("Account ID", mergedAccountId, { title: "Wiza account ID" })]
+      .concat(accountObj ? accountObjectSplit.more : [])
+      .filter(Boolean);
+    const hasAccount = !!(accountChips.length || accountMoreChips.length || account.isTargetAccount || hasAccountObj);
 
     // Nothing to say, or nothing left after the zeros went: no section.
     if (!user.isUser && !hasUserObj && !hasAccount && !hasTrial) {
@@ -2509,9 +2600,11 @@
       const sub = el("div", "wiza-sub");
       const head = el("div", "wiza-head");
       if (labelSubs) head.appendChild(el("span", "wiza-label", "User"));
-      if (pillLabel) {
-        head.appendChild(el("span", ("pill tiny " + pillVariant).trim(), pillLabel));
-      }
+      // The section head's own pill (setPill above) already states this
+      // exact status — it is the SAME pillLabel/pillVariant, not a
+      // coincidentally-matching one — so it is not repeated here (design
+      // critique: "Active" printed 3x). Nothing replaces it: the section
+      // pill is one glance away, immediately above.
       // Only worth saying when it's false — an unconfirmed email explains a lot
       // of "signed up but never used it" records.
       if (user.emailConfirmed === false) {
@@ -2524,6 +2617,13 @@
       const plan = [user.planStatus, user.planFrequency ? user.planFrequency.toLowerCase() : null]
         .filter(Boolean)
         .join(" ");
+      // Order (design critique, item d): related facts cluster — plan and its
+      // credits together, then the two timing facts — and the wrap breaks on
+      // a meaningful boundary: decision-relevant first (what they're on, when
+      // they last showed up, their role), the one raw identifier last,
+      // demoted below into MORE with the rest of the identifiers (the admin
+      // links a few lines down already carry the "jump to this Wiza user"
+      // job a bare ID number doesn't).
       const chips = chipRow([
         chip("Plan", plan, { title: "Plan status and billing frequency" }),
         chip(
@@ -2539,7 +2639,7 @@
           title: lastUsageAt ? `Last used ${fmt.dateTime(lastUsageAt)}` : null,
         }),
         chip("Signed up", signedUpAt ? fmt.date(signedUpAt) : null, { title: "Signed up" }),
-        chip("Wiza ID", wizaId, { title: "Wiza user ID" }),
+        chip("Role", userObj && userObj.role, { title: "Wiza role" }),
       ]);
       if (chips) sub.appendChild(chips);
 
@@ -2550,12 +2650,13 @@
         : null;
       if (spark) sub.appendChild(spark);
 
-      // Net-new profile facts only the custom object carries — behind the
-      // same MORE/LESS toggle the Account sub uses, so a fully-populated
-      // record doesn't spend height on them until asked.
+      // Net-new profile facts only the custom object carries, plus the raw
+      // Wiza ID (an identifier, not a mid-call fact) — behind the same
+      // MORE/LESS toggle the Account sub uses, so a fully-populated record
+      // doesn't spend height on them until asked.
       const more = chipDisclosure(
         [
-          chip("Role", userObj && userObj.role, { title: "Wiza role" }),
+          chip("Wiza ID", wizaId, { title: "Wiza user ID" }),
           chip(
             "Last enrichment",
             userObj && userObj.lastEnrichmentAt ? fmt.relativeTime(userObj.lastEnrichmentAt) : null,
@@ -2745,17 +2846,33 @@
           title: "Has overage",
           tone: accountObj.hasOverage === true ? "caution" : undefined,
         }),
+        // A free prospect with no card on file is the normal SDR-lead state,
+        // not a warning — no tone (design critique: never falsely alarm on a
+        // routine fact).
         chip(
           "Card on file",
           accountObj.hasCardOnFile == null ? null : accountObj.hasCardOnFile ? "Yes" : "No",
-          { title: "Has a card on file", tone: accountObj.hasCardOnFile === false ? "caution" : undefined }
+          { title: "Has a card on file" }
         ),
         // Stripe status is the headline fact (it's the one explicitly asked
         // for); account status stands in for it on a record with no Stripe
         // subscription at all — never BOTH silently, and never neither when
         // either exists. CRM-connected and the account's own trial flag are
         // hover detail rather than two more chips.
+        //
+        // Tone: only when the actual Stripe fact is bad (past_due/canceled —
+        // see STATUS_TONES.stripe_plan_subscription_status). "Active" and the
+        // account-status stand-in stay plain — billing is a different fact
+        // than the section's own Active/Trial pill and doesn't need its own
+        // color to repeat "things are fine".
         chip("Stripe status", accountObj.stripeStatus || accountObj.accountStatus, {
+          tone:
+            accountObj.stripeStatus && data && data.status
+              ? (() => {
+                  const t = data.status.tone("stripe_plan_subscription_status", accountObj.stripeStatus);
+                  return t === "neutral" ? undefined : t;
+                })()
+              : undefined,
           title:
             [
               accountObj.stripeStatus && accountObj.accountStatus && accountObj.accountStatus !== accountObj.stripeStatus
@@ -3066,11 +3183,13 @@
 
   // Used only by the two all-sections-empty branches in crmRender (signed
   // out, no prospect): everything downstream of Contact & company hides
-  // outright so the one message on that first section doesn't get repeated
-  // five more times. Every other state (loading, error, a bundle with real
-  // data) restores these to `false` at the top of crmRender before this
-  // could ever apply, so it never leaks into a state that has something to
-  // show.
+  // outright so the one message that state has to say doesn't get repeated
+  // five more times. (In the no-prospect branch, Contact & company hides
+  // itself too — see crmRender — because that state's one message already
+  // lives in the display headline above, not in this section.) Every other
+  // state (loading, error, a bundle with real data) restores these to
+  // `false` at the top of crmRender before this could ever apply, so it
+  // never leaks into a state that has something to show.
   function hideDownstreamCrmSections() {
     crmEls.accountSection.hidden = true;
     crmEls.colleaguesSection.hidden = true;
@@ -3107,6 +3226,7 @@
     // rendered list's. Activity joins them here too now (it never hid itself
     // before) purely so the dedup below can hide it — it must come back here
     // every render or it would stay hidden the first time that ever fires.
+    crmEls.identitySection.hidden = false;
     crmEls.accountSection.hidden = false;
     crmEls.colleaguesSection.hidden = false;
     crmEls.wizaSection.hidden = false;
@@ -3135,7 +3255,12 @@
       return;
     }
     if (!email) {
-      setNote(crmEls.identity, "No prospect captured yet — open one in the dialer.");
+      // The display headline above (#empty) already states this fact once;
+      // Contact & company joins the other five sections in deferring to it
+      // instead of restating it a line lower (design critique: one statement
+      // per fact).
+      clearNode(crmEls.identity);
+      crmEls.identitySection.hidden = true;
       hideDownstreamCrmSections();
       return;
     }
@@ -3577,10 +3702,15 @@
     // own placeholder, so it is hidden rather than spending two lines at 320px.
     // Neither branch invites typing here: this is a receipt for what the rep
     // wrote in the dialer, not the place they're asked to write it.
+    //
+    // No-prospect state (!state.ctx): the display headline above the CRM
+    // sections already states this fact once — this hint used to restate it
+    // a second time, so it defers and stays hidden here too (design critique:
+    // one statement per fact). The textarea's own placeholder still invites a
+    // typed note either way.
     if (!state.ctx) {
-      hintEl.hidden = false;
-      hintEl.textContent =
-        "Prospect not matched yet — open the prospect in the dialer so Dialer Helper Pro can read its HubSpot records.";
+      hintEl.hidden = true;
+      hintEl.textContent = "";
     } else if (!capture && !trimmed) {
       hintEl.hidden = false;
       hintEl.textContent = "No dialer note captured yet — notes you save in the dialer appear here.";
@@ -3619,7 +3749,18 @@
     // where the reasons very often come out identical. Same dedup guard as
     // renderResult(): skip the write when nothing changed, so a rep typing
     // doesn't get the same line read back on every character.
-    const reasonsText = gate.reasons.join(" ");
+    //
+    // No-prospect state: the hint above (and the display headline above the
+    // CRM sections) already say "no prospect" once — the gate's own
+    // not-matched reason would say it a third time. Drop it from what's
+    // shown here, but only when another reason is still visible to justify
+    // the disabled button; a fully silent blocker line on a dead button is
+    // worse than the repeat it replaces.
+    const visibleReasons =
+      !state.ctx && gate.reasons.length > 1
+        ? gate.reasons.filter((r) => !/Prospect not matched to HubSpot yet/.test(r))
+        : gate.reasons;
+    const reasonsText = visibleReasons.join(" ");
     if (reasonsText !== lastBlockersText) {
       lastBlockersText = reasonsText;
       blockersEl.textContent = reasonsText;

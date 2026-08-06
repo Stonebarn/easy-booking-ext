@@ -759,6 +759,22 @@
       // rep reading the owner next to it — a warning colour on every sequenced
       // contact would cry wolf on the common case.
       sequence: { enrolled: "info", not_enrolled: "neutral" },
+      // Stripe's own subscription status (design critique, Wiza usage polish):
+      // billing is a different fact than "is this person an active Wiza
+      // user" (the section pill already says that), so it only earns a tone
+      // when the news is actually bad — a lapsed or failed payment a rep
+      // might want to know about mid-call. "active"/"trialing" stay
+      // unmapped, which statusTone reads as `neutral` and the renderer
+      // treats as no tone at all — a plain value, not a second status pill.
+      // Exact enum unverified against a live past_due/canceled record.
+      stripe_plan_subscription_status: {
+        past_due: "caution",
+        unpaid: "caution",
+        incomplete: "caution",
+        canceled: "negative",
+        cancelled: "negative",
+        incomplete_expired: "negative",
+      },
     },
     // Aliases → the STATUS_TONES key they mean, so the renderer can ask for
     // either the HubSpot property name or the label the panel shows.
@@ -777,6 +793,8 @@
       deal_status: "deal",
       sequence_enrolled: "sequence",
       in_sequence: "sequence",
+      stripe: "stripe_plan_subscription_status",
+      stripe_status: "stripe_plan_subscription_status",
     },
 
     // Portal currency. Amounts come back as bare numbers in the portal's

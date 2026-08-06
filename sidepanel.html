@@ -1334,6 +1334,9 @@
         gap: 1px;
         margin-top: 4px;
       }
+      /* Same cursor cue as .chip[title]: this row carries a title too (what
+         the number is), so it should read as hoverable the same way. */
+      .spark-row[title] { cursor: help; }
       .spark-label {
         font-size: 10px;
         line-height: 12px;
@@ -1346,12 +1349,19 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        line-height: 18px;
+        line-height: 16px;
       }
       .spark-value {
         font-size: 12px;
         font-weight: var(--fw-value);
         color: var(--ink);
+      }
+      /* A zero is an absence, not a headline: muted and un-bolded rather than
+         the usual bold-ink value, even though the chart beside it (and a down
+         arrow, when there is one) still draw the "went quiet" trend. */
+      .spark-value.zero {
+        font-weight: var(--fw-body);
+        color: var(--muted);
       }
       /* Decoration, not meaning — the purple accent scale, same as every other
          chart/graphical mark in the panel that isn't a status. */
@@ -1688,7 +1698,11 @@
       <!-- The Wiza mark. A local file, never a data URI; alt is empty because
            the wordmark beside it is the accessible name. -->
       <img class="brand" src="icons/wizainc_logo.png" alt="" aria-hidden="true" />
-      <span class="dot"></span>
+      <!-- Capture status, not connection status (design critique: green here
+           reads as "connected" but means "a prospect is loaded"). role="img"
+           plus a title/aria-label named in JS (sidepanel.js render()) so the
+           fact is stated, not just implied by color. -->
+      <span class="dot" id="header-dot" role="img"></span>
       <h1>Dialer Helper Pro</h1>
       <span class="spacer"></span>
       <!-- The gear. Static inline SVG: MV3's CSP rules out a remote asset, there
