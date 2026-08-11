@@ -2255,9 +2255,11 @@
     // falls back to the legacy string list for a stale cached bundle.
     const stack = ctx.techStack;
     if (stack && stack.items && stack.items.length) {
-      const row = el("div", "fact-line tech-line");
-      const value = el("span");
-      value.appendChild(el("span", null, "Tech: "));
+      // Label over value, like the chips above: the 10px caps is the label's
+      // job, so the list itself reads at the 12px body step in full ink.
+      const row = el("div", "fact-block");
+      row.appendChild(el("span", "fact-label", "Tech"));
+      const value = el("div", "fact-value tech-line");
 
       // Rebuilt on every toggle: item spans joined by plain ", " text nodes,
       // competitor names in the accent style (decoration = purple scale).
@@ -2294,8 +2296,9 @@
       body.appendChild(row);
     } else if (ctx.tech) {
       // Legacy shape (pre-v11 cached bundle): plain strings, no competitor info.
-      const row = el("div", "fact-line");
-      const value = el("span", null, `Tech: ${ctx.tech.items.join(", ")}`);
+      const row = el("div", "fact-block");
+      row.appendChild(el("span", "fact-label", "Tech"));
+      const value = el("div", "fact-value", ctx.tech.items.join(", "));
       if (ctx.tech.more > 0) {
         value.appendChild(el("span", "ctx-more", ` +${ctx.tech.more} more`));
         value.title = ctx.tech.all.join(", ");
@@ -2304,15 +2307,18 @@
       body.appendChild(row);
     }
 
-    // Why the ICP call was made. Model-written, runs to paragraphs, and the
-    // least scannable thing in the panel: two muted lines and a toggle.
+    // Why the ICP call was made. Model-written and runs to paragraphs, so it
+    // still shows two lines and hands the rest to a toggle — but at the same
+    // size and in the same ink as the blurb above it. A WHY label and its
+    // position are what make it secondary; shrinking it only made it unreadable
+    // (rep feedback, v0.7.1).
     const reasoning = ctx.icpReasoningFull || ctx.icpReasoning;
-    const why = proseBlock(
-      reasoning ? `Why: ${reasoning}` : null,
-      "why",
-      "why this account is graded this way"
-    );
-    if (why) body.appendChild(why);
+    const why = proseBlock(reasoning, "why", "why this account is graded this way");
+    if (why) {
+      why.classList.add("fact-block");
+      why.insertBefore(el("span", "fact-label", "Why"), why.firstChild);
+      body.appendChild(why);
+    }
 
     attachProseToggles(body);
   }
@@ -3570,7 +3576,16 @@
   // document, so nothing on the web can reach it.
   {
     const EB = (window.EB = window.EB || {});
-    EB.panel = { crmRender, mountBooking, identityLeadsColumn, closeSettings };
+    EB.panel = {
+      crmRender,
+      mountBooking,
+      identityLeadsColumn,
+      closeSettings,
+      // Exposed so the harness can render Account context from a fixture
+      // bundle: its two long facts (Tech, Why) are the ones reps read most
+      // closely, and their legibility is worth a measured check.
+      renderAccountSection,
+    };
   }
 })();
 

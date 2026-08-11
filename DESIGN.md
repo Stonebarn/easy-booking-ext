@@ -84,6 +84,10 @@ components:
     borderColor: "{colors.meadow-green}"
     textColor: "{colors.meadow-green-text}"
     rounded: "{rounded.card}"
+  block-labelled:
+    textColor: "{colors.deep-plum-ink}"
+    labelColor: "{colors.dusk-grey}"
+    typography: "{typography.body}"
   bar-mode:
     backgroundColor: "{colors.lilac-wash}"
     borderColor: "{colors.wiza-violet}"
@@ -249,6 +253,20 @@ the parent's radius minus the inset, so the curves stay concentric.
   1px 6px padding; 10px caps label over 12px value; label never wraps,
   value does
 - **Tone:** only a *status* chip tints its value — a tone is meaning
+
+### Labelled blocks
+The stat chip taken vertical, for a fact too long to sit in a chip: the tech
+stack and the ICP rationale.
+- **Style:** 10px caps dusk-grey label on its own line, content beneath on
+  the 12px body step in deep-plum ink — the same size and ink as every other
+  value in the panel
+- **Never an inline prefix.** These were "Tech: …" and "Why: …" rows at 10px
+  in muted grey, and reps reported both as too small to read. 10px in this
+  panel is for ALL-CAPS labels and single-fact caption lines, never for a
+  paragraph or a list of product names. Moving the word into a label is what
+  paid for the content's size, so no row got taller.
+- Long content still clamps to two lines with an explicit MORE/LESS toggle;
+  the DOM holds the full text either way
 
 ### Pills
 - **Style:** fully-round, tone tint fill with tone text ("In sequence",

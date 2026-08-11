@@ -700,25 +700,16 @@
       .crm-note { font-size: 12px; color: var(--muted); margin: 0; }
       .crm-note.bad { color: var(--tone-negative-fg); }
 
-      /* One dense, wrapping line of facts. The labelled datapoints that used to
-         live here are stat chips now (see below); what is left is the Tech row,
-         where the value is one long comma-separated list with its own toggle.
-         There is no separator glyph anywhere in the panel: discrete facts are
-         separated by the row's own column gap — wide enough to read as a break,
-         and nothing lands in the accessibility tree or a copied selection that
-         isn't a value. Every other fact row (.ident-seq, .peer-meta,
-         .act-detail, .deal-outcome, .ident-facts) follows the same rule. */
-      .fact-line {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 0 10px;
-        font-size: 10px;
-        line-height: 1.35;
-        color: var(--muted);
-        overflow-wrap: anywhere;
-      }
-      .fact-line > span[title] { cursor: help; }
+      /* .fact-line is gone. It was the generic "one dense wrapping line of
+         10px muted facts" row, and by the end the Tech stack was its only
+         remaining user — which is exactly the row reps called unreadable. Tech
+         is a labelled block now (see .fact-block above), so nothing was left for
+         this rule to style. The rows it was the template for (.ident-seq,
+         .peer-meta, .act-detail, .deal-outcome, .ident-facts) each carry their
+         own rule and still follow its one lasting decision: no separator glyph
+         anywhere in the panel — discrete facts are separated by the row's own
+         column gap, so nothing lands in the accessibility tree or a copied
+         selection that isn't a value. */
 
       /* ---- Stat chips ---------------------------------------------------
          The panel's one labelled-datapoint idiom: a muted ALL-CAPS caption over
@@ -762,6 +753,34 @@
         overflow-wrap: anywhere;
       }
 
+      /* ---- Labelled block ------------------------------------------------
+         The stat-chip idiom taken vertical, for the two facts too long to sit in
+         a chip: the tech stack and the ICP rationale.
+
+         Both used to be inline rows prefixed "Tech: " / "Why: " at 10px in
+         muted grey, and reps reported them as small and hard to read. They were
+         right, and the rule they were breaking is this panel's own: 10px is for
+         ALL-CAPS labels and single-fact caption lines — never for a paragraph or
+         a list of product names. So the 10px caps moved to a label of its own
+         and the content came up to the 12px body step in full ink, which is
+         where every other value in the panel already lives. Removing the inline
+         prefix is what paid for the label's line: no row got taller. */
+      .fact-block > .fact-label {
+        display: block;
+        font-size: 10px;
+        line-height: 12px;
+        font-weight: var(--fw-caption);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .fact-value {
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+
       /* Running prose (the company blurb, the ICP rationale) is the least
          scannable thing in the panel, so it shows two lines and hands the rest
          to an explicit toggle. The DOM holds the full text either way, so
@@ -780,7 +799,9 @@
         display: block;
         -webkit-line-clamp: unset;
       }
-      .prose.why { font-size: 10px; color: var(--muted); }
+      /* The ICP rationale reads at the same size and in the same ink as the
+         company blurb above it. It is secondary because of what its WHY label
+         says and where it sits, not because it was shrunk and greyed. */
       .prose-more {
         margin: 1px 0 0;
         width: auto;
@@ -1670,7 +1691,7 @@
 
          LAST in the file on purpose. A tone class is applied on top of whatever
          a node already is, and several of those bases set a colour of their own
-         at the same specificity (.pill, .crm-note, .fact-line) — so the tone
+         at the same specificity (.pill, .crm-note, .fact-value) — so the tone
          has to be the later rule to win without an !important or an id. */
       .tone-positive { color: var(--tone-positive-fg); }
       .tone-caution { color: var(--tone-caution-fg); }

@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-11
+
+### Fixed — Account context's tech stack and rationale are readable
+
+Rep feedback: the **Tech** and **Why** lines in Account context were too small
+and hard to read. They were — both ran as inline rows prefixed "Tech: " /
+"Why: " at **10px in muted grey**, and 10px in this panel is meant for ALL-CAPS
+labels and single-fact caption lines, never for a paragraph or a list of product
+names.
+
+Both are labelled blocks now, the same label-over-value shape as the stat chips
+directly above them: a 10px caps **TECH** / **WHY** label on its own line, with
+the content beneath on the **12px body step in full ink** — the same size and
+colour as the company blurb and as every other value in the panel. Contrast on
+the rendered pixels goes from 5.9:1 muted grey to 13.9:1 ink.
+
+Moving the word up into the label is what paid for the size: the inline prefix
+is gone, so no row got taller. Everything else holds — the rationale still
+clamps to two lines with a MORE toggle, the tech list still shows four with
+MORE (n), and competitor names still carry the violet highlight (verified
+through the expand toggle).
+
+`.fact-line` — the generic 10px muted fact row — is removed. The tech stack was
+its last remaining user, which is to say the rule existed only to style the row
+reps couldn't read.
+
 ## [0.7.0] - 2026-08-11
 
 ### Added — reps set their own section order
