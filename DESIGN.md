@@ -84,6 +84,11 @@ components:
     borderColor: "{colors.meadow-green}"
     textColor: "{colors.meadow-green-text}"
     rounded: "{rounded.card}"
+  bar-mode:
+    backgroundColor: "{colors.lilac-wash}"
+    borderColor: "{colors.wiza-violet}"
+    textColor: "{colors.violet-ink}"
+    rounded: "{rounded.control}"
 motion:
   ease-out: "cubic-bezier(0.16, 1, 0.3, 1)"
   feedback: "160ms"
@@ -282,6 +287,28 @@ white round chip on the tone border, and a drawn dismiss glyph. It is the one
 place a second decorated surface is allowed, because it is a fact with
 valence rather than decoration — and it is transient. Absent by default;
 never a modal, never focus-stealing.
+
+### Arrange mode
+Section order belongs to the rep, so the panel has one temporary mode for
+setting it — and the mode carries all of its own chrome, so the everyday panel
+carries none.
+
+- **The mode bar** (`bar-mode`): a lilac-wash strip with a full-violet
+  hairline, sticky to the top of the arrangeable list, holding a 10px caps
+  "ARRANGING SECTIONS", a text Reset and a solid Done. Strong on purpose — the
+  panel is in a state it must be able to leave.
+- **Section heads gain** a 10px tabular "3/7" readout and two 20px ghost
+  chevron buttons, right-aligned. Disabled at the ends of the *visible* list.
+- **Each movable section** gains a 1px dashed lavender-soft edge showing how
+  far it reaches. Deliberately faint: which sections are movable is said by the
+  controls and the readout, so the edge is a supporting hint, and seven
+  saturated boxes down a 320px column would drown what they describe.
+- **Feedback** is a 320ms outline pulse on the section that moved — violet and
+  solid, settling back to the dashed hint. Not a slide: sliding cards inside a
+  scrolling panel fight the scroll position.
+- **Nothing is pinned inside the mode.** The won-meeting receipt and the
+  booking block stay above the bar and never move, because they are the call
+  rather than context about it.
 
 ## Motion
 

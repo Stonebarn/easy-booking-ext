@@ -2132,8 +2132,45 @@
     body.appendChild(cols);
     // The booking cluster moves in now the column is in the document, and lands
     // directly under the contact's header row — before the title, the phone and
-    // the owners. (The anchor is the header, not the name line inside it.)
-    mountBooking(colC, head.nextSibling);
+    // the owners. (The anchor is the header, not the name line inside it.) Only
+    // while this section still leads the column, though — see below.
+    if (identityLeadsColumn()) mountBooking(colC, head.nextSibling);
+  }
+
+  // The email, the prospect's clock and Fill form merge into the Contact column
+  // ONLY while Contact & company is the first section on screen. Sections are
+  // reorderable now (see the layout module at the end of this file), and a rep
+  // who puts Activity or Dialer notes first must not have the booking cluster
+  // travel down the panel inside Contact & company: that cluster is the call,
+  // not context about it. When it isn't leading, the cluster stays in its own
+  // pinned #prospect block at the top — the same fallback home it already uses
+  // when there is no HubSpot match at all.
+  // Re-decides the cluster's home against the CRM card that is already on
+  // screen. Reaches for the rendered contact column rather than re-rendering it:
+  // if there isn't one (no match, signed out, loading, error), the cluster parks,
+  // which is exactly what those states want anyway.
+  function remountBooking() {
+    const colC = crmEls.identity.querySelector(".ident-cols .ident-col");
+    const head = colC ? colC.querySelector(".ident-head") : null;
+    if (!colC || !head || crmEls.identitySection.hidden || !identityLeadsColumn()) {
+      mountBooking(null);
+      return;
+    }
+    // The cluster may already be sitting in this slot, and insertBefore must
+    // never be handed the node it is moving as its own anchor.
+    const after = head.nextSibling;
+    mountBooking(colC, after === capturedEl ? capturedEl.nextSibling : after);
+  }
+
+  function identityLeadsColumn() {
+    const main = document.querySelector("main");
+    if (!main) return true;
+    for (const node of main.children) {
+      if (node.tagName !== "SECTION" || !node.hasAttribute("data-arrange")) continue;
+      if (node.hidden) continue;
+      return node === crmEls.identitySection;
+    }
+    return true;
   }
 
   // --- Account context (Phase 8) -------------------------------------------
@@ -3516,9 +3553,25 @@
     if (touched) crmSync();
   });
 
+  // 3) The rep reordering their sections changes exactly one thing in here:
+  //    whether Contact & company still leads the column, and so which of the
+  //    booking cluster's two homes it belongs in. Only that is re-decided — a
+  //    full crmRender would rebuild six cards from scratch on every press of an
+  //    arrow, which is a lot of work to answer a question about one node.
+  window.addEventListener("eb:layout-changed", () => {
+    remountBooking();
+  });
+
   renderHubSpot();
   crmRender();
   refreshHubSpotState();
+
+  // Console/harness seam, like EB.celebration and EB.layout below. Isolated
+  // document, so nothing on the web can reach it.
+  {
+    const EB = (window.EB = window.EB || {});
+    EB.panel = { crmRender, mountBooking, identityLeadsColumn, closeSettings };
+  }
 })();
 
 // ===========================================================================
@@ -4887,6 +4940,457 @@
     celebrate,
     stopBurst,
     applyBooked,
+    state,
+  };
+})();
+
+// ===========================================================================
+// Section order (Phase 12)
+// ---------------------------------------------------------------------------
+// Brian and Savannah read the panel in different orders — one opens with
+// Activity, the other wants Dialer notes where their thumb already is — so the
+// order of the sections is the rep's, not ours. Seven sections move; the
+// won-meeting receipt and the booking block above them do not, because those
+// are the call itself rather than context about it.
+//
+// Three decisions worth knowing before changing anything here:
+//
+//   1. The DEFAULT order is read out of the DOM at load, before any stored
+//      order is applied. There is no hardcoded list to fall out of sync with
+//      the markup: adding a section to sidepanel.html with data-arrange makes
+//      it movable, and reps who have already arranged their panel get it next
+//      to the section it shipped behind rather than at the bottom (normalize).
+//
+//   2. A move jumps over sections that are currently HIDDEN because this
+//      prospect has nothing for them. Swapping with something invisible reads
+//      as a dead button, and a dead button mid-call costs trust in the whole
+//      control.
+//
+//   3. The up/down controls are built and destroyed with arrange mode, not
+//      hidden with CSS. Fourteen extra buttons in the heads would be fourteen
+//      extra tab stops on every call for a screen-reader user on their way to
+//      the note they came for — and nobody rearranges their panel while a
+//      prospect is talking.
+//
+// Shares the "eb:settings" object with the notes and celebration modules (all
+// three merge, none clobbers).
+// ===========================================================================
+(() => {
+  "use strict";
+
+  const SETTINGS_KEY = "eb:settings";
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  // The moved section holds its brightened edge this long. Matches the panel's
+  // state duration (see the motion section in sidepanel.html).
+  const FLASH_MS = 320;
+
+  const mainEl = document.querySelector("main");
+  if (!mainEl) return; // markup absent: this module simply doesn't exist
+  const statusEl = document.getElementById("arrange-status");
+  const toggleEl = document.getElementById("setting-arrange");
+  let barEl = null;
+
+  // The markup is the spec. Read once, before anything reorders it.
+  const DEFAULT_ORDER = Array.prototype.slice
+    .call(mainEl.children)
+    .filter((n) => n.tagName === "SECTION" && n.hasAttribute("data-arrange") && n.id)
+    .map((n) => n.id);
+
+  const state = {
+    order: DEFAULT_ORDER.slice(),
+    arranging: false,
+  };
+  let visObserver = null;
+  let flashTimer = null;
+  let flashed = null;
+
+  const sec = (id) => document.getElementById(id);
+
+  function nameOf(id) {
+    const el = sec(id);
+    if (!el) return id;
+    if (el.dataset && el.dataset.secName) return el.dataset.secName;
+    const title = el.querySelector(".section-title");
+    return (title && title.textContent.trim()) || id;
+  }
+
+  // --- Stored order → a real order -----------------------------------------
+  // Tolerant on purpose: the stored value is data a previous version wrote, so
+  // it may name sections this build removed, repeat one, be some other type
+  // entirely, or simply not know about a section added since. None of those may
+  // cost the rep a section they can't get back without clearing storage.
+  function normalize(stored) {
+    const known = new Set(DEFAULT_ORDER);
+    const placed = new Set();
+    const out = [];
+    for (const id of Array.isArray(stored) ? stored : []) {
+      if (typeof id !== "string" || !known.has(id) || placed.has(id)) continue;
+      placed.add(id);
+      out.push(id);
+    }
+    if (!out.length) return DEFAULT_ORDER.slice();
+    // Anything the stored order never heard of lands directly after the
+    // nearest section it shipped behind — so a new section appears where it was
+    // designed to appear, not at the bottom of every arranged panel.
+    for (let i = 0; i < DEFAULT_ORDER.length; i += 1) {
+      const id = DEFAULT_ORDER[i];
+      if (placed.has(id)) continue;
+      let at = 0;
+      for (let j = i - 1; j >= 0; j -= 1) {
+        const idx = out.indexOf(DEFAULT_ORDER[j]);
+        if (idx !== -1) {
+          at = idx + 1;
+          break;
+        }
+      }
+      out.splice(at, 0, id);
+      placed.add(id);
+    }
+    return out;
+  }
+
+  // The seven are contiguous at the end of <main> — the receipt, the booking
+  // block and its rule are pinned above them — so appending them in order IS
+  // the whole re-layout. It is also self-healing: whatever order the DOM was
+  // in, it matches state.order afterwards.
+  function applyOrder() {
+    for (const id of state.order) {
+      const el = sec(id);
+      if (el) mainEl.appendChild(el);
+    }
+  }
+
+  // Only the sections a rep can actually see are numbered, so the readout in
+  // the head and the spoken position always describe the panel in front of them.
+  function positions() {
+    const vis = state.order.filter((id) => {
+      const el = sec(id);
+      return el && !el.hidden;
+    });
+    const map = new Map();
+    vis.forEach((id, i) => {
+      map.set(id, { n: i + 1, total: vis.length, first: i === 0, last: i === vis.length - 1 });
+    });
+    return map;
+  }
+
+  function say(text) {
+    if (statusEl) statusEl.textContent = text;
+  }
+
+  // --- Moving ---------------------------------------------------------------
+  // A swap, not a splice: up-then-down puts a section exactly back where it
+  // was, which is what a rep trying the controls out expects.
+  function move(id, dir) {
+    const from = state.order.indexOf(id);
+    if (from === -1) return false;
+    const step = dir === "up" ? -1 : 1;
+    let to = from + step;
+    while (to >= 0 && to < state.order.length) {
+      const el = sec(state.order[to]);
+      if (el && !el.hidden) break;
+      to += step;
+    }
+    if (to < 0 || to >= state.order.length) return false;
+    const next = state.order.slice();
+    next[from] = next[to];
+    next[to] = id;
+    state.order = next;
+    applyOrder();
+    save();
+    refresh();
+    const pos = positions().get(id);
+    say(pos ? `${nameOf(id)}, position ${pos.n} of ${pos.total}.` : `${nameOf(id)} moved.`);
+    flash(id);
+    focusControl(id, dir);
+    // The panel scrolls; a section that moved off screen looks like nothing
+    // happened. "nearest" so a move that needed no scroll causes none.
+    const el = sec(id);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+    announceChange();
+    return true;
+  }
+
+  function announceChange() {
+    window.dispatchEvent(
+      new CustomEvent("eb:layout-changed", { detail: { order: state.order.slice() } })
+    );
+  }
+
+  function flash(id) {
+    if (flashed) flashed.classList.remove("arr-moved");
+    clearTimeout(flashTimer);
+    const el = sec(id);
+    if (!el) return;
+    flashed = el;
+    // Restart the run even when the same section is moved twice in a row.
+    void el.offsetWidth;
+    el.classList.add("arr-moved");
+    flashTimer = setTimeout(() => {
+      el.classList.remove("arr-moved");
+      if (flashed === el) flashed = null;
+    }, FLASH_MS);
+  }
+
+  // appendChild moves the node, which drops focus. Put it back on the same
+  // control so a rep can press Down three times without reaching for the mouse
+  // — and fall back to the opposite control when this one just became the end
+  // of the list and disabled itself.
+  function focusControl(id, dir) {
+    const el = sec(id);
+    if (!el) return;
+    const want = el.querySelector(`.arr-btn[data-dir="${dir}"]`);
+    const other = el.querySelector(`.arr-btn[data-dir="${dir === "up" ? "down" : "up"}"]`);
+    const target = want && !want.disabled ? want : other;
+    if (target && target.focus) target.focus();
+  }
+
+  // --- Controls -------------------------------------------------------------
+  function chevron(up) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", up ? "M6 14.5 12 8.5l6 6" : "M6 9.5l6 6 6-6");
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function arrangeButton(id, dir) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "arr-btn";
+    btn.dataset.dir = dir;
+    btn.dataset.sec = id;
+    btn.appendChild(chevron(dir === "up"));
+    // "Others at this account" is a collapsible section, so its head is a
+    // <summary>: without these two, every press would also open or close it.
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      move(id, dir);
+    });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") e.stopPropagation();
+    });
+    return btn;
+  }
+
+  function buildControls() {
+    for (const id of state.order) {
+      const el = sec(id);
+      if (!el || el.querySelector(".sec-arrange")) continue;
+      const head = el.querySelector(".section-head");
+      if (!head) continue;
+      // A <span>, not a <div>: a <summary>'s content model is phrasing content,
+      // and the colleagues head is a <summary>.
+      const group = document.createElement("span");
+      group.className = "sec-arrange";
+      const pos = document.createElement("span");
+      pos.className = "arr-pos";
+      group.appendChild(pos);
+      group.appendChild(arrangeButton(id, "up"));
+      group.appendChild(arrangeButton(id, "down"));
+      head.appendChild(group);
+    }
+  }
+
+  function removeControls() {
+    for (const group of mainEl.querySelectorAll(".sec-arrange")) group.remove();
+  }
+
+  // The bar that says arrange mode is on, and holds the two things a rep needs
+  // once they are in it: back to default, and out. It sits directly above the
+  // list it governs — the pinned booking block stays above it, untouched.
+  function buildBar() {
+    if (barEl) return;
+    barEl = document.createElement("div");
+    barEl.className = "arr-bar";
+    barEl.id = "arrange-bar";
+    const label = document.createElement("span");
+    label.className = "arr-bar-label";
+    label.textContent = "Arranging sections";
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "linkish";
+    resetBtn.id = "arrange-reset";
+    resetBtn.textContent = "Reset";
+    resetBtn.title = "Put the sections back in the default order";
+    resetBtn.addEventListener("click", () => reset());
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "arr-done";
+    done.id = "arrange-done";
+    done.textContent = "Done";
+    done.addEventListener("click", () => setArranging(false));
+    barEl.appendChild(label);
+    barEl.appendChild(resetBtn);
+    barEl.appendChild(done);
+    const first = sec(state.order[0]);
+    mainEl.insertBefore(barEl, first || null);
+  }
+
+  function removeBar() {
+    if (!barEl) return;
+    barEl.remove();
+    barEl = null;
+  }
+
+  // Position readouts and the two end-of-list disabled states. Runs after every
+  // move and whenever a section hides or shows itself under a new prospect.
+  function refresh() {
+    if (!state.arranging) return;
+    const map = positions();
+    for (const id of state.order) {
+      const el = sec(id);
+      if (!el) continue;
+      const group = el.querySelector(".sec-arrange");
+      if (!group) continue;
+      const pos = map.get(id);
+      const posEl = group.querySelector(".arr-pos");
+      if (posEl) posEl.textContent = pos ? `${pos.n}/${pos.total}` : "";
+      const name = nameOf(id);
+      for (const btn of group.querySelectorAll(".arr-btn")) {
+        const up = btn.dataset.dir === "up";
+        btn.disabled = !pos || (up ? pos.first : pos.last);
+        btn.setAttribute("aria-label", `Move ${name} ${up ? "up" : "down"}`);
+        btn.title = btn.getAttribute("aria-label");
+      }
+    }
+  }
+
+  // Sections hide and show themselves per prospect (see crmRender), which
+  // changes both the numbering and which buttons are at the ends of the list.
+  // Watched only while arranging, so this costs nothing during a normal call.
+  function watchVisibility() {
+    if (visObserver || typeof MutationObserver !== "function") return;
+    visObserver = new MutationObserver(() => refresh());
+    for (const id of state.order) {
+      const el = sec(id);
+      if (el) visObserver.observe(el, { attributes: true, attributeFilter: ["hidden"] });
+    }
+  }
+
+  function unwatchVisibility() {
+    if (!visObserver) return;
+    visObserver.disconnect();
+    visObserver = null;
+  }
+
+  function setArranging(on) {
+    const was = state.arranging;
+    state.arranging = !!on;
+    mainEl.classList.toggle("arranging", state.arranging);
+    if (state.arranging) {
+      buildBar();
+      buildControls();
+      refresh();
+      watchVisibility();
+    } else {
+      unwatchVisibility();
+      removeControls();
+      removeBar();
+    }
+    if (toggleEl) toggleEl.setAttribute("aria-pressed", state.arranging ? "true" : "false");
+    if (was === state.arranging) return;
+    if (state.arranging) {
+      // The popover the toggle lives in sits over the sections about to be
+      // moved, so entering arrange mode closes it and puts the keyboard on the
+      // first control that can actually do something. Leaving puts focus back on
+      // the gear, which is where the rep would go next anyway.
+      const panel = window.EB && window.EB.panel;
+      if (panel && panel.closeSettings) panel.closeSettings(false);
+      const firstUsable = mainEl.querySelector(".arr-btn:not([disabled])");
+      if (firstUsable && firstUsable.focus) firstUsable.focus();
+      say("Arrange mode on. Every section head has an up and a down control.");
+    } else {
+      const gear = document.getElementById("settings-btn");
+      if (gear && gear.focus) gear.focus();
+      say("Arrange mode off. Your order is saved.");
+    }
+  }
+
+  function reset() {
+    state.order = DEFAULT_ORDER.slice();
+    applyOrder();
+    save();
+    refresh();
+    say("Sections are back in the default order.");
+    announceChange();
+  }
+
+  // --- Storage --------------------------------------------------------------
+  async function save() {
+    try {
+      const res = (await chrome.storage.local.get(SETTINGS_KEY)) || {};
+      const merged = { ...(res[SETTINGS_KEY] || {}), sectionOrder: state.order.slice() };
+      await chrome.storage.local.set({ [SETTINGS_KEY]: merged });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] layout: could not save the section order:", (e && e.message) || e);
+    }
+  }
+
+  function adopt(stored) {
+    const next = normalize(stored);
+    if (next.join("|") === state.order.join("|")) return;
+    state.order = next;
+    applyOrder();
+    refresh();
+    announceChange();
+  }
+
+  // --- Wiring ---------------------------------------------------------------
+  if (toggleEl) {
+    toggleEl.addEventListener("click", () => setArranging(!state.arranging));
+  }
+
+  // Escape is the way out of every other transient state in the panel (the
+  // popover, an armed confirm), so it is the way out of this one too.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !state.arranging) return;
+    e.preventDefault();
+    setArranging(false);
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[SETTINGS_KEY]) return;
+    const next = changes[SETTINGS_KEY].newValue;
+    adopt(next && typeof next === "object" ? next.sectionOrder : null);
+  });
+
+  (async () => {
+    let stored = null;
+    try {
+      const res = (await chrome.storage.local.get(SETTINGS_KEY)) || {};
+      stored = res[SETTINGS_KEY] && typeof res[SETTINGS_KEY] === "object"
+        ? res[SETTINGS_KEY].sectionOrder
+        : null;
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] layout: could not read the section order:", (e && e.message) || e);
+    }
+    state.order = normalize(stored);
+    applyOrder();
+    announceChange();
+  })();
+
+  // Console/harness seam. Isolated document, so nothing on the web can reach it.
+  const EB = (window.EB = window.EB || {});
+  EB.layout = {
+    DEFAULT_ORDER,
+    normalize,
+    positions,
+    move,
+    reset,
+    setArranging,
+    applyOrder,
     state,
   };
 })();

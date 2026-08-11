@@ -1889,6 +1889,138 @@
         70%, 100% { transform: scale(2.1); opacity: 0; }
       }
 
+      /* ---- Arrange mode ------------------------------------------------
+         The order of the sections belongs to the rep (Brian and Savannah both
+         asked to move them up and down), but the controls for it do not belong
+         on screen during a call. So they exist only while Arrange is on, and
+         they are built and removed in JS rather than hidden in CSS: two extra
+         buttons per head is six extra stops a screen-reader user would tab
+         through on every call to reach the note they came for.
+
+         While arranging, every movable section wears a dashed edge showing how
+         far it reaches — useful, because what moves is the whole block and not
+         just the head the controls are in. It is deliberately faint: WHICH
+         sections are movable is stated by the controls and the "3/7" readout in
+         each head, so this is a supporting hint, and seven saturated boxes down
+         a 320px column would drown the panel it is describing. */
+      main.arranging > section[data-arrange] {
+        outline: 1px dashed var(--accent-soft);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+      /* Arrange mode is entered from Settings, but it cannot be LIVED IN there:
+         the popover sits over the sections the rep is about to move. So the
+         moment it turns on, the popover closes and this bar takes over — the way
+         out and the way back to default, in the place the work is happening.
+         Sticky, because the list it governs is taller than the panel and "Done"
+         must never be a scroll away. */
+      .arr-bar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        padding: 6px 8px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--accent-wash);
+      }
+      .arr-bar-label {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: 10px;
+        line-height: 14px;
+        font-weight: var(--fw-head);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--accent-ink);
+      }
+      /* Both override the full-width `button` base rule. */
+      .arr-bar .linkish { color: var(--accent-ink); }
+      /* Keeps the 12px button step — only the full-width geometry of the base
+         `button` rule is overridden, not its type. */
+      .arr-bar .arr-done {
+        flex: 0 0 auto;
+        width: auto;
+        margin: 0;
+        padding: 4px 10px;
+        border-radius: 6px;
+      }
+
+      /* Right end of the head while arranging: the position, then up, then down
+         — the pair in the direction they mean, and both under one thumb. */
+      .sec-arrange {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 2px;
+        /* "Others at this account" has a <summary> for a head, with a .hit24
+           overlay stretched across it — that overlay is what gives the toggle a
+           24px target, and being an ::after it paints over the summary's own
+           children. Without lifting this group out from under it, every press on
+           an arrow would land on the overlay and collapse the section instead of
+           moving it. */
+        position: relative;
+        z-index: 1;
+      }
+      /* "2/7". Tabular so the pair of digits doesn't shift the buttons sideways
+         as the number changes under a repeated press. */
+      .arr-pos {
+        font-size: 10px;
+        line-height: 14px;
+        font-weight: var(--fw-head);
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      /* Overrides the full-width `button` base rule, like header .gear does. */
+      .arr-btn {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        box-shadow: none;
+        color: var(--ink);
+        cursor: pointer;
+        line-height: 0;
+      }
+      .arr-btn svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+        /* So a press lands on the button, never on a path inside it. */
+        pointer-events: none;
+      }
+      .arr-btn:hover { background: var(--accent-wash); color: var(--accent-ink); }
+      .arr-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      /* The section is already at one end of the list. Greyed to the control-edge
+         grey, which is the one thing --tertiary is allowed to carry. */
+      .arr-btn[disabled] {
+        color: var(--tertiary);
+        cursor: default;
+        background: transparent;
+      }
+
+      /* The moved section brightens its own edge for a moment. A rep who presses
+         Down twice needs to know which card just answered — and unlike sliding
+         the cards, an outline pulse cannot fight the panel's scroll position. */
+      main.arranging > section.arr-moved {
+        animation: arr-flash 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      @keyframes arr-flash {
+        from { outline-color: var(--accent); outline-style: solid; }
+        to { outline-color: var(--accent-soft); outline-style: dashed; }
+      }
+
       /* Motion is a nicety; none of it is load-bearing. Reduced motion keeps
          every final state and drops every animation, confetti included (the
          panel skips the canvas entirely — see celebrate() in sidepanel.js). */
@@ -1898,6 +2030,7 @@
         .spark.spark-draw .spark-line,
         .spark.spark-draw .spark-area,
         main.crm-arrive > section,
+        main.arranging > section.arr-moved,
         #notes-result .tick,
         header.live .dot::after {
           animation: none;
@@ -2013,6 +2146,27 @@
           </p>
         </div>
 
+        <!-- Layout. Reps read the panel in different orders — one opens with
+             Activity, another wants Dialer notes under their thumb — so the
+             order of the sections is theirs, not ours. The controls appear in
+             the section heads only while Arrange is on: two extra buttons per
+             head would be permanent chrome in a panel read mid-call, and
+             nobody rearranges their panel while a prospect is talking.
+             Behavior belongs to the layout IIFE in sidepanel.js. -->
+        <div class="pop-sec">
+          <div class="pop-sec-head">
+            <span class="pop-label">Layout</span>
+          </div>
+          <button type="button" id="setting-arrange" aria-pressed="false">
+            Arrange sections
+          </button>
+          <p class="pop-note" id="setting-arrange-note">
+            Adds an up and a down control to every section head so you can put
+            them in the order you read them. The booking block stays at the top.
+            Your order is saved as you go.
+          </p>
+        </div>
+
         <!-- HubSpot. With the header's connection dot gone this is the panel's
              one explicit statement of connection state, so the pill is a
              full-size tone badge with its own dot (see .pill.conn) rather than a
@@ -2044,6 +2198,12 @@
            so it is announced once, politely, without stealing focus mid-call:
            the rep is talking, and a focus jump would cost them their place. -->
       <div id="booked" role="status" aria-live="polite" hidden></div>
+
+      <!-- Moving a section is a change a sighted rep sees happen and everyone
+           else has to be told about. Clipped off-screen: the position readout in
+           each head already states it visually, so this exists purely to say
+           "Activity, position 2 of 7" out loud the moment the move lands. -->
+      <div id="arrange-status" class="sr-only" role="status" aria-live="polite"></div>
 
       <!-- What the booking form will be filled with: the captured email, then
            the prospect's zone and clock next to the fill action. The capture
@@ -2096,7 +2256,7 @@
            split into a Contact and a Company column. Its job is context at a
            glance; the vertical space it gives back goes to Wiza and Activity.
            The Contact column also hosts the booking cluster (see #prospect). -->
-      <section id="crm-identity-section">
+      <section id="crm-identity-section" data-arrange data-sec-name="Contact &amp; company">
         <div class="section-head">
           <!-- Section glyphs are static markup, one per head: an inline SVG is
                not injectable from JS without innerHTML, and these never change.
@@ -2123,7 +2283,7 @@
            whole section is hidden when the company record has none of it —
            which is the normal case for a thin record — so it never costs a
            card's worth of vertical space to say nothing. -->
-      <section id="crm-account-section">
+      <section id="crm-account-section" data-arrange data-sec-name="Account context">
         <div class="section-head">
           <span class="sec-head-main">
             <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
@@ -2148,7 +2308,7 @@
            ceiling like Activity so 25 colleagues can't push the panel around.
            Hidden entirely when the prospect has no company: there is no account
            to be "others at", and no request is made either. -->
-      <section id="crm-colleagues-section">
+      <section id="crm-colleagues-section" data-arrange data-sec-name="Others at this account">
         <details id="crm-colleagues-details" open>
           <summary class="section-head sec-toggle hit24">
             <span class="sec-head-main">
@@ -2180,7 +2340,7 @@
            information" — that compound didn't scan at 10px caps. Company
            classification — ICP, industry — belongs to Account context above
            and is never repeated here. -->
-      <section id="crm-wiza-section">
+      <section id="crm-wiza-section" data-arrange data-sec-name="Wiza usage">
         <div class="section-head">
           <span class="sec-head-main">
             <!-- The Wiza mark, reduced to one stroke: the W the wordmark is. -->
@@ -2194,7 +2354,7 @@
         <div class="card crm-body" id="crm-wiza"></div>
       </section>
 
-      <section id="crm-deals-section">
+      <section id="crm-deals-section" data-arrange data-sec-name="Deals">
         <div class="section-head">
           <span class="sec-head-main">
             <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
@@ -2212,7 +2372,7 @@
            scrolls inside a fixed ceiling so 25 rows/type never push the rest of
            the panel off screen. Tabs are built in JS (counts change per
            prospect); the list is the single tabpanel they all point at. -->
-      <section id="crm-activity-section">
+      <section id="crm-activity-section" data-arrange data-sec-name="Activity">
         <div class="section-head">
           <span class="sec-head-main">
             <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
@@ -2241,10 +2401,16 @@
            with "Dialer" so the section reads as provenance first; the
            textarea stays editable for a pre-sync touch-up, but quiet (see
            #notes-text) so the Sync button and its result line, not the box,
-           carry the section's visual weight. -->
-      <hr class="divider" />
+           carry the section's visual weight.
 
-      <section id="notes-section">
+           There used to be a rule above this section, marking a "CRM context
+           above / notes below" boundary. It came out when sections became
+           reorderable: the rep decides the order now, so a divider welded to
+           one position in the markup would end up drawn in the middle of the
+           CRM sections. The one surviving rule (#booking-divider) separates the
+           pinned booking block from the arrangeable list, which is a boundary
+           that stays true whatever order the list is in. -->
+      <section id="notes-section" data-arrange data-sec-name="Dialer notes">
         <div class="section-head">
           <span class="sec-head-main">
             <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">

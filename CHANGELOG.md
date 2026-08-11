@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-11
+
+### Added — reps set their own section order
+
+Brian and Savannah both asked to move the panel's sections up and down so the
+one they open with is the one at the top. Seven sections move: Contact &
+company, Account context, Others at this account, Wiza usage, Deals, Activity
+and Dialer notes. The order is per rep, saved locally, and applied every time
+the panel opens.
+
+**Settings → Layout → Arrange sections** turns the mode on. Each section head
+grows an up and a down control plus its position ("3/7"), and a sticky bar above
+the list holds Reset and Done. Everything about the mode is built when it turns
+on and removed when it turns off, so the everyday panel gains nothing at all —
+no extra buttons in the heads, and no extra tab stops on the way to the note a
+rep came for.
+
+Chosen over drag-and-drop deliberately: dragging tall cards inside a 320px
+scrolling panel while on a live call is fragile, and up/down works from the
+keyboard and a screen reader without a second mechanism. Drag can be added on
+top of this later.
+
+Details worth knowing:
+
+- **A move jumps over sections that are hidden** because this prospect has
+  nothing for them. Swapping with something invisible reads as a dead button.
+- **The booking block never travels.** The captured email, the prospect's clock
+  and Fill form merge into the Contact column only while Contact & company is
+  the first section on screen; move it down and the cluster stays pinned in its
+  own block at the top. That cluster is the call, not context about it.
+- **A saved order survives a future release.** A section this build has but the
+  saved order never heard of lands next to the section it shipped behind, not at
+  the bottom of every arranged panel — and an unknown, duplicated, or garbage
+  stored value can never cost a rep a section.
+- **Escape leaves the mode**, like every other transient state in the panel, and
+  focus returns to the gear.
+- The order shares `eb:settings` with the auto-sync and celebration switches;
+  all three merge, so none can turn another off.
+
+### Changed
+
+- The rule that used to sit above Dialer notes is gone. It marked a "CRM context
+  above, notes below" boundary that stops being true once the rep owns the
+  order; the rule between the booking block and the list stays, because that
+  boundary holds whatever order the list is in.
+- Reordering no longer re-renders the CRM. The layout change re-decides where
+  the booking cluster lives and nothing else, instead of rebuilding six cards on
+  every press of an arrow.
+
 ## [0.6.1] - 2026-08-06
 
 ### Fixed — the booking page's actual confirmation is now recognized
