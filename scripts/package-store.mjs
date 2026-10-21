@@ -50,6 +50,7 @@ const FILES = [
   "sidepanel.js",
   "hubspot-config.js",
   "hubspot-auth.js",
+  "gtm-tech.js",
   "hubspot-data.js",
   "hubspot-notes.js",
   "hubspot-write.js",

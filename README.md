@@ -256,11 +256,12 @@ or on any text node. Hand it the tone name; never a colour.
 **Four idioms carry everything else**, and they are used consistently so a rep
 learns the panel once:
 
-- **Stat chips** — a labelled datapoint is a muted ALL-CAPS label over a bold
-  value, in a rounded box of page white on the card's grey. Account context and
-  the Wiza section are built entirely out of them. A datapoint with no value
-  renders **no chip** rather than an empty box, and only a *status* chip tints its
-  value (with a tone, because that is meaning).
+- **Stat tiles** — a labelled number is a muted ALL-CAPS label over a tabular
+  value, in a small rounded box. The Wiza usage tiles and Account context's team
+  counts use the same component, so they read as one system. A **zero** prints
+  muted and light, never at full weight; a datapoint with no value renders **no
+  tile** rather than an empty box; only a *status* value takes a tone (because
+  that is meaning).
 - **Record tiles** — a company shows its **favicon** beside its name (28px), the
   contact shows the **photo the dialer captured from their LinkedIn card** (36px
   circle), and every other person shows **initials** on a purple-scale square.
@@ -274,7 +275,8 @@ learns the panel once:
   (`aria-hidden`), all `currentColor`.
 - **No separator glyphs.** There is no "·" anywhere a rep can see one — not in a
   line, not in a tooltip. Discrete facts are separated by real layout: a flex gap,
-  a chip, a right-aligned column, or a line break. Values the data layer composes
+  a tile, a label | value row, an icon-led row, a right-aligned column, or a line
+  break. Values the data layer composes
   with an interpunct ("Connected · 3:34") are split back apart before rendering.
 
 #### Connecting HubSpot
@@ -313,12 +315,12 @@ read-only, and every record name links out to HubSpot (opens in a new tab).
 
 | Section | What it shows |
 |---|---|
-| **Contact & company** | Two columns. **Contact**: the prospect's **photo** (from the LinkedIn card in the dialer; their initials when there isn't one) beside their name (linked to the record), a **LinkedIn glyph** straight to the captured profile — hover it for their headline — and a lifecycle-stage pill. Directly under that, the **live capture**: the email the booking form will be filled with, the prospect's zone and clock, and the **Fill form** button (see [Usage](#usage)). Then their job title; the **phone row** — every number the record has (**Phone**, **Mobile**, **Phone 2**), lead status, and a **Wrong number?** link that corrects the number in HubSpot from here (see [Fixing a wrong number](#fixing-a-wrong-number)); the **contact owner**; and the **sequence line** — *"In sequence: Outbound Q3"* (hover for the enrolment date) with *"contacted 3d ago"* beside it. **Company**: its **favicon** beside the name (linked), then its domain, industry and headcount, **who owns this account** (see below) and a **Company LinkedIn** link. The company is matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"* — and the capture cluster moves to its own block above, so autofill still works; a company matched with no contact record says *"No contact record"*. |
-| **Account context** | Is this worth calling, and what do you open with. The **account grade** sits in the section header (*"Grade A"*). Then every labelled datapoint the record has, as **stat chips**: **Status** (tinted by what it means), **ICP fit**, **ICP**, **Industry**, **Sales team** (the size of their sales team using Wiza data — the caveat is on the chip's hover), **AE**, **Outbound**, **Leadership**. ICP and industry live **here**, not in the Wiza section: they describe the company, not our product relationship. Below the chips: the company's own blurb in its own words (two lines, **MORE** for the rest), a **Tech** row (comma-separated, Wiza **competitors** highlighted, **MORE (n)** for the tail), and a muted *"Why: …"* line with the ICP reasoning. Companies with **none** of this hide the whole section rather than showing an empty card. |
-| **Others at this account (N)** | Everyone *else* on the same company record — who else you're touching there, without leaving the call. Collapsible, and the count is in the heading. Each row: the colleague's **name** (linked to their HubSpot contact record), an **In sequence** badge (hover it for the sequence name and start date) or a muted **Not sequenced** when HubSpot says so either way, their **job title**, **Last contacted 3d ago** (hover for the exact time), the **owner** — *"Owner: You"* when it's yours, otherwise their name — and a small **in** link straight to their LinkedIn profile when the record has one. Sorted so the useful ones are first: anyone currently in a sequence, then whoever was contacted most recently. Empty: *"No other contacts on this account"*. A prospect with no company at all doesn't get the section. |
-| **Wiza usage** *(titled "Wiza usage" — the old "Wiza user/account information" didn't scan at 10px caps)* | Wiza **product** data, and only that; the rollup properties on the contact/company below are the fallback, and a richer Wiza User / Wiza Account / Trial **custom object** layers on top when it's associated and readable (see "Wiza custom objects" under [CRM sidebar](#crm-sidebar) below) — never the other way around, and never blanker than the rollup alone. **User**: an Active/Closed status pill, chips for **Plan**, **Plan credits**, **Last used**, **Signed up** and **Wiza ID**, an inline **Credits 30d sparkline** (the value alone when there's under 3 versions of history to draw from), **Open in Wiza Admin** / **Usage logs** links, and — behind a **MORE (n)** toggle — **Role**, **Extension**, **Last enrichment** and **Last export**. **Account** (from the company, plus its own custom object): chips for **Account ID**, **Subscribed**, **API credits**, **Purchases**, **Last purchase**, **Plan** (name + compact price) and **Seats** (used of total), a second **Credits 30d sparkline**, a **Target account** badge, and — behind its own **MORE (n)** — **Renews** (plan period end), **Credits** (email/phone/export balances, `-1` renders as **Unlimited**), **Spend**, **Last payment**, **Overage**, **Card on file** and **Stripe status** (account status, CRM-connected and the account's own trial flag ride in that chip's hover title). **Trial**: only when a Trial record is associated — **Dates**, **Length**, **Paid**, **Amount**, **Trial users**, **Export credits**, **API credits** and **Monitor**, with the free-text notes on the sub-card's hover. Most prospects aren't users — those get one muted *"Not a Wiza user"* line above the account chips — and a value that isn't set (or is a zero) is left out rather than shown blank. Nothing here repeats the company's ICP or industry; that is Account context's. |
+| **Contact & company** | Two cards, side by side when the panel is wide enough and stacked (company under contact) below about 390px. **Contact**: the prospect's **photo** (from the LinkedIn card in the dialer; their initials when there isn't one) beside their name (linked to the record), a **LinkedIn glyph** straight to the captured profile (hover it for their headline; HubSpot's own LinkedIn URL fills it when the dialer captured none) and a lifecycle-stage pill, with their **job title** as a muted second line; the two lines sit centred beside the photo. A pill that doesn't fit beside the name wraps to its own line under it. Then the **live capture** as the card's first two rows: the email the booking form will be filled with (mail icon, copy button, and a small **auto-fill** badge with a green dot, amber and *"may be stale"* once the capture is older than 30 minutes), then the prospect's clock with a small zone tag (*"9:40 AM their time"* and *"PDT, UTC-7"*). Under them, the same icon-led rows as the company card: one **phone row** per number the record has (**Phone**, plus a small **Mobile** / **Phone 2** label on the others, each with a copy button) with a **Wrong number?** link at the end of the first that corrects the number in HubSpot from here (see [Fixing a wrong number](#fixing-a-wrong-number)); lead status; the **sequence** row (*"In sequence: Outbound Q3"*, hover for the enrolment date, or a muted *"Not in a sequence"*); the contact **owner** with its mark; and **last contacted** (*"1d ago"*, hover for the exact date). A fact the record doesn't have is no row. A full-width **Fill form** button closes the card (see [Usage](#usage)). **Company**: its **favicon**, name (linked), a **LinkedIn badge** and a small open-in-HubSpot icon on one line beside the logo; then one icon-led row each for the **domain** (linked), **industry** and **headcount** (*"53 employees"*), with a missing fact simply left out; then **who owns this account** (Outbound owner, Company owner, and the CSM when set) as a label and value list. Every owner name carries a mark: a green check when it's **you**, a red X when it's **someone else** (hover for which), and no mark when the panel can't tell. The company is matched from the record ID on the dialer's account pane, else the contact's associated company, else the email domain. If the prospect isn't in HubSpot: *"No HubSpot contact for {email}"*, and the capture cluster moves to its own block above, so autofill still works; a company matched with no contact record says *"No contact record"*. |
+| **Account context** | Is this worth calling, and what do you open with. The **account type** (*Inbound*, *Prospected* or *Unknown*) and **grade** (*"Grade A"*) sit in the section header. Then a key/value grid: **Prospecting Status** (`prospecting_status`) and **Company Status** (`company_lifecycle_stage`; a stored *Open Deal* reads *Active Deal*) side by side, red for *Do Not Outbound* / *Disqualified* and green for *Demo Outstanding* / *Actively Engaged* / *Active Deal* / *Customer*, then **ICP**, **ICP fit**, **Industry**. ICP and industry live **here**, not in the Wiza section: they describe the company, not our product relationship. Then two rows of small stat tiles: **Their team (est.)** (Sales, AE, Outbound, Leaders from the company record; the Sales figure is the size of their sales team using Wiza data) and **In HubSpot** (the contacts we hold by role: SDR, AE, AM/CS, Leaders, GTM Ops, Total). Then labelled blocks, each three lines with **MORE** for the rest: **About** (the company's own blurb), **GTM tech** (the sales and marketing tools the company runs, as pills, all of them; *"No GTM tech found."* when its site shows none; a closed **All tech (n)** toggle underneath lists every technology; see **GTM tech** under [Configuration](#configuration)), **Why ICP**. Then **Call intel**, what automations pulled from previous calls: **Using**, **Renews** (amber inside 30 days, red inside 7), **Next check-in** (amber when overdue) and **Missing features**. Then **Account notes**: **Source**, **Channels** and **Company research**. Companies with **none** of this hide the whole section rather than showing an empty card. |
+| **Others at this account (N)** | Everyone *else* on the same company record — who else you're touching there, without leaving the call. Collapsed by default (open it once and it stays open), and the count is in the heading. One row per person: two HubSpot records with the same email show once, the one contacted most recently. Each row: the colleague's **name** (linked to their HubSpot contact record), an **In sequence** badge (hover it for the sequence name and start date) or a muted **Not sequenced** when HubSpot says so either way, their **job title**, **Last contacted 3d ago** (hover for the exact time), the **owner** — *"Owner: You"* when it's yours, otherwise their name — and a small **in** link straight to their LinkedIn profile when the record has one. Sorted so the useful ones are first: anyone currently in a sequence, then whoever was contacted most recently. Empty: *"No other contacts on this account"*. A prospect with no company at all doesn't get the section. |
+| **Wiza usage** *(titled "Wiza usage" — the old "Wiza user/account information" didn't scan at 10px caps)* | Wiza **product** data, and only that; the rollup properties on the contact/company are the fallback, and a richer Wiza User / Wiza Account / Trial **custom object** layers on top when it's associated and readable (see "Wiza custom objects" under [CRM sidebar](#crm-sidebar) below). Laid out as tiles, each with a small icon header. **Account** and **Usage** sit side by side when the card is wide enough (a wide panel) and stack otherwise. **Account**: the **Stripe status** as a coloured dot and its word (green Active, amber Past due / Unpaid, grey Canceled or anything else), **Card on file** with a check or a grey X, and **Overage** (an amber pill when there is one, a muted "No overage" when not); the **Plan** (name + compact price); **Seats** as *"1 of 1"* over a thin meter (the number alone when there is no total); the **email / phone / export** credit balances as three mini tiles (`-1` renders as **Unlimited**); **Spend 30d** and **Total spend** as two more; then any rollup facts (**Subscribed**, **API credits**, **Purchases**, **Last purchase**, **Use case**, **Renews**, **Last payment**), inline when the tile has room and behind **MORE (n)** when it would run past about six rows; and a muted footer with the **Account ID** (with a copy button) and the **Created** date. A **Target account** badge rides on the header, and so does a muted **Not a Wiza user** pill when this contact has no Wiza login. **Usage** (the company's rollups): **Active users 30d**, **Credits used 30d** and **API balance** as three primary tiles, **API / 30d** and **API / day** smaller underneath, and a **Depletion** bar with the day count, green from 14 days of runway, amber under 14, red under 7. Zeros show here, muted. **User** (when the contact is a Wiza user): an Active/Closed status pill in the section head, then tiles for **Plan**, **Plan credits**, **Credits 30d** (a sparkline when there's history to draw), **Last used**, **Signed up**, **Role**, **Last enrichment**, **Last export** and **Extension** (past six, the rest behind **MORE**), the **Open in Wiza Admin** / **Usage logs** links and the **Wiza ID** with a copy button. **Trial** (clock icon): only when a Trial record is associated, **Dates**, **Length**, **Paid**, **Amount**, **Trial users**, **Export credits**, **API credits** and **Monitor**, with the free-text notes on the tile's hover. No Wiza User, Account, Trial or usage at all: one muted *"No Wiza User or Account data found"* line. Nothing here repeats the company's ICP or industry; that is Account context's. |
 | **Deals** | One row per associated deal — name (linked), human-readable stage, amount, close date, owner. Open deals sort first; closed-won gets a green pill. **Closed** rows also carry a one-line *why*: *"Lost: Went with incumbent vendor"* then *"Price"* (reason, then category, then secondary category — spaced, never glyph-separated — duplicates collapsed, long reasons capped with the rest on hover) or *"Won: Champion moved from a customer account"*. Open deals never show one, and a closed deal with nothing on file shows no line at all. Empty: *"No open deals"*. |
-| **Activity** | A tab per engagement type — **All**, **Calls**, **Emails**, **Meetings**, **Notes**, **Tasks** — each with its count, the selected one an outlined violet pill, and up to 25 rows per type. Types with nothing logged are dimmed and not clickable. Every row is attributed to whoever logged it ("by Jenny Choi") and carries a relative timestamp with the exact date on hover, plus a small tinted **type disc** on the left of every row (phone, envelope, clock, pencil, tick) and per-type detail: direction arrow, disposition and duration (`4:07`) on calls; direction and subject on emails; title and outcome on meetings; the first line of the body on notes; subject and status on tasks. **All** merges every type newest-first. The list scrolls inside a fixed height (about 40% of the panel) so the section stays small no matter how much history there is; your chosen tab sticks as you move between prospects. |
+| **Activity** | Collapsed by default, with the count in the heading; open it once and it stays open. A tab per engagement type — **All**, **Calls**, **Emails**, **Meetings**, **Notes**, **Tasks** — each with its count, the selected one an outlined violet pill, and up to 25 rows per type. Types with nothing logged are dimmed and not clickable. Every row is attributed to whoever logged it ("by Jenny Choi") and carries a relative timestamp with the exact date on hover, plus a small tinted **type disc** on the left of every row (phone, envelope, clock, pencil, tick) and per-type detail: direction arrow, disposition and duration (`4:07`) on calls; direction and subject on emails; title and outcome on meetings; the first line of the body on notes; subject and status on tasks. **All** merges every type newest-first. The list scrolls inside a fixed height (about 40% of the panel) so the section stays small no matter how much history there is; your chosen tab sticks as you move between prospects. |
 
 **Who owns this account.** The identity block spells ownership out, one labelled
 row each, and only for the ones the record actually has:
@@ -402,9 +404,11 @@ matched HubSpot **contact and company** timelines, attributed to you.
 1. Take your notes in the dialer as usual — either in the **Add note** dialog
    (the panel picks up your draft **as you type**, so you don't have to save it
    first) or by saving notes on the Prospect / Account tabs.
-2. Open the side panel. The **Notes** section shows the draft in an editable box
-   with a character count; already-saved notes appear read-only underneath, under
-   "Saved notes in the dialer".
+2. Open the side panel. The **Dialer notes** section shows the draft in an
+   editable box with a character count; already-saved notes appear read-only
+   underneath, under **Saved notes**. Both are collapsible: Dialer notes starts
+   closed, opens itself whenever there is a note that hasn't synced yet, and
+   otherwise remembers whether you left it open. Saved notes remembers too.
 3. Trim or add anything you want — editing here never changes the note in the
    dialer, and your edits are kept even if the dialer draft changes underneath
    you (the panel tells you when that happens).
@@ -469,9 +473,9 @@ in the dialer clears the section rather than re-attributing your notes.
 When a number doesn't work, correct it **in HubSpot, from the panel** — no tabbing
 out to LinkedIn and Outreach.
 
-1. In **Contact & company**, the phone row shows every number on the record
-   (**Phone**, **Mobile**, **Phone 2**). Click **Wrong number?** next to it (or
-   **Add a number** if the contact has none).
+1. In **Contact & company**, the phone rows show every number on the record
+   (**Phone**, **Mobile**, **Phone 2**), one per row. Click **Wrong number?** at
+   the end of the first (or **Add a number** if the contact has none).
 2. Pick **which number** to update — the dropdown shows what's currently on each
    field, and starts on the one displayed in the row.
 3. Type the corrected number. What's on the record right now stays visible above
@@ -585,18 +589,22 @@ email does not disturb the booking tab.
 | `ACTIVITY_PER_TYPE_LIMIT` | Rows kept **per engagement type** (newest first) — what one Activity tab can hold | `25` |
 | `BATCH_MAX` | Objects per `batch/read` and IDs per association read (HubSpot's own ceiling) | `100` |
 | `RETRY_AFTER_FALLBACK_S` | Wait used when a `429` carries no usable `Retry-After` header | `10` |
-| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `11` |
+| `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `13` |
 | `NOTE_PREVIEW_CHARS` | Characters of a note body kept for its one-line activity row | `120` |
 | `SNIPPET_CHARS` | Characters of the company blurb shown inline in **Account context** (the full text becomes the row's hover) | `200` |
 | `REASONING_CHARS` | Ceiling on the ICP rationale kept for its hover title | `400` |
 | `TECH_STACK_MAX` | Technologies listed before "+N more" | `8` |
 | `OUTCOME_CHARS` | Characters of a closed deal's reason shown on its row (rest on hover) | `140` |
+| `COMM_CHANNEL_LABELS` | Display labels for `communications_channel_company`'s lowercase keys; an unknown key falls back to a humanized form | slack → Slack, sms → SMS, video_call → Video call, inperson → In-person, … |
+| `RENEWAL_CAUTION_DAYS` / `RENEWAL_NEGATIVE_DAYS` | Account context's **Renews** value turns amber within the first and red within the second (muted once passed) | `30`, `7` |
+| `COMPETITOR_LABELS` | Labels for the deal `competitor` enum's lowercase keys; any other value prints as-is, and Unknown/None print nothing | cognism → Cognism, seamlessai → Seamless.ai, hunterio → Hunter.io, … |
+| `DEPLETION_CAUTION_DAYS` / `DEPLETION_NEGATIVE_DAYS` | Wiza usage's **Depletion** bar turns amber below the first and red below the second | `14`, `7` |
 | `ACCOUNT_CONTACTS_LIMIT` | Colleagues shown in **Others at this account** — and the page size the association read asks for, so one page is always enough and there is never a second request | `25` |
-| `ACCOUNT_OWNER_LOOKUP_MAX` | Colleague owner IDs looked up *for the first time* per prospect. Cached names are always resolved; this only stops an account whose contacts each have a different owner from turning a 2-request section into 27. Rows past it show no owner rather than a number | `10` |
-| `CONTACT_PROPERTIES` | Contact properties requested | firstname, lastname, email, jobtitle, phone, lifecyclestage, hs_lead_status, hubspot_owner_id, notes_last_updated, **wiza_status, wiza_id, signed_up_at, plan_status, plan_credits, plan_frequency, number_of_credits_used_in_last_30_days, date_of_last_wiza_usage, wiza_admin_url, wiza_usage_logs, wiza_email_confirmed**, *hs_linkedin_url, hs_sequences_is_enrolled, hs_latest_sequence_enrolled, hs_latest_sequence_enrolled_date, notes_last_contacted* |
-| `COMPANY_PROPERTIES` | Company properties requested | name, domain, industry, numberofemployees, hubspot_owner_id, **api_wiza_account_id, primary_account_id_associated_wiza, number_of_associated_accounts, number_of_associated_subscribed_accounts, api_credit_balance, number_of_credits_used_in_last_30_days, last_api_credit_purchase, times_api_credits_purchased, account_icp, industry_wiza, hs_is_target_account, use_case**, *sdr_company_owner, cs_company_owner, outbound_ownership_change_date, account_grade_v1, asm_sales_team_size, ae_team_size, ob_team_size, sales_leadership_team_size, company_lifecycle_stage, description, about_us, linkedinbio, account_icp_ai_reasoning, icp_fit, web_technologies, linkedin_company_page* |
+| `ACCOUNT_OWNER_LOOKUP_MAX` | Colleague owner IDs looked up *for the first time* per prospect. Cached names are always resolved. Raised from 10 to match `ACCOUNT_CONTACTS_LIMIT` in v0.8.1, because every colleague row now states its owner; a row whose owner still can't resolve reads "Owner unresolved", never a number | `25` |
+| `CONTACT_PROPERTIES` | Contact properties requested | firstname, lastname, email, jobtitle, phone, lifecyclestage, hs_lead_status, hubspot_owner_id, notes_last_updated, **wiza_status, wiza_id, signed_up_at, plan_status, plan_credits, plan_frequency, number_of_credits_used_in_last_30_days, date_of_last_wiza_usage, wiza_admin_url, wiza_usage_logs, wiza_email_confirmed**, *hs_linkedin_url, hs_sequences_is_enrolled, hs_latest_sequence_enrolled, hs_latest_sequence_enrolled_date, notes_last_contacted*, inbound_source, inbound_source_last_updated |
+| `COMPANY_PROPERTIES` | Company properties requested | name, domain, industry, numberofemployees, hubspot_owner_id, **api_wiza_account_id, primary_account_id_associated_wiza, number_of_associated_accounts, number_of_associated_subscribed_accounts, api_credit_balance, number_of_credits_used_in_last_30_days, last_api_credit_purchase, times_api_credits_purchased, account_icp, industry_wiza, hs_is_target_account, use_case**, *sdr_company_owner, cs_company_owner, outbound_ownership_change_date, account_grade_v1, asm_sales_team_size, ae_team_size, ob_team_size, sales_leadership_team_size, company_lifecycle_stage, prospecting_status, description, about_us, linkedinbio, account_icp_ai_reasoning, icp_fit, web_technologies, linkedin_company_page*, inbound_source, inbound_source_last_updated, last_bulk_contact_enrichment_date (account type) · sdr_contacts, ae_contacts, amcs_contacts, sales_leader_contacts, gtm_ops_contacts, number_of_associated_sales_team_contacts (sales team mix) · company_source, communications_channel_company, next_checkin, competitor_tech, competitor_renewal_date, missing_wiza_features, company_research (rep notes) · wiza_account_create_date, number_of_active_users_last_30_days, api_credit_balance_company, api_credits_used\_\_30_days_cloned, credit_use_per_day_company, wiza_credit_depletion_days_company (Wiza usage) |
 | `ACCOUNT_CONTACT_PROPERTIES` | Properties read for each *other* contact on the account. Deliberately a short list rather than `CONTACT_PROPERTIES`: 25 contacts × the full Wiza property set is a large response for a list of names | firstname, lastname, jobtitle, email, phone, hubspot_owner_id, hs_sequences_is_enrolled, hs_latest_sequence_enrolled, hs_latest_sequence_enrolled_date, notes_last_contacted, notes_last_updated, lifecyclestage, hs_linkedin_url |
-| `DEAL_PROPERTIES` | Deal properties requested | dealname, dealstage, pipeline, amount, closedate, hubspot_owner_id, *closed_lost_reason, closed_loss_category, closed_lost_category\_\_secondary\_, hs_is_closed_lost, closed_won_reason* |
+| `DEAL_PROPERTIES` | Deal properties requested | dealname, dealstage, pipeline, amount, closedate, hubspot_owner_id, *closed_lost_reason, closed_loss_category, closed_lost_category\_\_secondary\_, hs_is_closed_lost, closed_won_reason*, competitor, competitor_renewal_date_deal |
 | `WIZA_USER_OBJECT_TYPE`, `WIZA_ACCOUNT_OBJECT_TYPE`, `TRIAL_OBJECT_TYPE` | The portal's custom-object type ids | `2-48448238`, `2-48693578`, `2-40064102` |
 | `WIZA_USER_ASSOC_KEYS`, `WIZA_ACCOUNT_ASSOC_KEYS`, `TRIAL_ASSOC_KEYS` | Both spellings an association can come back keyed by (fully-qualified name, or the `2-X` type id) — every lookup tries both | e.g. `["p40063500_wiza_users", "2-48448238"]` |
 | `WIZA_USER_OBJECT_PROPERTIES` / `WIZA_ACCOUNT_OBJECT_PROPERTIES` / `TRIAL_OBJECT_PROPERTIES` | Properties requested on each custom-object GET | user: wiza_user_id, user_status, wiza_role, wiza_email, user_signup_date, number_of_credits_used_in_last_30_days, date_of_last_wiza_usage, date_of_last_enrichment, date_of_last_bulk_export, last_usage_at, extension_version, wiza_admin_url, wiza_usage_logs · account: account_id, plan_name, plan_price, plan_frequency, plan_category, plan_period_end, plan_seats_used, account_plan_seats_no, account_email_credits, account_phone_credits, api_credit_balance, export_credits, number_of_credits_used_in_last_30_days, number_of_active_users_last_30_days, number_of_new_users_in_last_30_days, reports_count_30d, spend_last_30d, total_spend, last_payment_date, last_payment_amount, has_overage, has_card_on_file, stripe_plan_subscription_status, account_status, account_trial_status, trial_ends_at\_\_edt\_, crm_connected · trial: company_name, trial_start_date, trial_end_date, trial_end_date_calculated, trial_length, paid_trial, trial_amount, how_many_trial_users, emails_of_trial_users, trial_notes, trial_export_credits, trial_api_credits, monitor_access |
@@ -651,6 +659,30 @@ can never be the thing hidden behind the tech row's **MORE** toggle.
 > `apollo_server`, `apollo_client`, `apollo_federation`) are already excepted. To
 > stop flagging the bare value, delete the single `"apollo"` line from
 > `CONFIG.COMPETITORS` — `apollo_io` keeps working on its own.
+
+**GTM tech (`gtm-tech.js` → `EB.gtmTech`).** A static map, `TOOLS`, keyed on
+the exact `web_technologies` enum **values** from the portal, each with a clean
+display `label` and a `cat` (CRM, Engagement, Dialer, Marketing, Chat, ABM,
+Analytics, and so on). 249 of the enum's 712 options are classified as GTM;
+everything else is website plumbing (CMS, CDN, JavaScript libraries) and only
+appears under **All tech (n)**. `accountContext.gtmTech` is an exact-slug
+lookup in `TOOLS`, never a fuzzy match, so a value that isn't a key is not a GTM
+tool. The panel loads `gtm-tech.js` before `hubspot-data.js`; without it the
+map is empty and every value lands in All tech.
+
+> **Competitors on web_technologies never fire.** None of the `COMPETITORS`
+> slugs exist as options in the portal's `web_technologies` enum, so a company
+> record can never carry one. The check stays (a future option would be
+> flagged and sorted first), but competitor signal comes from **Call intel**
+> and the deal rows, not from website tech.
+
+> **To refresh:** HubSpot manages the `web_technologies` enum, so new options
+> only appear when HubSpot adds them. Re-pull the `web_technologies` enum
+> options (HubSpot `GET /crm/v3/properties/companies/web_technologies`, read
+> only) and regenerate `TOOLS` from them: diff the values against the current
+> keys, classify any new GTM ones, drop any that no longer exist, and bump
+> `VERSION`. The classify script lives outside this repo; `TOOLS` is the only
+> artifact that ships. `node scripts/test-views.mjs` checks the map's shape.
 
 **`hubspot-config.js` → `EB.hubspotConfig`:**
 
@@ -716,6 +748,7 @@ easy-booking-ext/
 ├── sidepanel.js           # side panel logic: live storage subscription, "Fill now", settings popover, CRM rendering, notes sync
 ├── hubspot-config.js      # HubSpot OAuth app config (client id, scopes — no secret)
 ├── hubspot-auth.js        # per-SDR HubSpot OAuth: login/logout/token refresh
+├── gtm-tech.js            # static map: web_technologies enum value → GTM tool label + category (loaded before hubspot-data.js)
 ├── hubspot-data.js        # CRM reads: contact/company resolution, Wiza data, deals, activity, account contacts, caching
 ├── hubspot-notes.js       # note creation: POST /crm/v3/objects/notes + contact/company associations
 ├── hubspot-write.js       # the write path: corrects a contact's phone/mobilephone/phone_number_2 (allowlisted), + audit note
@@ -728,11 +761,12 @@ easy-booking-ext/
 │   ├── ext_icon.png       # toolbar + store icon
 │   └── wizainc_logo.png   # the Wiza mark in the panel's header
 ├── scripts/
+│   ├── test-views.mjs     # view-model tests for hubspot-data.js (no deps; run by CI)
 │   └── validate.mjs       # validates the manifest, its referenced files, and the panel's <script src> and <img src> lists (used by CI)
 └── README.md
 ```
 
-The panel's scripts load in dependency order — config, auth, data, notes, write,
+The panel's scripts load in dependency order — config, auth, the GTM tech map, data, notes, write,
 then the panel itself — as plain `<script src>` tags with **no `import`/`export`**: CI
 syntax-checks `.js` with `node --check`, which parses them as CommonJS. Shared ES
 modules, if any are ever added, go in `.mjs` files. `scripts/validate.mjs` checks
@@ -817,6 +851,9 @@ There is no build step — it's plain JS/HTML loaded unpacked.
 ```bash
 # Validate the manifest, everything it references, and the panel's script tags
 node scripts/validate.mjs
+
+# View-model tests for hubspot-data.js (no dependencies)
+node scripts/test-views.mjs
 
 # Same syntax check CI runs (node --check parses .js as CommonJS: no import/export)
 for f in $(git ls-files '*.js' '*.mjs'); do node --check "$f"; done
@@ -953,7 +990,9 @@ identity is ever sent.
   and notes do live in `chrome.storage.local` (`eb:currentProspect`,
   `eb:prospectContext`, `eb:notes`, `eb:notes:lastSynced`) and are overwritten or
   cleared as the prospect changes. `eb:settings` holds the rep's own preferences
-  (currently just the notes auto-sync toggle) and contains no prospect data. A
+  (the notes auto-sync toggle, `celebrate`, the section order in `sectionOrder`
+  and which collapsible sections are open in `sectionOpen`, keyed by section id)
+  and contains no prospect data. A
   profile that still has a `theme` key from an earlier build is harmless — it is
   ignored, and writes to `eb:settings` are read-modify-write so nothing else in
   the object is dropped.

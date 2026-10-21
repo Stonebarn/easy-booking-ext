@@ -15,6 +15,7 @@ There's no build step. Load the extension unpacked:
 ## Before opening a PR
 
 - [ ] Run the manifest validator: `node scripts/validate.mjs`
+- [ ] Run the view-model tests: `node scripts/test-views.mjs` (no install needed)
 - [ ] Manually test the full flow: prospect loaded in the Nooks dialer →
       booking form auto-fills on `scheduler.default.com`.
 - [ ] Confirm you did **not** hard-code Nooks' generated CSS classes

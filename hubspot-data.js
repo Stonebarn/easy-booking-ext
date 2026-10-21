@@ -96,19 +96,23 @@
     // 11 = Phase 11's accountContext.techStack and ownership.roles. 12 = Phase
     // 12's Wiza custom-object reads (wiza.userObject / wiza.accountObject /
     // wiza.trial) — a bundle cached before this phase has none of those keys.
-    CACHE_VERSION: 12,
+    // 13 = v0.8.1's accountContext.accountType / teamMix / rep notes,
+    // contact.inboundSource and wiza.usage. 14 = v0.8.1's accountContext
+    // gtmTech / allTech / techCount (the GTM tech block).
+    CACHE_VERSION: 14,
     // Colleagues shown for the account (Phase 9). This is the *association page
     // limit we ask for* as well as the row cap, which is the point: one page, one
     // batch read, no paging, ever. 25 names is already more than a rep reads
     // mid-call, and the section scrolls.
     ACCOUNT_CONTACTS_LIMIT: 25,
     // Ceiling on owner IDs from colleague rows that are looked up *for the first
-    // time* in a bundle. Cache hits are free and the SDR team is small, so in
-    // practice this never bites; it exists so one account whose 25 contacts each
-    // have a different owner cannot turn a 2-request section into 27 on the
-    // general pool. Rows past the cap render without an owner name — never a
-    // bare ID.
-    ACCOUNT_OWNER_LOOKUP_MAX: 10,
+    // time* in a bundle. v0.8.1 raised it from 10 to ACCOUNT_CONTACTS_LIMIT:
+    // every colleague row now states its owner, so a row past the cap would
+    // read "Owner unresolved" for a name the panel could have had. Cache hits
+    // are still free and the SDR team is small, so the realistic cost is a
+    // handful of owner reads, once per session; the cap stays so the bound is
+    // explicit. A row whose owner still can't resolve says so — never a bare ID.
+    ACCOUNT_OWNER_LOOKUP_MAX: 25,
     // Characters of a note body kept for the one-line activity preview.
     NOTE_PREVIEW_CHARS: 120,
     // Characters of the company blurb shown inline; the full text rides along as
@@ -123,6 +127,40 @@
     // Closed-lost reasons are free text and some reps write essays; the row
     // shows this much, the hover title the rest.
     OUTCOME_CHARS: 140,
+    // v0.8.1: communications_channel_company is a multi-select whose stored
+    // values are lowercase keys; these are the portal's own labels for them.
+    // A key the portal adds later falls through to humanizeEnum, never blank.
+    COMM_CHANNEL_LABELS: {
+      slack: "Slack",
+      sms: "SMS",
+      phone: "Phone",
+      email: "Email",
+      whatsapp: "WhatsApp",
+      video_call: "Video call",
+      inperson: "In-person",
+      other: "Other",
+    },
+    // v0.8.1: Wiza usage's depletion-days chip turns caution under the first
+    // number and negative under the second. Two weeks is enough runway to sell
+    // a top-up; one week is a customer about to hit a wall.
+    DEPLETION_CAUTION_DAYS: 14,
+    DEPLETION_NEGATIVE_DAYS: 7,
+    // v0.8.1: a competitor renewal inside the first window is caution, inside
+    // the second negative — the window to displace them is closing.
+    RENEWAL_CAUTION_DAYS: 30,
+    RENEWAL_NEGATIVE_DAYS: 7,
+    // v0.8.1: the deal `competitor` enum stores most values as labels already,
+    // but a few as lowercase keys. Those map here; anything else prints as-is.
+    COMPETITOR_LABELS: {
+      cognism: "Cognism",
+      seamlessai: "Seamless.ai",
+      swordfishai: "Swordfish.ai",
+      snovio: "Snov.io",
+      anyleads: "AnyLeads",
+      kaspr: "Kaspr",
+      hunterio: "Hunter.io",
+      other: "Other",
+    },
 
     CONTACT_PROPERTIES: [
       "firstname",
@@ -165,6 +203,11 @@
       "hs_latest_sequence_enrolled",
       "hs_latest_sequence_enrolled_date",
       "notes_last_contacted",
+      // --- v0.8.1: how this person came in ---------------------------------
+      // PLG Signup / Abandoned Booking / Denied Booking / Website Visit. The
+      // identity block shows it as an "Inbound" pill when set.
+      "inbound_source",
+      "inbound_source_last_updated",
     ],
     COMPANY_PROPERTIES: [
       "name",
@@ -201,6 +244,9 @@
       "ob_team_size",
       "sales_leadership_team_size",
       "company_lifecycle_stage",
+      // v0.8.1: where outbound is with the account (Ready For Outbound ...
+      // Do Not Outbound). Shown beside Company Status in Account context.
+      "prospecting_status",
       // "Do you even know what we do?" — first non-empty of these three is the
       // blurb a rep can read mid-dial.
       "description",
@@ -210,6 +256,37 @@
       "icp_fit",
       "web_technologies",
       "linkedin_company_page",
+      // --- v0.8.1: account type (Inbound vs Prospected) --------------------
+      // inbound_source wins; a bulk contact enrichment is what "we went and
+      // found them" looks like on the record; neither is "Unknown".
+      "inbound_source",
+      "inbound_source_last_updated",
+      "last_bulk_contact_enrichment_date",
+      // --- v0.8.1: sales team mix (contact-role rollups on the company) ----
+      // A different source from the *_team_size properties above: these count
+      // the associated contacts by role, the team sizes are enrichment data.
+      "sdr_contacts",
+      "ae_contacts",
+      "amcs_contacts",
+      "sales_leader_contacts",
+      "gtm_ops_contacts",
+      "number_of_associated_sales_team_contacts",
+      // --- v0.8.1: rep notes (fields reps fill in on the company) ----------
+      "company_source",
+      "communications_channel_company",
+      "next_checkin",
+      "competitor_tech",
+      "competitor_renewal_date",
+      "missing_wiza_features",
+      "company_research",
+      // --- v0.8.1: Wiza usage rollups on the company -----------------------
+      // number_of_credits_used_in_last_30_days is already requested above.
+      "wiza_account_create_date",
+      "number_of_active_users_last_30_days",
+      "api_credit_balance_company",
+      "api_credits_used__30_days_cloned",
+      "credit_use_per_day_company",
+      "wiza_credit_depletion_days_company",
     ],
     // --- Phase 9: the other contacts on the account ------------------------
     // Deliberately NOT CONTACT_PROPERTIES: that array carries the whole Wiza
@@ -247,6 +324,9 @@
       "closed_lost_category__secondary_",
       "hs_is_closed_lost",
       "closed_won_reason",
+      // --- v0.8.1: who we're up against on this deal, and when they renew --
+      "competitor",
+      "competitor_renewal_date_deal",
     ],
 
     // --- Phase 12: Wiza custom objects (richer product data) --------------
@@ -1222,6 +1302,76 @@
     };
   }
 
+  // --- Company Status / Prospecting Status (v0.8.1; pure, exported) --------
+  // company_lifecycle_stage is labelled "Company Status" in the portal. Its
+  // stored "Open Deal" reads "Active Deal" to reps; every other value prints
+  // as-is.
+  function companyStatusLabel(value) {
+    const h = humanizeEnum(value);
+    if (!h) return null;
+    return enumSlug(h) === "open_deal" ? "Active Deal" : h;
+  }
+
+  // A subtle tone on the two status values in Account context: red for the
+  // "do not call" answers, green for the "this is live" ones, and no tone for
+  // everything else (null, which the renderer reads as default ink).
+  const ACCOUNT_STATUS_TONES = {
+    do_not_outbound: "negative",
+    disqualified: "negative",
+    demo_outstanding: "positive",
+    actively_engaged: "positive",
+    active_deal: "positive",
+    customer: "positive",
+  };
+  function accountStatusTone(label) {
+    return label ? own(ACCOUNT_STATUS_TONES, enumSlug(label)) || null : null;
+  }
+
+  // --- GTM tech (v0.8.1; pure, exported, unit-tested) ----------------------
+  // The GTM tools a company runs, out of everything in web_technologies. The
+  // property holds the portal's enum VALUES, so a GTM tool is an exact-slug
+  // hit in gtm-tech.js's TOOLS map (self.EB.gtmTech, loaded by the panel
+  // before this file). No fuzzy matching: a value that is not a TOOLS key is
+  // not a GTM tool. Read at call time, not load time, and an absent map is an
+  // empty one, so a context that never loaded gtm-tech.js still gets allTech.
+  //
+  //   { gtmTech:  [{ slug, label, cat, competitor }]  competitors first, then A-Z
+  //     allTech:  [{ slug, label }]                   every value, A-Z, no cap
+  //     techCount }
+  //
+  // The competitor flag reuses isCompetitorTech (COMPETITORS + exceptions). No
+  // competitor slug exists in the portal enum today, so it never fires on real
+  // data; it stays so a future enum option is flagged without a code change.
+  function gtmToolsMap() {
+    const g = self.EB && self.EB.gtmTech;
+    return (g && g.TOOLS) || {};
+  }
+
+  function gtmTechView(value) {
+    const tools = gtmToolsMap();
+    const parts = splitDelimited(value);
+    const byLabel = (a, b) => a.label.localeCompare(b.label, "en", { sensitivity: "base" });
+    const gtmTech = [];
+    const allTech = [];
+    for (const slug of parts) {
+      const tool = own(tools, slug);
+      const label = (tool && tool.label) || techLabel(slug);
+      if (!label) continue;
+      allTech.push({ slug, label });
+      if (tool) {
+        gtmTech.push({
+          slug,
+          label,
+          cat: tool.cat || null,
+          competitor: isCompetitorTech(slug) || isCompetitorTech(label),
+        });
+      }
+    }
+    gtmTech.sort((a, b) => (a.competitor === b.competitor ? byLabel(a, b) : a.competitor ? -1 : 1));
+    allTech.sort(byLabel);
+    return { gtmTech, allTech, techCount: allTech.length };
+  }
+
   // The pre-Phase-11 { items, more, total, all } shape, built from the cleaned
   // labels. Kept because it is what the panel's tech row renders today, and a
   // label fix should not have to wait for a renderer change to reach a rep.
@@ -1473,6 +1623,41 @@
       .replace(/&#0?39;|&apos;/gi, "'")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  // v0.8.1: stripHtml's multi-line sibling, for company_research — a rich-text
+  // property reps paste whole briefs into, where the paragraph breaks are the
+  // structure. Block ends and <br> become newlines, every entity (named or
+  // numeric) is decoded, whitespace collapses within a line, and blank lines
+  // go. Same contract as stripHtml: the result only ever reaches textContent.
+  const HTML_ENTITIES = { nbsp: " ", lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" };
+  function decodeEntities(text) {
+    return String(text).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, ref) => {
+      if (ref.charAt(0) === "#") {
+        const code = ref.charAt(1).toLowerCase() === "x" ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+        // A code point outside Unicode (or 0) is dropped, not thrown on.
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+      }
+      const named = own(HTML_ENTITIES, ref.toLowerCase());
+      return named == null ? m : named;
+    });
+  }
+
+  function htmlToText(html) {
+    if (!html) return "";
+    const text = decodeEntities(
+      String(html)
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/(td|th)\s*>/gi, " ")
+        .replace(/<\/(p|div|li|tr|h[1-6]|blockquote|ul|ol|table)\s*>/gi, "\n")
+        .replace(/<[^>]*>/g, "")
+    );
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n");
   }
 
   // HubSpot's own vocabulary is SCREAMING_SNAKE ("SALES_QUALIFIED_LEAD"); the
@@ -1934,6 +2119,8 @@
         lostCategory: humanizeEnum(p.closed_loss_category) || null,
         lostCategorySecondary: humanizeEnum(p.closed_lost_category__secondary_) || null,
         wonReason: asText(p.closed_won_reason),
+        // v0.8.1: { competitor, competitorRenewalAt } — see dealCompetitorView.
+        ...dealCompetitorView(p),
       };
     });
     // Open deals are what a rep is about to talk about; closed ones are context.
@@ -1942,6 +2129,20 @@
       return toMillis(b.closeDate) - toMillis(a.closeDate);
     });
     return deals;
+  }
+
+  // v0.8.1: the deal's competitor and their renewal date, for the row's meta
+  // line. "Unknown" and "None" are values reps pick to mean "no competitor",
+  // so they display as nothing, same as blank. Pure over the deal's
+  // properties, so the harness can assert it without a batch read.
+  function dealCompetitorView(p) {
+    const props = p || {};
+    const raw = asText(props.competitor);
+    const label = raw ? own(CONFIG.COMPETITOR_LABELS, raw.toLowerCase()) || raw : null;
+    return {
+      competitor: label && !/^(unknown|none)$/i.test(label) ? label : null,
+      competitorRenewalAt: toMillis(props.competitor_renewal_date_deal) || null,
+    };
   }
 
   // --- Deal outcome line (Phase 8; pure, exported, unit-tested) -------------
@@ -2282,6 +2483,30 @@
       });
     }
 
+    // v0.8.1: one row per person. The id check above covers a record listed
+    // twice; this covers two HubSpot records for the same email (a merge that
+    // never happened), which the panel showed as the same name twice. The row
+    // kept is the one contacted most recently, so its owner and "contacted"
+    // time are the live ones. Same name with different emails stays as two
+    // rows: those are real CRM duplicates a rep should see, not hide.
+    const byEmail = Object.create(null);
+    const unique = [];
+    for (const row of rows) {
+      if (!row.email) {
+        unique.push(row);
+        continue;
+      }
+      const at = byEmail[row.email];
+      if (at == null) {
+        byEmail[row.email] = unique.length;
+        unique.push(row);
+      } else if ((row.lastContactedAt || 0) > (unique[at].lastContactedAt || 0)) {
+        unique[at] = row;
+      }
+    }
+    rows.length = 0;
+    rows.push(...unique);
+
     rows.sort((a, b) => {
       const aSeq = a.inSequence === true ? 0 : 1;
       const bSeq = b.inSequence === true ? 0 : 1;
@@ -2320,6 +2545,10 @@
       // One-click LinkedIn from the identity block (Phase 8): the rep was going
       // to open a tab and search for them anyway.
       linkedinUrl: linkedInUrl(p.hs_linkedin_url),
+      // v0.8.1: how this person came in (PLG Signup, Abandoned Booking, ...).
+      // Null for a prospected contact, which is the common case.
+      inboundSource: humanizeEnum(p.inbound_source) || null,
+      inboundSourceAt: toMillis(p.inbound_source_last_updated) || null,
       url: recordUrl("contact", contact.id),
     };
   }
@@ -2424,8 +2653,105 @@
   // Every field is independently nullable and `hasData` is false when the
   // company has none of them (the common case for a thin record), which is what
   // lets the panel hide the whole section instead of drawing an empty card.
-  function accountContextView(company) {
+  // --- v0.8.1: account type, team mix, rep notes ---------------------------
+  // "Did they come to us, or did we go to them?" — the first thing a rep wants
+  // to know before deciding how warm to open. Precedence, by design:
+  //   inbound_source set                 → Inbound (they raised a hand; that
+  //                                        outranks any enrichment we ran)
+  //   last_bulk_contact_enrichment_date  → Prospected
+  //   neither                            → Unknown (a claim the record can't
+  //                                        back is not made)
+  // `detail` is the relative time behind the type; `at` is the raw stamp for
+  // the hover. Pure apart from `now`, which tests pass in.
+  function accountTypeView(p, now) {
+    const source = humanizeEnum(p.inbound_source) || null;
+    if (source) {
+      const at = toMillis(p.inbound_source_last_updated) || null;
+      return {
+        kind: "inbound",
+        label: `Inbound · ${source}`,
+        detail: at ? relativeTime(at, now) : null,
+        source,
+        at,
+      };
+    }
+    const enrichedAt = toMillis(p.last_bulk_contact_enrichment_date) || null;
+    if (enrichedAt) {
+      return {
+        kind: "prospected",
+        label: "Prospected",
+        detail: `enriched ${relativeTime(enrichedAt, now)}`,
+        source: null,
+        at: enrichedAt,
+      };
+    }
+    return { kind: "unknown", label: "Unknown", detail: null, source: null, at: null };
+  }
+
+  // The contact-role rollups, raw. Null as a whole when no member is a
+  // positive count — zero contacts in every role is the same "nothing to say"
+  // as no data, and the panel hides the row on null.
+  function teamMixView(p) {
+    const mix = {
+      sdr: asNumber(p.sdr_contacts),
+      ae: asNumber(p.ae_contacts),
+      amcs: asNumber(p.amcs_contacts),
+      leaders: asNumber(p.sales_leader_contacts),
+      gtmOps: asNumber(p.gtm_ops_contacts),
+      total: asNumber(p.number_of_associated_sales_team_contacts),
+    };
+    return Object.keys(mix).some((k) => mix[k] != null && mix[k] > 0) ? mix : null;
+  }
+
+  // communications_channel_company → [{ key, label }], in the order the
+  // portal stored them. HubSpot returns a multi-select as "slack;email".
+  function commChannels(value) {
+    return splitDelimited(value).map((raw) => {
+      const key = raw.toLowerCase();
+      return { key, label: own(CONFIG.COMM_CHANNEL_LABELS, key) || humanizeEnum(raw) };
+    });
+  }
+
+  // HubSpot stores a date-only property as midnight UTC (and fmt.date shows it
+  // in UTC), but "today" is the rep's own calendar day: at 8pm in Atlanta the
+  // UTC date has already rolled to tomorrow, and a check-in due today would
+  // read overdue. So today is the viewer's LOCAL Y/M/D re-expressed as a UTC
+  // midnight, which is directly comparable to the stored value.
+  function localTodayUtc(now) {
+    const ref = new Date(now == null ? Date.now() : now);
+    return Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate());
+  }
+
+  // next_checkin is a calendar date (midnight UTC), so "overdue" means a day
+  // strictly before the viewer's local today, not "earlier than this instant":
+  // a check-in due today is due, not late.
+  function isPastDate(ms, now) {
+    if (!ms) return false;
+    return ms < localTodayUtc(now);
+  }
+
+  // Where a calendar date sits against today (the viewer's local date), for the competitor
+  // renewal chip: "past" | "negative" (within RENEWAL_NEGATIVE_DAYS) |
+  // "caution" (within RENEWAL_CAUTION_DAYS) | null (further out, or no date).
+  function renewalState(ms, now) {
+    if (!ms) return null;
+    const days = Math.floor((ms - localTodayUtc(now)) / 86400000);
+    if (days < 0) return "past";
+    if (days <= CONFIG.RENEWAL_NEGATIVE_DAYS) return "negative";
+    if (days <= CONFIG.RENEWAL_CAUTION_DAYS) return "caution";
+    return null;
+  }
+
+  // Whole calendar days from the viewer's local today to a date-only stamp:
+  // negative once passed, 0 today, null with no date.
+  function daysFromToday(ms, now) {
+    if (!ms) return null;
+    return Math.floor((ms - localTodayUtc(now)) / 86400000);
+  }
+
+  function accountContextView(company, options) {
     const p = (company && company.properties) || {};
+    const now = options && options.now != null ? options.now : null;
 
     // description → about_us → linkedinbio. The full text is kept for the hover
     // title; `truncated` tells the panel whether a hover is worth offering.
@@ -2440,7 +2766,10 @@
     const ctx = {
       // Worth-calling check
       grade: asText(p.account_grade_v1),
-      status: humanizeEnum(p.company_lifecycle_stage) || null,
+      // "Company Status" in the portal (the property is named lifecycle).
+      // Stored "Open Deal" displays as "Active Deal"; everything else as-is.
+      status: companyStatusLabel(p.company_lifecycle_stage),
+      prospectingStatus: humanizeEnum(p.prospecting_status) || null,
       salesTeamSize: asNumber(p.asm_sales_team_size),
       aeTeamSize: asNumber(p.ae_team_size),
       obTeamSize: asNumber(p.ob_team_size),
@@ -2462,9 +2791,79 @@
       tech: null,
     };
     ctx.tech = techListLegacy(ctx.techStack);
+    ctx.statusTone = accountStatusTone(ctx.status);
+    ctx.prospectingStatusTone = accountStatusTone(ctx.prospectingStatus);
+    // v0.8.1: the GTM tech block. gtmTech is what renders as pills, allTech the
+    // "All tech (n)" disclosure under it.
+    Object.assign(ctx, gtmTechView(p.web_technologies));
+
+    // v0.8.1. Account type rides in the section head beside the grade; the
+    // team mix sits under the chip grid; the rep notes follow the ICP Why.
+    ctx.accountType = accountTypeView(p, now);
+    ctx.teamMix = teamMixView(p);
+    const nextCheckinAt = toMillis(p.next_checkin) || null;
+    const researchFull = asText(p.company_research) ? htmlToText(p.company_research) || null : null;
+    const research = researchFull ? truncate(researchFull, CONFIG.REASONING_CHARS) : null;
+    Object.assign(ctx, {
+      companySource: humanizeEnum(p.company_source) || null,
+      channels: commChannels(p.communications_channel_company),
+      nextCheckinAt,
+      nextCheckinOverdue: isPastDate(nextCheckinAt, now),
+      competitorTech: asText(p.competitor_tech),
+      // The COMPANY's own renewal date only. A deal's competitor_renewal_date_deal
+      // is never used as a fallback here: the two are separate sources and the
+      // deal row shows its own.
+      competitorRenewalAt: toMillis(p.competitor_renewal_date) || null,
+      competitorRenewalState: renewalState(toMillis(p.competitor_renewal_date) || null, now),
+      missingFeatures: asText(p.missing_wiza_features),
+      research,
+      researchFull,
+      researchTruncated: !!(researchFull && research && researchFull.length > research.length),
+    });
+    // v0.8.1: the bottom of Account context as two labelled groups. Call intel
+    // is what automations extracted from previous calls (what they use today,
+    // when it renews, what they said Wiza lacks, when to check back); Account
+    // notes is what reps keep on the record by hand. Flat fields above stay
+    // for existing readers.
+    const renewDays = daysFromToday(ctx.competitorRenewalAt, now);
+    const checkinDays = daysFromToday(nextCheckinAt, now);
+    ctx.callIntel = {
+      using: ctx.competitorTech,
+      renewsAt: ctx.competitorRenewalAt,
+      renewsState: ctx.competitorRenewalState,
+      renewsHint: renewDays == null ? null : renewDays < 0 ? "passed" : renewDays === 0 ? "today" : `in ${renewDays}d`,
+      missingFeatures: ctx.missingFeatures,
+      nextCheckinAt,
+      nextCheckinOverdue: ctx.nextCheckinOverdue,
+      nextCheckinHint:
+        checkinDays == null ? null : ctx.nextCheckinOverdue ? "overdue" : checkinDays === 0 ? "today" : `in ${checkinDays}d`,
+    };
+    ctx.callIntel.hasData = !!(ctx.callIntel.using || ctx.callIntel.renewsAt || ctx.callIntel.missingFeatures || nextCheckinAt);
+    ctx.accountNotes = {
+      source: ctx.companySource,
+      channels: ctx.channels,
+      research,
+      researchFull,
+    };
+    ctx.accountNotes.hasData = !!(ctx.companySource || ctx.channels.length || research);
+
+    ctx.hasRepNotes = !!(
+      ctx.companySource ||
+      ctx.channels.length ||
+      ctx.nextCheckinAt ||
+      ctx.competitorTech ||
+      ctx.competitorRenewalAt ||
+      ctx.missingFeatures ||
+      ctx.research
+    );
+
     ctx.hasData = !!(
+      ctx.accountType.kind !== "unknown" ||
+      ctx.teamMix ||
+      ctx.hasRepNotes ||
       ctx.grade ||
       ctx.status ||
+      ctx.prospectingStatus ||
       ctx.salesTeamSize != null ||
       ctx.aeTeamSize != null ||
       ctx.obTeamSize != null ||
@@ -2474,7 +2873,7 @@
       ctx.icp ||
       ctx.icpFit ||
       ctx.icpReasoning ||
-      ctx.tech
+      ctx.allTech.length > 0
     );
     return ctx;
   }
@@ -2592,6 +2991,94 @@
       account.isTargetAccount
     );
     return account;
+  }
+
+  // v0.8.1: the company-level usage rollups (bundle.wiza.usage). A separate
+  // view from wizaAccountView on purpose: these are the company's own
+  // properties, present on a record with no Wiza Account object at all, and
+  // the Wiza section shows on them alone. Once the rollups count as data (any
+  // value > 0, or a create date), zero is a real value (0 active users is
+  // something a rep acts on); all-zero/null is `hasData: false`. `depletionTone` is the semantic tone NAME for the depletion chip.
+  function wizaUsageView(company) {
+    const p = (company && company.properties) || {};
+    const depletionDays = asNumber(p.wiza_credit_depletion_days_company);
+    const usage = {
+      accountCreatedAt: toMillis(p.wiza_account_create_date) || null,
+      activeUsers30d: asNumber(p.number_of_active_users_last_30_days),
+      creditsUsed30d: asNumber(p.number_of_credits_used_in_last_30_days),
+      apiCreditBalance: asNumber(p.api_credit_balance_company),
+      apiCreditsUsed30d: asNumber(p.api_credits_used__30_days_cloned),
+      apiCreditsPerDay: asNumber(p.credit_use_per_day_company),
+      depletionDays,
+      depletionTone:
+        depletionDays == null
+          ? null
+          : depletionDays < CONFIG.DEPLETION_NEGATIVE_DAYS
+            ? "negative"
+            : depletionDays < CONFIG.DEPLETION_CAUTION_DAYS
+              ? "caution"
+              : null,
+    };
+    // v0.8.1: all-zero/null rollups are not data (HubSpot rollups default to 0
+    // on companies that never used Wiza); a positive number or an account
+    // create date is.
+    const counts = [
+      usage.activeUsers30d,
+      usage.creditsUsed30d,
+      usage.apiCreditBalance,
+      usage.apiCreditsUsed30d,
+      usage.apiCreditsPerDay,
+      usage.depletionDays,
+    ];
+    usage.hasData = !!(usage.accountCreatedAt || counts.some((n) => n != null && n > 0));
+    return usage;
+  }
+
+  // v0.8.1 Wiza tiles: three small shapers the Account and Usage tiles draw
+  // from, kept here (pure, unit-tested) so the colour rules live in one place.
+  //
+  // Stripe status → the status dot's tone NAME. Broader than the pill-tone map
+  // above on purpose: the dot always draws, so "active" needs its green here,
+  // while a canceled or missing subscription is grey (a fact, not an alarm).
+  // Accepts the raw enum or the label statusLabel made of it ("Past due").
+  const STRIPE_DOT_TONES = {
+    active: "positive",
+    trialing: "positive",
+    past_due: "caution",
+    unpaid: "caution",
+    incomplete: "caution",
+  };
+  function stripeDotTone(value) {
+    const slug = String(value == null ? "" : value)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    return Object.prototype.hasOwnProperty.call(STRIPE_DOT_TONES, slug) ? STRIPE_DOT_TONES[slug] : "neutral";
+  }
+
+  // Seats used of total, for a thin meter. `ratio` is null when there is no
+  // usable total (the tile then prints the used count alone); it is clamped
+  // to 0..1 and `over` says when the account is past its seat count.
+  function seatsMeterView(used, total) {
+    const u = asNumber(used);
+    if (u == null) return null;
+    const t = asNumber(total);
+    if (t == null || t <= 0) return { used: u, total: null, ratio: null, over: false };
+    return { used: u, total: t, ratio: Math.max(0, Math.min(1, u / t)), over: u > t };
+  }
+
+  // Days of credit runway → a meter. Green at 14 days and up, amber under 14,
+  // red under 7 (the same thresholds as depletionTone). The bar is full at
+  // DEPLETION_METER_FULL_DAYS so a healthy account reads as a full bar rather
+  // than a sliver of some arbitrary maximum.
+  const DEPLETION_METER_FULL_DAYS = 30;
+  function depletionMeterView(days) {
+    const d = asNumber(days);
+    if (d == null) return null;
+    const tone =
+      d < CONFIG.DEPLETION_NEGATIVE_DAYS ? "negative" : d < CONFIG.DEPLETION_CAUTION_DAYS ? "caution" : "positive";
+    return { days: d, tone, ratio: Math.max(0, Math.min(1, d / DEPLETION_METER_FULL_DAYS)) };
   }
 
   // --- Phase 12: property history → sparkline view-model -------------------
@@ -2955,6 +3442,8 @@
         userObject: wizaUserObjectView(wizaUserObj),
         accountObject: wizaAccountObjectView(wizaAccountObj),
         trial: trialObjectView(trialObj),
+        // v0.8.1: company-level usage rollups — shows the section on its own.
+        usage: wizaUsageView(company),
       },
       deals,
       activity,
@@ -3036,6 +3525,13 @@
     view: {
       wizaUser: wizaUserView,
       wizaAccount: wizaAccountView,
+      // v0.8.1
+      wizaUsage: wizaUsageView,
+      stripeDotTone,
+      seatsMeter: seatsMeterView,
+      depletionMeter: depletionMeterView,
+      contact: contactView,
+      company: companyView,
       // Phase 12: the custom-object views + the history → sparkline shaper,
       // each pure over a fetched object (or null) so the harness can build a
       // bundle without a network call, same as every view-model above.
@@ -3049,10 +3545,16 @@
       accountContext: accountContextView,
       sequence: sequenceView,
       dealOutcome,
+      // v0.8.1
+      dealCompetitor: dealCompetitorView,
       // Phase 9 (pure: records + resolved owner names in, ordered rows out)
       accountContacts: accountContactsView,
       // Phase 11
       techStack: techStackView,
+      // v0.8.1
+      gtmTech: gtmTechView,
+      companyStatusLabel,
+      accountStatusTone,
       // (ownerId, selfOwnerId, resolvedName) → true | false | null. Exported
       // because the three-state rule is the part a renderer can get wrong: null
       // must never be drawn as "not yours".
@@ -3073,6 +3575,7 @@
     // renderer can label a single value without building a whole stack.
     tech: {
       stack: techStackView,
+      gtm: gtmTechView,
       label: techLabel,
       slug: enumSlug,
       isCompetitor: isCompetitorTech,
@@ -3094,6 +3597,7 @@
       relativeTime,
       duration: formatDuration,
       stripHtml,
+      htmlToText,
       humanizeEnum,
       truncate,
       safeUrl,

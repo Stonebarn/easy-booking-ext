@@ -18,6 +18,9 @@ jobs:
       - name: Validate manifest and referenced files
         run: node scripts/validate.mjs
 
+      - name: Run view-model tests
+        run: node scripts/test-views.mjs
+
       - name: Check JS syntax
         # Globbed over git-tracked files so new scripts are never silently
         # unchecked. Note `node --check` parses .js as CommonJS: keep .js files

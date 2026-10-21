@@ -48,6 +48,7 @@
   const tzEl = document.getElementById("tz");
   const metaEl = document.getElementById("meta");
   const fillBtn = document.getElementById("fill");
+  const capBadgeEl = document.getElementById("cap-badge");
 
   // Single source of render truth: the stored payload plus an optional transient
   // notice (which the age ticker must not clobber mid-message).
@@ -95,6 +96,14 @@
     if (capturedEl.parentElement !== target || (anchor && capturedEl.nextSibling !== anchor)) {
       target.insertBefore(capturedEl, anchor);
     }
+    // v0.8.1: Fill form is its own full-width row at the bottom of the
+    // contact card (after the last-contacted row) while the cluster lives in
+    // the column, and the last thing in the cluster in its fallback home. The
+    // same button either way, so its click handler and disabled state carry.
+    const fillHome = target === prospectSectionEl ? capturedEl : target;
+    if (fillBtn.parentElement !== fillHome || fillHome.lastElementChild !== fillBtn) {
+      fillHome.appendChild(fillBtn);
+    }
     syncProspectShell();
   }
 
@@ -118,6 +127,9 @@
     // A stale capture can still be filled — the nudge below re-stamps it — so
     // the button stays live whenever there is a prospect at all.
     fillBtn.disabled = !hasProspect;
+    // Outside the cluster while it sits in the Contact column, so it is
+    // hidden on its own rather than with #captured.
+    fillBtn.hidden = !hasProspect;
     headerEl.classList.toggle("live", view === "live");
     // Design critique: the dot's colour alone reads as "connected" to anyone
     // used to that convention; it actually means "a fresh prospect is loaded
@@ -143,10 +155,10 @@
 
     renderEmail(emailEl, payload.email);
 
-    // The zone: its abbreviation, the UTC offset, then the prospect's own clock
-    // — the number a dialer actually acts on. Three discrete facts, so three
-    // spans spaced by the row's gap: no separator glyph, nothing in the
-    // accessibility tree that isn't a value. The full zone name and the capture
+    // The prospect's own clock first (the number a dialer actually acts on),
+    // then the zone abbreviation and UTC offset as one small muted tag
+    // ("PDT, UTC-7"). No separator glyph between them; the row's clock icon
+    // is static markup in sidepanel.html. The full zone name and the capture
     // age are the block's hover detail, because neither changes a decision.
     const localTime = payload.timezoneRaw && (payload.timezoneRaw.match(/\(([^)]+)\)/) || [])[1];
     const zone = [payload.tzAbbr || payload.timezone, fmtOffset(payload.tzOffsetMin)].filter(Boolean);
@@ -154,13 +166,23 @@
     // (hoisted function declarations), so the same textContent-only rule that
     // covers every CRM value covers the captured payload too.
     clearNode(tzEl);
-    for (const part of zone) tzEl.appendChild(el("span", null, part));
-    if (localTime) tzEl.appendChild(el("span", "bk-local", `${localTime} their time`));
+    if (localTime) tzEl.appendChild(el("span", "tz-local", `${localTime} their time`));
+    if (zone.length) tzEl.appendChild(el("span", "tz-zone", zone.join(", ")));
     if (!zone.length && !localTime) tzEl.textContent = "Timezone unknown";
 
     // The standing "captured Nm ago" line is hover detail; it only comes back
     // as a line when it is a warning (a stale capture) or a fill result.
     const stale = view === "stale";
+    // The email row's badge: green "auto-fill" for a fresh capture, amber
+    // "may be stale" past MAX_AGE_MS (same rule as viewOf/ageText).
+    if (capBadgeEl) {
+      capBadgeEl.classList.toggle("stale", stale);
+      const txt = capBadgeEl.querySelector(".cap-badge-text");
+      if (txt) txt.textContent = stale ? "may be stale" : "auto-fill";
+      capBadgeEl.title = stale
+        ? `${ageText(payload)}; Fill form will still use this email`
+        : "Picked up from the dialer; Fill form will use this email";
+    }
     capturedEl.title = [
       payload.timezone && payload.timezone !== payload.tzAbbr ? payload.timezone : null,
       ageText(payload),
@@ -593,13 +615,14 @@
     accountSection: document.getElementById("crm-account-section"),
     account: document.getElementById("crm-account"),
     accountPill: document.getElementById("crm-account-pill"),
+    // v0.8.1: Inbound / Prospected / Unknown, beside the grade.
+    accountTypePill: document.getElementById("crm-account-type-pill"),
     // Others at this account (Phase 9). Like Account context this section hides
     // itself outright — here when the prospect has no company at all — and its
     // count lives in the title rather than a pill, because "Others at this
     // account (4)" is the whole headline.
     colleaguesSection: document.getElementById("crm-colleagues-section"),
     colleaguesTitle: document.getElementById("crm-colleagues-title"),
-    colleaguesOwner: document.getElementById("crm-colleagues-owner"),
     colleagues: document.getElementById("crm-colleagues"),
     // Wiza and Deals join Account context and Others-at-this-account in hiding
     // outright when they have nothing to say (the density pass): a "No
@@ -745,14 +768,14 @@
   // ran. getValue reads state.payload at CLICK time, so this one button stays
   // correct across every render without ever being rebuilt.
   //
-  // Inserted BEFORE #email, not appended after it: the button floats (see
-  // .bk-email-row in sidepanel.html) and a float only affects content that
-  // comes after it in source order.
+  // Inserted after #email: the row is an icon-led .fact-row (mail glyph,
+  // then email, copy and the static auto-fill badge in one wrapping box), so
+  // copy follows the value
+  // the way it does on a phone row and the badge stays the row's last item.
   if (emailRowEl) {
-    emailRowEl.insertBefore(
-      copyButton(() => state.payload && state.payload.email, "Copy email"),
-      emailEl
-    );
+    const copy = copyButton(() => state.payload && state.payload.email, "Copy email");
+    if (capBadgeEl && capBadgeEl.parentElement) capBadgeEl.parentElement.insertBefore(copy, capBadgeEl);
+    else emailRowEl.appendChild(copy);
   }
 
   // --- tiny DOM builders ---------------------------------------------------
@@ -943,6 +966,162 @@
     return a;
   }
 
+  // v0.8.1: any of the panel's glyph links (the LinkedIn badge's shape), for
+  // the company's "open in HubSpot" mark beside its name.
+  const EXTERNAL_PATHS = ["M14 4h6v6", "M20 4l-9 9", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"];
+  function iconLink(url, label, paths, extraClass) {
+    const href = httpsUrl(url);
+    if (!href) return null;
+    const a = el("a", extraClass ? `li-glyph hit24 ${extraClass}` : "li-glyph hit24");
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.title = label;
+    a.setAttribute("aria-label", label);
+    a.appendChild(svgIcon(paths));
+    return a;
+  }
+
+  // v0.8.1: the ownership mark after an owner's name. Three states, and only
+  // two of them draw anything: true is a green check ("Owned by you"), false a
+  // red X ("Owned by someone else"), null (unknown, or no owner set) nothing.
+  // Replaces the "(not you)" suffix text.
+  const CHECK_PATHS = ["M5.5 12.5l4 4 9-9"];
+  const CROSS_PATHS = ["M7.5 7.5l9 9", "M16.5 7.5l-9 9"];
+  // The disc itself, factored out so any yes/no fact (Card on file, Overage)
+  // reads with the same mark as ownership: "yes" a green check, "no" a red X.
+  // `kind` "no-quiet" is the X in the neutral grey, for a "no" that is not bad
+  // news (no overage). The title doubles as the accessible name.
+  function markIcon(kind, title) {
+    if (kind !== "yes" && kind !== "no" && kind !== "no-quiet") return null;
+    const mark = el("span", `own-mark own-mark-${kind}`);
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", title);
+    mark.title = title;
+    mark.appendChild(svgIcon(kind === "yes" ? CHECK_PATHS : CROSS_PATHS));
+    return mark;
+  }
+  function ownerMark(isMine) {
+    if (isMine !== true && isMine !== false) return null;
+    return markIcon(isMine ? "yes" : "no", isMine ? "Owned by you" : "Owned by someone else");
+  }
+
+  // --- v0.8.1 stat tiles ---------------------------------------------------
+  // The panel's one tile system: Account, Usage, User and Trial in Wiza usage,
+  // and the team counts in Account context. A stat tile is a small caps label
+  // over a tabular number; a zero renders muted and light (an absence, not a
+  // headline), never as a full-weight value. A number passed in is formatted
+  // here and its zero is detected here; a string is printed as given, with
+  // `muted` set by the caller.
+  //   opts: { icon: paths[], muted, tone, title, size: "sm" }
+  function statTile(label, value, opts) {
+    const o = opts || {};
+    if (value == null || value === "") return null;
+    const isNum = typeof value === "number";
+    const text = isNum ? fmt.number(value) : String(value);
+    const muted = o.muted != null ? !!o.muted : isNum && value === 0;
+    let cls = "stat-tile";
+    if (o.size === "sm") cls += " stat-sm";
+    const tile = el("div", cls);
+    const top = el("span", "stat-label");
+    if (o.icon) {
+      const ic = svgIcon(o.icon);
+      ic.setAttribute("class", "stat-icon");
+      top.appendChild(ic);
+    }
+    top.appendChild(document.createTextNode(label));
+    tile.appendChild(top);
+    let vcls = "stat-value";
+    if (muted) vcls += " stat-zero";
+    else if (o.tone && o.tone !== "neutral") vcls += ` tone-${o.tone}`;
+    tile.appendChild(el("span", vcls, text));
+    if (o.title) tile.title = o.title;
+    return tile;
+  }
+
+  // Tiles in a wrapping row: equal shares when there is room, wrapping onto a
+  // second line when the panel is narrow. Null tiles drop.
+  function statRow(tiles, extraClass) {
+    const kept = (tiles || []).filter(Boolean);
+    if (!kept.length) return null;
+    const row = el("div", extraClass ? `stat-row ${extraClass}` : "stat-row");
+    for (const t of kept) row.appendChild(t);
+    return row;
+  }
+
+  // A thin progress bar. `ratio` 0..1; `tone` colours the fill with a tone's
+  // solid (depletion), otherwise the fill is the accent (seats: decoration).
+  function meterBar(ratio, tone, label) {
+    const bar = el("span", tone ? `meter meter-${tone}` : "meter");
+    bar.setAttribute("role", "img");
+    if (label) bar.setAttribute("aria-label", label);
+    const fill = el("span", "meter-fill");
+    fill.style.width = `${Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100)}%`;
+    bar.appendChild(fill);
+    return bar;
+  }
+
+  // A Wiza sub-card as a tile: an icon and a caps title on the header row,
+  // anything extra (a pill) at the header's right, then the body nodes.
+  function wizaTile(title, iconPaths, kind) {
+    const tile = el("div", `wz-tile wz-${kind}`);
+    const head = el("div", "wz-head");
+    const name = el("span", "wz-title");
+    const ic = svgIcon(iconPaths);
+    ic.setAttribute("class", "wz-icon");
+    name.appendChild(ic);
+    name.appendChild(document.createTextNode(title));
+    head.appendChild(name);
+    tile.appendChild(head);
+    return { tile, head };
+  }
+
+  // 14px glyphs for the tiles and the contact/company fact rows. 2px stroke,
+  // currentColor.
+  const ICONS = {
+    globe: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "M3 12h18", "M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"],
+    briefcase: ["M4 8h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z", "M9 8V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V8", "M3 13h18"],
+    people: ["M9 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", "M3 19a6 6 0 0 1 12 0", "M16 5.6a3 3 0 0 1 0 6.8", "M17.5 14.4A6 6 0 0 1 21 19"],
+    person: ["M12 4.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8z", "M5.5 20a6.5 6.5 0 0 1 13 0"],
+    building: ["M4 20V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v15", "M15 9h4a1 1 0 0 1 1 1v10", "M3 20h18", "M7.5 8h4M7.5 12h4M7.5 16h4"],
+    activity: ["M3 12h4l3-8 4 16 3-8h4"],
+    clock: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "M12 7.5V12l3 2"],
+    mail: ["M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z", "M3.5 7l8.5 6 8.5-6"],
+    phone: ["M5 4h3.5l1.5 4-2.2 1.4a11 11 0 0 0 6.8 6.8L16 14l4 1.5V19a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"],
+    download: ["M12 4v11", "M7.5 10.5 12 15l4.5-4.5", "M5 20h14"],
+    coin: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "M14.8 9.2c-.5-.8-1.5-1.3-2.8-1.3-1.6 0-2.7.8-2.7 2s1.1 1.7 2.7 2.1 2.9.9 2.9 2.2-1.2 2-2.9 2c-1.4 0-2.5-.6-3-1.5", "M12 6.2v1.7M12 16.2v1.6"],
+    send: ["M21 3 10.5 13.5", "M21 3 14.5 21l-4-7.5L3 9.5z"],
+    history: ["M3.5 12a8.5 8.5 0 1 0 2.5-6", "M3.5 4.5V8.5h4", "M12 7.5V12l3 2"],
+  };
+
+  // One icon-led fact row, the pattern both identity cards share: a 14px
+  // muted glyph, then the value node(s). Null nodes drop; no nodes, no row.
+  // `title` names the fact for a hover (the row has no visible label).
+  // opts.badge (a number) pins a 9px numeral to the icon's bottom-right (the
+  // "2nd, 3rd of this kind" cue). The hover title then lives on the icon
+  // wrapper and the row gets an aria-label, so there is no visible label.
+  function factRow(iconPaths, title, nodes, extraClass, opts) {
+    const kept = (nodes || []).filter(Boolean);
+    if (!kept.length) return null;
+    const row = el("div", extraClass ? `fact-row ${extraClass}` : "fact-row");
+    const ic = svgIcon(iconPaths);
+    ic.setAttribute("class", "fact-icon");
+    const badge = opts && opts.badge;
+    if (badge) {
+      const wrap = el("span", "icon-badge");
+      if (title) wrap.title = title;
+      wrap.appendChild(ic);
+      wrap.appendChild(el("span", "icon-badge-num", String(badge)));
+      row.appendChild(wrap);
+      if (title) row.setAttribute("aria-label", title);
+    } else {
+      row.appendChild(ic);
+      if (title) row.title = title;
+    }
+    for (const n of kept) row.appendChild(n);
+    return row;
+  }
+
   // An external link built from a CRM URL property. hubspot-data.js has already
   // rejected anything that isn't http(s), so href can never be a javascript:
   // URL — but the value is still only ever set through .href, never markup.
@@ -955,73 +1134,11 @@
     return a;
   }
 
-  // --- stat chips ----------------------------------------------------------
-  // The panel's one labelled-datapoint idiom: a muted ALL-CAPS label over a
-  // bold value, in a rounded box of page white on the card's grey fill. It
-  // replaced the label-left inline rows because a rep scanning for "how big is
-  // their sales team" finds a labelled box faster than a word in a sentence.
-  //
-  // A datapoint with no value renders NO chip — never an empty box. `tone` puts
-  // a semantic tone on the VALUE only (the label is always muted), which is how
-  // a status keeps its meaning without becoming a second pill.
-  function chip(label, value, opts) {
-    const o = opts || {};
-    const text = value == null ? "" : String(value);
-    if (!text) return null;
-    const node = el("div", "chip");
-    node.appendChild(el("span", "chip-label", label));
-    node.appendChild(el("span", o.tone ? `chip-value tone-${o.tone}` : "chip-value", text));
-    if (o.title) node.title = o.title;
-    return node;
-  }
-
-  // Chips flow in a wrapping row and size to their content. Null chips (the
-  // datapoints this record doesn't have) are dropped here, so a caller can list
-  // every possible chip and let the record decide which ones exist.
-  function chipRow(chips) {
-    const kept = (chips || []).filter(Boolean);
-    if (!kept.length) return null;
-    const row = el("div", "chips");
-    for (const c of kept) row.appendChild(c);
-    return row;
-  }
-
-  // Phase 12: a second chip row, collapsed behind a MORE/LESS toggle exactly
-  // like the Account context tech row's (same .prose-more button, same
-  // "More (n)"/"Less" text, same aria-expanded). A fully-populated Wiza
-  // Account object has more secondary facts than the height budget affords
-  // showing unconditionally; this is how they stay reachable — one click, not
-  // gone — without spending the height on a record nobody asked to see yet.
-  function chipDisclosure(chips, noun) {
-    const kept = (chips || []).filter(Boolean);
-    if (!kept.length) return null;
-    const wrap = el("div", "chip-more-wrap");
-    const row = chipRow(kept);
-    row.hidden = true;
-    // hit24, same as every other prose-more instance (tech stack, prose
-    // blocks): this toggle was missing it (a latent ≥24px-hit-area gap the
-    // ergonomics fix wave didn't reach because no fixture used before this
-    // pass ever exercised it — see the whole-path sweep).
-    const toggle = el("button", "prose-more hit24", `More (${kept.length})`);
-    toggle.type = "button";
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.setAttribute("aria-label", `Show ${kept.length} more ${noun}`);
-    toggle.addEventListener("click", () => {
-      const expand = row.hidden;
-      row.hidden = !expand;
-      toggle.textContent = expand ? "Less" : `More (${kept.length})`;
-      toggle.setAttribute("aria-expanded", expand ? "true" : "false");
-    });
-    wrap.appendChild(row);
-    wrap.appendChild(toggle);
-    return wrap;
-  }
-
   // --- Phase 12: usage sparkline row ----------------------------------------
   // The panel's second labelled-datapoint idiom, one line: a caption label
   // over a row holding the current value, then — only when there is enough
   // history to draw one — a small inline line and a trend arrow. Same
-  // label-over-value shape as a stat chip, so the two read as one system.
+  // label-over-value shape as a stat tile, so the two read as one system.
   //
   // Every coordinate below is computed from numbers hubspot-data.js already
   // downsampled (historyView's `points`), never from a CRM string: the
@@ -1180,8 +1297,13 @@
   function proseBlock(fullText, className, label) {
     const value = String(fullText == null ? "" : fullText).trim();
     if (!value) return null;
-    const wrap = el("div");
-    const p = el("p", className ? `prose ${className}` : "prose", value);
+    return clampWrap(el("p", className ? `prose ${className}` : "prose", value), label);
+  }
+
+  // The clamp-and-toggle behind proseBlock, for a paragraph that is already
+  // built (the tech stack's spans). `p` must carry the .prose class.
+  function clampWrap(p, label) {
+    const wrap = el("div", "prose-wrap");
     wrap.appendChild(p);
     const btn = el("button", "prose-more hit24", "More");
     btn.type = "button";
@@ -1204,8 +1326,10 @@
 
   // Second pass over the prose blocks a section just appended: a clamp is only
   // measurable after layout, and a "More" button on unclipped text is a lie.
+  // Walks descendants, not just children: Account context nests its blocks
+  // inside the Call intel / Account notes groups.
   function attachProseToggles(root) {
-    for (const node of root.children) {
+    for (const node of root.querySelectorAll(".prose-wrap")) {
       if (typeof node.__ebProseToggle === "function") node.__ebProseToggle();
     }
   }
@@ -1365,38 +1489,65 @@
   // was the same name on three lines. Roles are grouped by name now — one name
   // for everything collapses to a single "Owner <name>" line whose title spells
   // out the roles it covers, and only genuinely different names get a line.
-  // Sequence context (Phase 8): whether this contact is already being worked,
-  // and when anyone last touched them. `line` is null when the portal doesn't
-  // say — no line is better than a guess.
-  //
-  // Density note: the enrolment date used to run on the end of the line ("since
-  // Jul 27, 2026") and pushed the whole thing onto a second row at 320px. It is
-  // hover detail now — "are they being worked, and when did anyone last touch
-  // them" is answered by the name and the relative time alone.
+  // Sequence context (Phase 8): whether this contact is already being worked.
+  // `seq.line` is null when the portal doesn't say: no row is better than a
+  // guess. v0.8.1: one icon-led row on the Contact card (paper plane), the
+  // enrolled state in the positive colour, "Not in a sequence" muted, and the
+  // last sequence's name as a muted trailing fact. Enrolment and last-sequence
+  // dates are hover detail. Last contacted has its own row (contactFactRows).
   function sequenceLine(seq) {
     if (!seq || !seq.hasData) return null;
-    const row = el("div", "ident-seq");
+    const nodes = [];
+    let title = "Sequence";
     if (seq.line) {
       // seq.line already carries "since <date>" when the portal has one; strip
       // it back to the state and keep the date in the title.
       const enrolled = seq.enrolled === true;
       const label = enrolled ? (seq.name ? `In sequence: ${seq.name}` : "In sequence") : seq.line;
-      const span = el("span", enrolled ? "seq-on" : null, label);
-      if (enrolled && seq.enrolledAt) span.title = `Enrolled ${fmt.date(seq.enrolledAt)}`;
-      row.appendChild(span);
+      nodes.push(el("span", enrolled ? "seq-on" : "fact-muted", label));
+      if (enrolled && seq.enrolledAt) title = `Enrolled ${fmt.date(seq.enrolledAt)}`;
     }
     if (seq.lastSequence) {
-      const span = el("span", null, `Last sequence: ${seq.lastSequence}`);
-      if (seq.lastSequenceAt) span.title = fmt.date(seq.lastSequenceAt);
-      row.appendChild(span);
+      nodes.push(el("span", "fact-muted", `Last sequence: ${seq.lastSequence}`));
+      if (seq.lastSequenceAt) title = `Last sequence enrolled ${fmt.date(seq.lastSequenceAt)}`;
     }
-    if (seq.lastContactedAt) {
-      const when = el("span", null, `contacted ${fmt.relativeTime(seq.lastContactedAt)}`);
+    if (!nodes.length) return null;
+    // Two facts wrap as one value block beside the glyph, not under it.
+    const value = el("span", "fact-wrap");
+    appendAll(value, nodes);
+    return factRow(ICONS.send, title, [value], "seq-row");
+  }
+
+  // The Contact card's owner and last-touch facts, as icon-led rows like the
+  // company card's facts (rep feedback: one standard across both cards).
+  // Owner keeps its mark; with no name it says so, muted, because ownership is
+  // load-bearing and a missing owner is a fact. Last contacted is muted, with
+  // the exact date on hover; no date, no row.
+  function contactFactRows(role, seq) {
+    const rows = [];
+    if (role) {
+      const v = el("span", "own-value");
+      if (role.name) {
+        v.appendChild(el("span", "own-name", role.name));
+        const mark = ownerMark(role.isMine);
+        if (mark) v.appendChild(mark);
+      } else {
+        v.appendChild(el("span", "own-name own-unset", role.missing ? "Owner not set" : "Owner unknown"));
+      }
+      rows.push(factRow(ICONS.person, role.label || "Owner", [v], "owner-row"));
+    }
+    if (seq && seq.lastContactedAt) {
       const exact = fmt.dateTime(seq.lastContactedAt);
-      if (exact) when.title = `Last contacted ${exact}`;
-      row.appendChild(when);
+      rows.push(
+        factRow(
+          ICONS.history,
+          exact ? `Last contacted ${exact}` : "Last contacted",
+          [el("span", "fact-muted", fmt.relativeTime(seq.lastContactedAt))],
+          "contacted-row"
+        )
+      );
     }
-    return row.childElementCount ? row : null;
+    return rows;
   }
 
   // ==== Wrong-number workflow (Phase 10) ===================================
@@ -1903,24 +2054,34 @@
       }
       rows.push({ digits, value: f.value, label: f.label, names: [f.name] });
     }
-    return rows.map((r) => {
-      const span = el("span", null, r.label ? `${r.label}: ${r.value}` : r.value);
-      // Always say which field(s) this number is on when it isn't just "Phone" —
-      // the duplicate that used to be a second visible row is preserved here.
-      if (r.names.length > 1) span.title = `On ${r.names.join(" and ")}`;
-      else if (!r.label) span.title = r.names[0];
-      return span;
+    // v0.8.1: one icon-led row per distinct number, its own copy button, and
+    // a small muted label (Mobile, Phone 2) when it isn't the main Phone.
+    return rows.map((r, i) => {
+      const nodes = [];
+      nodes.push(el("span", "phone-num", r.value));
+      nodes.push(copyButton(() => r.value, `Copy ${r.label ? r.label.toLowerCase() : "phone"}`));
+      // Always say which field(s) this number is on — the duplicate that used
+      // to be a second visible row is preserved here.
+      const title = r.names.length > 1 ? `On ${r.names.join(" and ")}` : r.names[0];
+      // Rows after the first get a subscript numeral on the icon instead of
+      // a text label; the field label stays in the hover title / aria-label.
+      const hover = r.label && r.names.length === 1 ? r.label : title;
+      return factRow(ICONS.phone, hover, nodes, "phone-row", i > 0 ? { badge: i + 1 } : null);
     });
   }
 
-  // One block for both records, in two columns.
-  //   Contact  name + lifecycle stage / the booking cluster (email, their time,
-  //            Fill) / title / phone + lead status / owner / LinkedIn / sequence
-  //   Company  name / domain, industry, headcount / the owner rows / LinkedIn
+  // One block for both records, as two cards (side by side when they fit).
+  //   Contact  photo + name + LinkedIn + lifecycle stage / title / the booking
+  //            cluster (email, their time, Fill) / icon rows: phone(s) +
+  //            Wrong number?, lead status, sequence, owner ✓, last contacted
+  //   Company  logo + name + LinkedIn + HubSpot / icon rows: domain, industry,
+  //            headcount / Outbound owner, Company owner (label | value)
   //
-  // The booking cluster sits directly under the name because that is what it is:
+  // The booking cluster sits directly under the name and title because that is what it is:
   // the captured email is this contact's identity and the clock is what a rep
-  // books against. It is the same node the #prospect section declares — moved,
+  // books against. Since v0.8.1 it reads as the first two contact fact rows
+  // (email + auto-fill badge, then their time), and Fill form is a full-width
+  // row at the bottom of the contact card. It is the same node the #prospect section declares — moved,
   // not rebuilt (see mountBooking) — and it goes back there in the states this
   // function returns early from, so email/their-time/Fill are reachable even
   // with no HubSpot match at all.
@@ -1945,71 +2106,38 @@
     setPill(crmEls.identityPill, c ? null : "No contact record");
     clearNode(body);
 
-    // Two columns, contact | company, separated by a hairline. Owners are the
-    // load-bearing rows: all three are ALWAYS drawn (missing/unresolved states
-    // say so honestly). isMine === null (can't tell) is never flagged: falsely
-    // telling a rep an account isn't theirs is worse than silence.
-    //
-    // Ownership tone fix (P1, design critique "Neutral chip, red retired"):
-    // another rep's name is a routine, benign state on a shared account, not
-    // an error — red is retired from ownership entirely, here and on the
-    // colleague rows below. The one fact a rep needs — "this isn't yours" —
-    // is stated ONCE per card, in plain visible text (never title-only, so a
-    // screen reader gets it too), on whichever role is most prominent:
-    // outbound first (HubSpot's own field for outbound ownership), contact
-    // otherwise. Company ownership was never flaggable and still isn't.
+    // Two cards, contact | company, side by side when the panel is wide enough
+    // and stacked when it isn't (see .ident-cols). Owners are the load-bearing
+    // rows: all three are ALWAYS drawn (missing/unresolved states say so
+    // honestly), and each carries a small mark after the name: a green check
+    // for "this is yours", a red X for "someone else's". isMine === null
+    // (can't tell) gets no mark at all: falsely telling a rep an account isn't
+    // theirs is worse than silence. The mark is an icon with a title and an
+    // aria-label, so a screen reader gets the same fact a sighted rep does.
     const roles = (bundle.ownership && bundle.ownership.byKey) || {};
-    const flagRole =
-      roles.outbound && roles.outbound.isMine === false
-        ? roles.outbound
-        : roles.contact && roles.contact.isMine === false
-          ? roles.contact
-          : null;
     const ownChanged =
       bundle.ownership && bundle.ownership.changedAt
         ? `Outbound ownership changed ${fmt.date(bundle.ownership.changedAt)}`
         : null;
-    const ownerRow = (role, isFlagRow) => {
-      if (!role) return null;
-      const row = el("div", "own-row");
-      row.appendChild(el("span", "own-label", role.label));
+    // An owner's value: the name and its mark, or a muted "Not set" / "Unknown".
+    const ownerValue = (role) => {
+      const v = el("span", "own-value");
       if (role.name) {
-        row.appendChild(el("span", "own-name", role.name));
-        if (isFlagRow) row.appendChild(el("span", "own-suffix", "(not you)"));
+        v.appendChild(el("span", "own-name", role.name));
+        const mark = ownerMark(role.isMine);
+        if (mark) v.appendChild(mark);
       } else {
-        row.appendChild(
-          el("span", "own-name own-unset", role.missing ? "Not set" : "Unknown")
-        );
+        v.appendChild(el("span", "own-name own-unset", role.missing ? "Not set" : "Unknown"));
       }
-      // When ownership last moved: context for "why haven't they been called",
-      // kept as hover detail on the outbound row it belongs to.
-      if (role.key === "outbound" && ownChanged) row.title = ownChanged;
-      return row;
-    };
-    // The promised collapse (old comment above this code, now made real):
-    // outbound, company and contact owner are the same person more often than
-    // not, and three rows saying one thing is noise. Only a fully resolved,
-    // identical trio collapses; a divergent, missing or unresolved name keeps
-    // the split rows — so "Not set"/"Unknown" states stay honest.
-    const ownerTriple = [roles.contact, roles.outbound, roles.company];
-    const sharedOwnerName =
-      ownerTriple.every((r) => r && r.name) &&
-      ownerTriple.every((r) => r.name === ownerTriple[0].name)
-        ? ownerTriple[0].name
-        : null;
-    const sharedOwnerRow = (name, isFlagRow) => {
-      const row = el("div", "own-row");
-      row.appendChild(el("span", "own-label", "Owner"));
-      row.appendChild(el("span", "own-name", name));
-      const clauses = isFlagRow ? "all roles, not you" : "all roles";
-      row.appendChild(el("span", "own-suffix", `(${clauses})`));
-      if (ownChanged) row.title = ownChanged;
-      return row;
+      return v;
     };
 
     const cols = el("div", "ident-cols");
 
-    // --- Contact column ---
+    // --- Contact card ---
+    // Top to bottom: photo + name + LinkedIn + stage pills / title / the
+    // booking cluster (email, their time, Fill) / icon-led fact rows: phone(s)
+    // + Wrong number?, lead status, sequence, owner + mark, last contacted.
     const colC = el("div", "ident-col");
     colC.appendChild(el("div", "col-head", "Contact"));
     // The contact's own header: photo (or initials) at 36px, with the name, the
@@ -2022,19 +2150,29 @@
     // the photo URL is signed and WILL expire — so the initials fallback in
     // tileNode is the normal path, not the error path.
     const li = prospectLinkedIn();
+    // Photo on the left; to its right a two-line block (name, LinkedIn and
+    // pills on line 1, the job title muted on line 2), centred on the photo.
     const head = el("div", "ident-head");
-    const line1 = el("div", "ident-line");
+    const block = el("div", "ident-block");
+    const line1 = el("div", "ident-line ident-name-line");
     // A tile only for a matched contact: an email address makes meaningless
     // initials, and there is nothing to put a photo next to.
     if (c && c.name) head.appendChild(contactTile(c.name, li.photoUrl));
-    head.appendChild(line1);
-    line1.appendChild(recordLink(c ? c.name : bundle.email, c && c.url, "rec-name"));
+    head.appendChild(block);
+    block.appendChild(line1);
+    const nameNode = recordLink(c ? c.name : bundle.email, c && c.url, "rec-name");
+    // The name ellipsizes when it is too long for a line of its own (see
+    // .ident-name-line), so its full text rides along as the title.
+    nameNode.title = (c ? c.name : bundle.email) || "";
+    line1.appendChild(nameNode);
     // The headline ("VP Sales at Powtoon | ex-Gong") is hover detail on the
     // glyph: it is long, it repeats the title row, and this panel is 320px wide.
-    const liGlyph = linkedInGlyphLink(
-      li.profileUrl,
-      li.headline ? `LinkedIn — ${li.headline}` : c ? `${c.name} on LinkedIn` : "LinkedIn profile"
-    );
+    // With no dialer capture, HubSpot's own hs_linkedin_url fills the glyph.
+    const liGlyph =
+      linkedInGlyphLink(
+        li.profileUrl,
+        li.headline ? `LinkedIn — ${li.headline}` : c ? `${c.name} on LinkedIn` : "LinkedIn profile"
+      ) || (c ? linkedInGlyphLink(c.linkedinUrl, `${c.name} on LinkedIn`) : null);
     if (liGlyph) line1.appendChild(liGlyph);
     if (c && c.lifecycleStage) {
       line1.appendChild(
@@ -2047,93 +2185,107 @@
         )
       );
     }
-    colC.appendChild(head);
-    // The live capture, right under the name. Appended after the column is in
-    // the document (below), because a move is cheaper than a reparent-then-move.
-    if (c && c.title) colC.appendChild(el("div", "ident-role", c.title));
-
-    // Phase 10 phone row + wrong-number editor, unchanged behavior.
-    const meta = el("div", "ident-meta");
-    // Same priority order phoneSpans itself resolves duplicates by, so this is
-    // always the number the row's FIRST span is actually showing — never the
-    // label text ("Mobile: ...") that span might carry.
-    const primaryPhone = (c && (c.phone || c.mobilePhone || c.phone2)) || null;
-    const hasAnyPhone = !!primaryPhone;
-    const phoneRows = phoneSpans(c);
-    if (phoneRows.length) {
-      // One copy affordance, on the number a rep would actually dial — not
-      // one per field, which would be three copy buttons for what is usually
-      // the same number written twice.
-      const wrap = el("span", "phone-value");
-      wrap.appendChild(phoneRows[0]);
-      wrap.appendChild(copyButton(() => primaryPhone, "Copy phone"));
-      phoneRows[0] = wrap;
+    // v0.8.1: how this person came in. The same teal as the Account context
+    // Inbound pill, so "inbound" reads as one thing wherever it shows; absent
+    // for a prospected contact rather than saying so.
+    if (c && c.inboundSource) {
+      const inbound = el("span", "pill tiny acct-inbound", `Inbound · ${c.inboundSource}`);
+      inbound.title = c.inboundSourceAt
+        ? `Inbound · ${c.inboundSource}, set ${fmt.date(c.inboundSourceAt)}`
+        : `Inbound · ${c.inboundSource}`;
+      line1.appendChild(inbound);
     }
-    appendAll(meta, [
+    colC.appendChild(head);
+    // The title is line 2 of the name block (rep feedback): the second thing a
+    // rep reads about a person, before the email they are booking with.
+    if (c && c.title) block.appendChild(el("div", "ident-role ident-title", c.title));
+
+    // v0.8.1: everything under the booking cluster is one .ident-facts list
+    // of icon-led rows, the same component and spacing as the company card:
+    // phone(s), lead status, sequence, owner, last contacted. A fact the record
+    // doesn't have is no row. The Phase 10 wrong-number control rides at the
+    // end of the first phone row ("Add a number" on a no-phone row, so a rep
+    // can still add one); its editor mounts under the list, unchanged.
+    const facts = el("div", "ident-facts contact-facts");
+    const phoneRows = phoneSpans(c);
+    if (c && !phoneRows.length) {
+      phoneRows.push(factRow(ICONS.phone, "Phone", [el("span", "fact-muted", "No phone number")], "phone-row"));
+    }
+    const wnBtn = wnOpenButton(c);
+    if (wnBtn && phoneRows.length) phoneRows[0].appendChild(wnBtn);
+    appendAll(facts, [
       ...phoneRows,
-      c && !hasAnyPhone ? el("span", null, "No phone number") : null,
-      c && c.leadStatus ? el("span", null, c.leadStatus) : null,
-      wnOpenButton(c),
+      c && c.leadStatus ? factRow(ICONS.activity, "Lead status", [el("span", null, c.leadStatus)]) : null,
+      sequenceLine(bundle.sequence),
+      ...contactFactRows(roles.contact, bundle.sequence),
     ]);
-    if (meta.childElementCount) colC.appendChild(meta);
+    if (facts.childElementCount) colC.appendChild(facts);
     const wnHost = wnMount(c);
     if (wnHost) colC.appendChild(wnHost);
 
-    appendAll(colC, [
-      // Suppressed here entirely when the trio collapses — the merged
-      // "Owner" row lands once, in the Company column, below.
-      sharedOwnerName ? null : ownerRow(roles.contact, roles.contact === flagRole),
-      // The row link is suppressed when the glyph beside the name is already
-      // showing: two links to the same person's profile is one row of the panel
-      // spent twice. HubSpot's own hs_linkedin_url still carries it when the
-      // dialer captured nothing.
-      linkRow([liGlyph ? null : extLink("LinkedIn", c && c.linkedinUrl)]),
-      sequenceLine(bundle.sequence),
-    ]);
+    // Only when the profile URL couldn't become a glyph (an http:// value):
+    // the link is still worth having.
+    if (!liGlyph && c && c.linkedinUrl) colC.appendChild(linkRow([extLink("LinkedIn", c.linkedinUrl)]));
 
-    // --- Company column ---
+    // --- Company card ---
+    // Logo + name + LinkedIn (+ open in HubSpot), then the company's facts as
+    // icon-led rows (domain, industry, headcount), then a label | value list
+    // of the account's owners.
     const colCo = el("div", "ident-col ident-col-co");
     colCo.appendChild(el("div", "col-head", "Company"));
     if (co) {
       const coHead = el("div", "ident-head");
+      const coBlock = el("div", "ident-block");
       const coLine = el("div", "ident-line");
       colCo.appendChild(coHead);
       coHead.appendChild(companyTile(co.name, co.domain));
-      coHead.appendChild(coLine);
-      coLine.appendChild(recordLink(co.name, co.url, "rec-name"));
-      // Domain, industry and headcount: three discrete facts on one wrapping
-      // line, spaced by the row's gap rather than strung together with a glyph.
-      const about = [
-        co.domain,
-        co.industry,
-        co.employees != null ? `${fmt.number(co.employees)} employees` : null,
-      ].filter(Boolean);
-      if (about.length) {
-        const facts = el("div", "ident-role ident-facts");
-        for (const fact of about) facts.appendChild(el("span", null, fact));
-        colCo.appendChild(facts);
+      coHead.appendChild(coBlock);
+      coBlock.appendChild(coLine);
+      appendAll(coLine, [
+        recordLink(co.name, co.url, "rec-name"),
+        linkedInGlyphLink(co.linkedinUrl, "Company LinkedIn"),
+        co.url ? iconLink(co.url, "Open the company in HubSpot", EXTERNAL_PATHS, "ext-glyph") : null,
+      ]);
+      // One row per fact, each led by a small muted glyph; a missing fact is
+      // no row at all. The domain links to the company's site.
+      const coFacts = el("div", "ident-facts");
+      for (const [icon, label, node] of [
+        [ICONS.globe, "Website", co.domain ? extLink(co.domain, httpsUrl(`https://${String(co.domain).replace(/^https?:\/\//i, "")}`)) || el("span", null, co.domain) : null],
+        [ICONS.briefcase, "Industry", co.industry ? el("span", null, co.industry) : null],
+        [ICONS.people, "Employees", co.employees != null ? el("span", null, `${fmt.number(co.employees)} employees`) : null],
+      ]) {
+        const row = factRow(icon, label, [node]);
+        if (row) coFacts.appendChild(row);
       }
+      if (coFacts.childElementCount) colCo.appendChild(coFacts);
     } else {
       colCo.appendChild(el("div", "ident-role", "No company record"));
     }
-    appendAll(colCo, [
-      sharedOwnerName
-        ? sharedOwnerRow(sharedOwnerName, !!flagRole)
-        : ownerRow(roles.outbound, roles.outbound === flagRole),
-      sharedOwnerName ? null : ownerRow(roles.company, false),
-      bundle.ownership && bundle.ownership.csmRole && bundle.ownership.csmRole.name
-        ? ownerRow(bundle.ownership.csmRole, false)
-        : null,
-      linkRow([extLink("Company LinkedIn", co && co.linkedinUrl)]),
-    ]);
+    const owners = el("div", "kv-list own-list");
+    for (const role of [
+      roles.outbound,
+      roles.company,
+      roles.csm && roles.csm.name ? roles.csm : null,
+    ]) {
+      if (!role) continue;
+      const label = el("span", "kv-label", role.label);
+      const value = ownerValue(role);
+      value.classList.add("kv-value");
+      // When ownership last moved: context for "why haven't they been called",
+      // kept as hover detail on the outbound row it belongs to.
+      if (role.key === "outbound" && ownChanged) value.title = ownChanged;
+      owners.appendChild(label);
+      owners.appendChild(value);
+    }
+    if (owners.childElementCount) colCo.appendChild(owners);
 
     cols.appendChild(colC);
     cols.appendChild(colCo);
     body.appendChild(cols);
     // The booking cluster moves in now the column is in the document, and lands
-    // directly under the contact's header row — before the title, the phone and
-    // the owners. (The anchor is the header, not the name line inside it.) Only
-    // while this section still leads the column, though — see below.
+    // directly under the name block (which carries the title) — before the
+    // phone and the owners. Only while this section still leads the column,
+    // though — see below.
     if (identityLeadsColumn()) mountBooking(colC, head.nextSibling);
   }
 
@@ -2158,6 +2310,7 @@
     }
     // The cluster may already be sitting in this slot, and insertBefore must
     // never be handed the node it is moving as its own anchor.
+    // Under the name block, which carries the title (see renderIdentitySection).
     const after = head.nextSibling;
     mountBooking(colC, after === capturedEl ? capturedEl.nextSibling : after);
   }
@@ -2184,6 +2337,7 @@
     const ctx = bundle.accountContext || {};
     if (!ctx.hasData) {
       setPill(crmEls.accountPill, null);
+      setAccountTypePill(null);
       crmEls.accountSection.hidden = true;
       clearNode(body);
       return;
@@ -2202,125 +2356,303 @@
       // through F worst, is the whole fact this hover adds.
       ctx.grade ? "HubSpot account grade — A best, F worst" : undefined
     );
+    setAccountTypePill(ctx.accountType || null);
     clearNode(body);
 
-    // Every labelled datapoint on this record, as stat chips in one wrapping
-    // grid: the classification first (what kind of account is this), then the
-    // team sizes (how big is the motion). A chip is only built when the record
-    // has the value, so a thin company shows two chips rather than eight boxes
-    // of nothing.
+    // v0.8.1 layout (rep feedback: the chip grid was cramped). Top to bottom:
+    //   key/value grid   Prospecting Status, Company Status, ICP, ICP fit,
+    //                    Industry
+    //   Their team (est.) / In HubSpot   two compact count rows
+    //   About / GTM tech / Why ICP           labelled prose, 3 lines + More
+    //   Call intel                       what previous calls told us
+    //   Account notes                    what reps keep on the record
+    // Nothing is built for a value the record doesn't have, so a thin company
+    // shows two cells rather than eight boxes of nothing.
     //
     // ICP and industry live HERE, and only here. They are company data; the
-    // Wiza section is Wiza PRODUCT data and no longer shows them at all — which
-    // is the inverse of the old rule, where Account context suppressed them
-    // whenever the Wiza section happened to have account data to print.
-    const chips = chipRow([
-      // Company status is a status → the tone rides on the chip's value text.
-      chip("Status", ctx.status, {
-        title: "Company status",
-        tone: data && data.status ? data.status.tone("company_lifecycle_stage", ctx.status) : null,
+    // Wiza section is Wiza PRODUCT data and does not show them.
+    const facts = kvGrid([
+      // v0.8.1: the portal's own labels. Company Status, Prospecting
+      // Status and ICP are short values and share the first row (thirds). Tone is subtle and
+      // only for the answers that change the call: red for Do Not Outbound /
+      // Disqualified, green for Demo Outstanding / Actively Engaged / Active
+      // Deal / Customer, default ink otherwise (ctx.*Tone, hubspot-data.js).
+      kvCell("Company Status", ctx.status, {
+        title: "Company status (company_lifecycle_stage)",
+        tone: ctx.statusTone || null,
+        wide: false,
+        third: true,
       }),
-      chip("ICP fit", ctx.icpFit, { title: "ICP fit" }),
-      chip("ICP", ctx.icp, { title: "Ideal customer profile" }),
-      chip("Industry", ctx.industry, { title: "Industry" }),
-      // The Wiza-data caveat on the first number is straight from the property's
-      // own description, and stays as the chip's hover.
-      chip("Sales team", ctx.salesTeamSize != null ? fmt.number(ctx.salesTeamSize) : null, {
-        title: "Size of the sales team using Wiza data",
+      kvCell("Prospecting Status", ctx.prospectingStatus, {
+        title: "Prospecting status (prospecting_status)",
+        tone: ctx.prospectingStatusTone || null,
+        wide: false,
+        third: true,
       }),
-      chip("AE", ctx.aeTeamSize != null ? fmt.number(ctx.aeTeamSize) : null, { title: "AE team" }),
-      chip("Outbound", ctx.obTeamSize != null ? fmt.number(ctx.obTeamSize) : null, {
-        title: "Outbound team",
-      }),
-      // "Leadership" against a one-digit value drew a label 8x wider than
-      // its own value (design critique 3c) — the label alone sets a
-      // nowrap chip's width. "Leaders" says the same thing shorter; the
-      // full term stays one hover away in the title, same as every other
-      // chip's fuller wording.
-      chip("Leaders", ctx.leadershipTeamSize != null ? fmt.number(ctx.leadershipTeamSize) : null, {
-        title: "Sales leadership team",
-      }),
+      kvCell("ICP", ctx.icp, { title: "Ideal customer profile", wide: false, third: true }),
+      kvCell("ICP fit", ctx.icpFit, { title: "ICP fit" }),
+      kvCell("Industry", ctx.industry, { title: "Industry" }),
     ]);
-    if (chips) body.appendChild(chips);
+    if (facts) body.appendChild(facts);
 
-    // The company's own blurb: two lines, then a toggle. The full text (not the
-    // 200-char snippet) goes in, so expanding shows all of it and the collapsed
-    // state never ends in a mid-sentence "…".
-    const blurb = proseBlock(ctx.snippetFull || ctx.snippet, null, "the company description");
-    if (blurb) body.appendChild(blurb);
+    // Two sources of "how big is their team", kept apart because they mean
+    // different things: the estimate on the company record, and a count of
+    // the contacts we actually hold by role.
+    const est = countRow("Their team (est.)", "Team sizes on the company record", [
+      ["Sales", ctx.salesTeamSize, "Size of the sales team using Wiza data"],
+      ["AE", ctx.aeTeamSize, "AE team"],
+      ["Outbound", ctx.obTeamSize, "Outbound team"],
+      ["Leaders", ctx.leadershipTeamSize, "Sales leadership team"],
+    ]);
+    if (est) body.appendChild(est);
+    const mix = ctx.teamMix;
+    const held = mix
+      ? countRow(
+          "In HubSpot",
+          "Associated contacts by sales role",
+          [
+            ["SDR", mix.sdr],
+            ["AE", mix.ae],
+            ["AM/CS", mix.amcs],
+            ["Leaders", mix.leaders],
+            ["GTM Ops", mix.gtmOps],
+            ["Total", mix.total],
+          ].filter(([, n]) => n != null && Number(n) > 0)
+        )
+      : null;
+    if (held) body.appendChild(held);
 
-    // Tech stack: comma-separated, competitors highlighted, MORE/LESS toggle.
-    // Prefers the rich techStack view-model (labels cleaned of underscores,
-    // competitors partitioned to the front so they can never hide behind MORE);
-    // falls back to the legacy string list for a stale cached bundle.
-    const stack = ctx.techStack;
-    if (stack && stack.items && stack.items.length) {
-      // Label over value, like the chips above: the 10px caps is the label's
-      // job, so the list itself reads at the 12px body step in full ink.
-      const row = el("div", "fact-block");
-      row.appendChild(el("span", "fact-label", "Tech"));
-      const value = el("div", "fact-value tech-line");
-
-      // Rebuilt on every toggle: item spans joined by plain ", " text nodes,
-      // competitor names in the accent style (decoration = purple scale).
-      const list = el("span");
-      const renderItems = (expanded) => {
-        while (list.firstChild) list.removeChild(list.firstChild);
-        const shown = expanded ? stack.items : stack.items.slice(0, stack.visibleCount);
-        shown.forEach((item, i) => {
-          if (i > 0) list.appendChild(document.createTextNode(", "));
-          const piece = el("span", item.isCompetitor ? "tech-comp" : null, item.label);
-          if (item.isCompetitor) piece.title = "Wiza competitor";
-          list.appendChild(piece);
-        });
-      };
-      renderItems(false);
-      value.appendChild(list);
-
-      if (stack.hiddenCount > 0) {
-        let expanded = false;
-        const toggle = el("button", "prose-more hit24", `More (${stack.hiddenCount})`);
-        toggle.type = "button";
-        toggle.setAttribute("aria-expanded", "false");
-        toggle.setAttribute("aria-label", `Show ${stack.hiddenCount} more technologies`);
-        toggle.addEventListener("click", () => {
-          expanded = !expanded;
-          renderItems(expanded);
-          toggle.textContent = expanded ? "Less" : `More (${stack.hiddenCount})`;
-          toggle.setAttribute("aria-expanded", String(expanded));
-        });
-        value.appendChild(document.createTextNode(" "));
-        value.appendChild(toggle);
-      }
-      row.appendChild(value);
-      body.appendChild(row);
-    } else if (ctx.tech) {
-      // Legacy shape (pre-v11 cached bundle): plain strings, no competitor info.
-      const row = el("div", "fact-block");
-      row.appendChild(el("span", "fact-label", "Tech"));
-      const value = el("div", "fact-value", ctx.tech.items.join(", "));
-      if (ctx.tech.more > 0) {
-        value.appendChild(el("span", "ctx-more", ` +${ctx.tech.more} more`));
-        value.title = ctx.tech.all.join(", ");
-      }
-      row.appendChild(value);
-      body.appendChild(row);
-    }
-
-    // Why the ICP call was made. Model-written and runs to paragraphs, so it
-    // still shows two lines and hands the rest to a toggle — but at the same
-    // size and in the same ink as the blurb above it. A WHY label and its
-    // position are what make it secondary; shrinking it only made it unreadable
-    // (rep feedback, v0.7.1).
-    const reasoning = ctx.icpReasoningFull || ctx.icpReasoning;
-    const why = proseBlock(reasoning, "why", "why this account is graded this way");
-    if (why) {
-      why.classList.add("fact-block");
-      why.insertBefore(el("span", "fact-label", "Why"), why.firstChild);
-      body.appendChild(why);
-    }
+    // The company's own blurb. The full text (not the 200-char snippet) goes
+    // in, so expanding shows all of it and the collapsed state never ends in a
+    // mid-sentence "…".
+    appendAll(body, [
+      labelledProse("About", ctx.snippetFull || ctx.snippet, null, "the company description"),
+      techBlock(ctx),
+      // Model-written and runs to paragraphs, so it clamps like the rest; the
+      // label and its position make it secondary, not a smaller font.
+      labelledProse("Why ICP", ctx.icpReasoningFull || ctx.icpReasoning, "why", "why this account is graded this way"),
+      callIntelBlock(ctx.callIntel),
+      accountNotesBlock(ctx.accountNotes),
+    ]);
 
     attachProseToggles(body);
+  }
+
+  // --- Account context building blocks (v0.8.1) ----------------------------
+  // A key/value cell: small-caps muted label over a normal-weight value. A long
+  // value spans both grid columns rather than wrapping a word per line.
+  const KV_WIDE_CHARS = 22;
+  function kvCell(label, value, opts) {
+    const o = opts || {};
+    let valueNode = null;
+    if (value instanceof Node) valueNode = value;
+    else if (value != null && String(value) !== "") {
+      valueNode = el("span", o.tone ? `kv-value tone-${o.tone}` : "kv-value", String(value));
+    }
+    if (!valueNode) return null;
+    // wide: false pins a cell to one column (a pair meant to share a row).
+    const wide = o.wide === false ? false : o.wide || (!(value instanceof Node) && String(value).length > KV_WIDE_CHARS);
+    const cell = el("div", wide ? "kv-cell kv-wide" : o.third ? "kv-cell kv-third" : "kv-cell");
+    cell.appendChild(el("span", "kv-label", label));
+    cell.appendChild(valueNode);
+    if (o.title) cell.title = o.title;
+    if (o.cls) cell.classList.add(o.cls);
+    return cell;
+  }
+
+  function kvGrid(cells) {
+    const kept = (cells || []).filter(Boolean);
+    if (!kept.length) return null;
+    const grid = el("div", "kv-grid");
+    for (const c of kept) grid.appendChild(c);
+    return grid;
+  }
+
+  // "THEIR TEAM (EST.)" over a row of small stat tiles (Sales 44, AE 9, ...),
+  // the same tile component the Wiza usage section uses, so the panel reads as
+  // one system. The tiles wrap when the panel is narrow. Null counts drop; no
+  // counts, no row.
+  function countRow(label, title, parts) {
+    const kept = (parts || []).filter(([, n]) => n != null && n !== "");
+    if (!kept.length) return null;
+    const row = el("div", "count-row");
+    row.title = title;
+    row.appendChild(el("span", "kv-label", label));
+    const tiles = statRow(
+      kept.map(([name, n, hint]) => {
+        const num = Number(n);
+        return statTile(name, Number.isFinite(num) ? num : String(n), { size: "sm", title: hint });
+      }),
+      "count-tiles"
+    );
+    if (tiles) row.appendChild(tiles);
+    return row;
+  }
+
+  // A labelled prose block (About, Why ICP, Missing features, Research): the
+  // label, then the text clamped to three lines with More/Less.
+  function labelledProse(label, text, cls, noun) {
+    const block = proseBlock(text, cls, noun);
+    if (!block) return null;
+    block.classList.add("fact-block");
+    block.insertBefore(el("span", "fact-label", label), block.firstChild);
+    return block;
+  }
+
+  // GTM tech (v0.8.1): the GTM tools the company runs (gtm-tech.js's TOOLS,
+  // exact enum-slug matches) as one flat row of pills, competitors first in
+  // the accent tint. No category labels and no cap: past GTM_TECH_CLAMP_AT
+  // pills the row clamps to three lines with More/Less. Everything
+  // web_technologies holds sits under it in a small "All tech (n)" disclosure,
+  // closed on every render and never persisted. No tech at all, no block.
+  //
+  // A bundle cached before gtmTech existed (same session, pre-reload) has no
+  // allTech; it falls back to the techStack labels, all of them in the
+  // disclosure and none claimed as GTM.
+  const GTM_TECH_CLAMP_AT = 12;
+  const CARET_PATHS = ["M6 9l6 6 6-6"];
+  function techBlock(ctx) {
+    const stackItems = ctx.techStack && ctx.techStack.items ? ctx.techStack.items : [];
+    const allTech = Array.isArray(ctx.allTech) ? ctx.allTech : stackItems.map((t) => ({ slug: t.slug, label: t.label }));
+    const gtm = Array.isArray(ctx.gtmTech) ? ctx.gtmTech : [];
+    if (!allTech.length) return null;
+
+    const block = el("div", "fact-block tech-block");
+    block.appendChild(el("span", "fact-label", "GTM tech"));
+    if (gtm.length) {
+      const row = el("div", gtm.length > GTM_TECH_CLAMP_AT ? "tech-tags tech-clamp" : "tech-tags");
+      for (const t of gtm) {
+        const pill = el("span", t.competitor ? "tech-tag tech-comp" : "tech-tag", t.label);
+        pill.title = t.competitor ? `${t.label}: Wiza competitor` : t.cat ? `${t.label}: ${t.cat}` : t.label;
+        row.appendChild(pill);
+      }
+      block.appendChild(gtm.length > GTM_TECH_CLAMP_AT ? clampWrap(row, "the GTM tech") : row);
+    } else {
+      block.appendChild(el("div", "tech-none", "No GTM tech found."));
+    }
+
+    const all = el("details", "tech-all");
+    const sum = el("summary", "tech-all-toggle hit24");
+    const caret = svgIcon(CARET_PATHS);
+    caret.setAttribute("class", "tech-all-caret");
+    sum.appendChild(caret);
+    sum.appendChild(el("span", null, `All tech (${ctx.techCount != null ? ctx.techCount : allTech.length})`));
+    all.appendChild(sum);
+    const list = el("div", "tech-tags tech-all-list");
+    for (const t of allTech) list.appendChild(el("span", "tech-tag tech-muted", t.label));
+    all.appendChild(list);
+    block.appendChild(all);
+    return block;
+  }
+
+  // A group sub-head inside Account context: small caps, optional icon.
+  const HEADSET_PATHS = [
+    "M4 14v-2a8 8 0 0 1 16 0v2",
+    "M4 14a2 2 0 0 1 2-2h1v6H6a2 2 0 0 1-2-2z",
+    "M20 14a2 2 0 0 0-2-2h-1v6h1a2 2 0 0 0 2-2z",
+    "M17 18a4 4 0 0 1-4 3h-1",
+  ];
+  function ctxGroup(title, hint, paths) {
+    const group = el("div", "ctx-group");
+    const head = el("div", "ctx-subhead");
+    if (paths) {
+      const icon = svgIcon(paths);
+      icon.setAttribute("class", "ctx-subicon");
+      head.appendChild(icon);
+    }
+    head.appendChild(el("span", null, title));
+    if (hint) head.title = hint;
+    group.appendChild(head);
+    return group;
+  }
+
+  // A date value plus its muted relative hint ("Nov 14, 2026  in 12d").
+  function datedValue(at, hint, toneCls) {
+    const v = el("span", toneCls ? `kv-value ${toneCls}` : "kv-value", fmt.date(at));
+    if (hint) v.appendChild(el("span", "kv-hint", hint));
+    return v;
+  }
+
+  // Call intel: what automations pulled out of previous calls. Using is what
+  // the account runs today (competitor_tech), Renews when that contract is up
+  // (amber inside 30 days, red inside 7, muted once passed), Next check-in
+  // (amber once overdue), and the features they told us Wiza lacks.
+  function callIntelBlock(ci) {
+    if (!ci || !ci.hasData) return null;
+    const group = ctxGroup("Call intel", "Pulled from previous calls", HEADSET_PATHS);
+    const renewTone =
+      ci.renewsState === "negative" || ci.renewsState === "caution"
+        ? `tone-${ci.renewsState}`
+        : ci.renewsState === "past"
+          ? "kv-past"
+          : null;
+    const grid = kvGrid([
+      kvCell("Using", ci.using, { title: "What the account uses today" }),
+      ci.renewsAt
+        ? kvCell("Renews", datedValue(ci.renewsAt, ci.renewsHint, renewTone), {
+            title: ci.renewsState === "past" ? "Their current contract renewal (passed)" : "Their current contract renewal",
+            cls: ci.renewsState ? `kv-${ci.renewsState}` : null,
+          })
+        : null,
+      ci.nextCheckinAt
+        ? kvCell(
+            "Next check-in",
+            datedValue(ci.nextCheckinAt, ci.nextCheckinHint, ci.nextCheckinOverdue ? "tone-caution" : null),
+            {
+              title: ci.nextCheckinOverdue ? "Next check-in is overdue" : "Next check-in",
+              cls: ci.nextCheckinOverdue ? "kv-overdue" : null,
+            }
+          )
+        : null,
+    ]);
+    if (grid) group.appendChild(grid);
+    const missing = labelledProse("Missing features", ci.missingFeatures, null, "the missing Wiza features");
+    if (missing) group.appendChild(missing);
+    return group;
+  }
+
+  // Account notes: what reps keep on the record by hand.
+  function accountNotesBlock(an) {
+    if (!an || !an.hasData) return null;
+    const group = ctxGroup("Account notes");
+    let tags = null;
+    if (an.channels && an.channels.length) {
+      tags = el("div", "chan-tags");
+      for (const ch of an.channels) tags.appendChild(el("span", "chan-tag", ch.label));
+    }
+    const grid = kvGrid([
+      kvCell("Source", an.source, { title: "Company source" }),
+      tags ? kvCell("Channels", tags, { title: "Communications channels", wide: !an.source }) : null,
+    ]);
+    if (grid) group.appendChild(grid);
+    // Paragraph breaks survive (see .prose.research): a pasted brief is
+    // structured text, and one run-on line of it is unreadable.
+    const research = labelledProse("Company research", an.researchFull || an.research, "research", "the company research");
+    if (research) group.appendChild(research);
+    return group;
+  }
+
+  // v0.8.1: the account-type pill beside the grade. Three fixed looks, one per
+  // kind (see .acct-* in sidepanel.html): this is a classification, not a
+  // status, so it draws from its own pastels rather than borrowing a tone.
+  // The relative time rides inside the pill in a lighter weight, and the
+  // absolute date is the hover.
+  const ACCOUNT_TYPE_TITLES = {
+    inbound: "Inbound source on the company record",
+    prospected: "No inbound source; contacts were bulk-enriched",
+    unknown: "No inbound source and no bulk enrichment on record",
+  };
+  function setAccountTypePill(type) {
+    const pillEl = crmEls.accountTypePill;
+    if (!pillEl) return;
+    if (!type || !type.label) {
+      setPill(pillEl, null);
+      return;
+    }
+    const kind = /^(inbound|prospected|unknown)$/.test(type.kind) ? type.kind : "unknown";
+    const title = [ACCOUNT_TYPE_TITLES[kind], type.at ? fmt.date(type.at) : null].filter(Boolean).join(", ");
+    setPill(pillEl, type.label, `acct-${kind}`, title);
+    if (type.detail) pillEl.appendChild(el("span", "pill-sub", type.detail));
   }
 
   // --- Others at this account (Phase 9) -------------------------------------
@@ -2344,36 +2676,25 @@
       typeof n === "number" && n > 0 ? `${COLLEAGUES_TITLE} (${n})` : COLLEAGUES_TITLE;
   }
 
-  // The shared-owner note in the section head ("all Jasper Guilaran"). Every row
-  // on an account is usually owned by the same rep, and four rows each reading
-  // "Owner: Jasper Guilaran" is four lines saying one thing. The section head's
-  // own gap separates it from the title — no glyph.
-  function setColleaguesOwnerNote(text) {
-    if (!crmEls.colleaguesOwner) return;
-    crmEls.colleaguesOwner.textContent = text || "";
+  // v0.8.1: every row states its owner. The old shared-owner note in the
+  // section head ("all owned by Jasper") is gone — reps read rows, not the
+  // head, and a row with no owner on it read as "nobody owns this".
+  //   isMine          → "Owned by you"
+  //   resolved name   → "Owned by {name}"
+  //   ID, no name     → "Owner unresolved" (muted; never a bare ID)
+  //   no owner at all → "No owner" (muted)
+  function colleagueOwner(row) {
+    if (row.isMine === true) return el("span", "peer-owner", "Owned by you");
+    if (row.ownerName) return el("span", "peer-owner", `Owned by ${row.ownerName}`);
+    return el("span", "peer-owner peer-owner-unset", row.ownerId ? "Owner unresolved" : "No owner");
   }
 
-  // What a row would display as its owner: "You" for the connected rep, the
-  // teammate's name when we resolved one, null when the portal didn't say.
-  const colleagueOwnerLabel = (row) =>
-    row.isMine === true ? "You" : row.ownerName || null;
-
-  // The one owner every row shares, or null when they differ (or any row's owner
-  // is unknown — an unknown can't be folded into a claim about all of them).
-  function sharedColleagueOwner(rows) {
-    if (!rows || rows.length < 2) return null;
-    const first = colleagueOwnerLabel(rows[0]);
-    if (!first) return null;
-    return rows.every((r) => colleagueOwnerLabel(r) === first) ? first : null;
-  }
-
-  function colleagueRow(row, hideOwner) {
+  function colleagueRow(row) {
     // Ownership tone fix (P1): no per-row alert outline/tint, even for a
     // colleague owned by a named someone else — that's a routine, benign
-    // state on a shared account, not an error. The shared-owner note in the
-    // section head already carries the fact when every row matches; when
-    // owners differ, the quiet "Owned by {name}" text below (line two) is the
-    // only signal, and it is plain visible text, not a hover-only title.
+    // state on a shared account, not an error. The quiet "Owned by {name}"
+    // text below (line two) is the signal, and it is plain visible text, not
+    // a hover-only title.
     const node = el("div", "peer");
 
     const top = el("div", "peer-top");
@@ -2424,24 +2745,9 @@
     node.appendChild(top);
 
     const meta = el("div", "peer-meta");
-    // Owner: "You" when the ID matches the connected rep (that comparison is on
-    // IDs, so it holds even when the name didn't resolve), a teammate's name when
-    // we have it, and nothing at all otherwise. Never a bare owner ID.
-    //
-    // Suppressed entirely when the section head has already said every row is
-    // this person's — then it is only ever the exceptions that carry a name.
-    const ownerLabel = colleagueOwnerLabel(row);
-    let owner = null;
-    if (!hideOwner && ownerLabel) {
-      // "You" stays as-is (it's not an ownership fact worth flagging); a
-      // named teammate gets the quiet "Owned by {name}" idiom — plain text,
-      // no alert styling, on the one row it applies to.
-      owner = el(
-        "span",
-        "peer-owner",
-        row.isMine === true ? "You" : `Owned by ${ownerLabel}`
-      );
-    }
+    // Owner, always (see colleagueOwner). "Owned by you" is decided on IDs, so
+    // it holds even when the name didn't resolve. Never a bare owner ID.
+    const owner = colleagueOwner(row);
     // "contacted 4d ago" rather than "Last contacted 4d ago": in a list of
     // colleagues there is nothing else the time could be about, and the two
     // dropped words are what kept this row on one line at 320px. The absolute
@@ -2454,7 +2760,7 @@
       contacted.title = exact ? `Last contacted ${exact}` : "Last contacted";
     }
     // Line two, as structure rather than a strung-together sentence: the title
-    // on the leading edge, the owner next to it when owners are mixed, and the
+    // on the leading edge, the owner next to it, and the
     // relative time pushed to the trailing edge (see .peer-when).
     appendAll(meta, [
       row.title ? el("span", "peer-title", row.title) : null,
@@ -2507,10 +2813,8 @@
     }
     crmEls.colleaguesSection.hidden = false;
     setColleaguesCount(rows.length);
-    const shared = sharedColleagueOwner(rows);
-    setColleaguesOwnerNote(shared ? `all owned by ${shared}` : null);
     clearNode(body);
-    for (const row of rows) body.appendChild(colleagueRow(row, !!shared));
+    for (const row of rows) body.appendChild(colleagueRow(row));
   }
 
   // active → the positive tone (the bare pill), closed → the neutral outline,
@@ -2537,21 +2841,19 @@
   // section does not print it at all.
   //
   // Absence is the normal case — most prospects have never signed up — so a
-  // prospect with no user and no account data gets no section at all, and inside
-  // each subsection every datapoint with no value (or a zero) is simply not
-  // built.
-  // Phase 12 added the custom-object view-models (wiza.userObject,
-  // wiza.accountObject, wiza.trial) alongside the rollups above. Everything
-  // below is ADDITIVE on the rollup rendering that already existed: every
-  // rollup chip still renders exactly as before, a richer object value takes
-  // over a chip only where the two are literally the same fact (last used,
-  // signed up, the admin links, the Wiza ID, the account ID — see the
-  // merged* values below), and every net-new fact from the objects gets its
-  // own chip or, for the two usage series a sparkline replaces its
-  // once-numeric chip. So: no object data at all (no association, a 403
-  // ahead of crm.objects.custom.read landing, a 404) means every merged*
-  // value falls through to the rollup and every net-new chip is simply
-  // absent — which is exactly what this section rendered before this phase.
+  // datapoint with no value is simply not built. The rollup metrics on the
+  // Wiza Account keep their zero suppression (see metric); the custom-object
+  // views (wiza.userObject, wiza.accountObject, wiza.trial) and the company
+  // usage rollups print a zero, muted. Where a rollup and an object state the
+  // same fact (last used, signed up, the admin links, the Wiza ID, the
+  // account ID) the object wins and the rollup fills in.
+  //
+  // v0.8.1 layout (rep feedback: a wall of same-weight chips). The section is
+  // now tiles from one component (statTile / wizaTile): Account and Usage side
+  // by side when the card is wide enough and stacked when not, then a User
+  // tile when this contact is a Wiza user, then Trial. Inside each tile the
+  // facts a rep acts on come first (billing state, seats, runway) and zeros
+  // read muted.
   function renderWizaSection(bundle) {
     const body = crmEls.wiza;
     const wiza = bundle.wiza || {};
@@ -2563,6 +2865,8 @@
     const hasUserObj = !!(userObj && userObj.hasData);
     const hasAccountObj = !!(accountObj && accountObj.hasData);
     const hasTrial = !!(trialObj && trialObj.hasData);
+    const isUser = !!(user.isUser || hasUserObj);
+    const views = (data && data.view) || {};
 
     // Status at section level so it's readable without opening anything.
     // The object's own status wins when the rollup has none at all — a
@@ -2572,25 +2876,17 @@
     const pillLabel = user.statusLabel || (userObj && userObj.statusLabel) || null;
     const pillVariant = user.statusLabel ? variant : hasUserObj ? wizaStatusVariant(userObj.status) : variant;
 
-    // The two facts the User object states more richly than the contact
-    // rollup ever could: when they last actually used the product, and when
-    // they signed up. Both fall back to the rollup value untouched.
+    // Rollup and object values that are the same fact: the object wins when
+    // it has one, the rollup fills in otherwise.
     const lastUsageAt = (userObj && userObj.lastUsageAt) || user.lastUsageAt || null;
     const signedUpAt = (userObj && userObj.signedUpAt) || user.signedUpAt || null;
     const adminUrl = user.adminUrl || (userObj && userObj.adminUrl) || null;
     const usageLogsUrl = user.usageLogsUrl || (userObj && userObj.usageLogsUrl) || null;
     const wizaId = user.wizaId || (userObj && userObj.userId) || null;
-    // The user's own credits-30d trend — one of the panel's two sparkline
-    // series. Below HISTORY_MIN_SPARKLINE_POINTS usable versions, the value
-    // still renders (as the plain "Credits 30d" chip below), just without a
-    // line — sparkline is false, not the whole datapoint.
     const userCreditsHistory = userObj && userObj.creditsUsed30dHistory;
     const userCreditsSpark = !!(userCreditsHistory && userCreditsHistory.sparkline);
     const userCreditsValue = userObj && userObj.creditsUsed30d != null ? userObj.creditsUsed30d : user.creditsUsed30d;
 
-    // --- Account: the Wiza account's own identity and its metrics, as chips.
-    // Zero-suppression happens before the chip is built, so a zeroed account
-    // contributes no chips rather than a row of boxes reading "0".
     const mergedAccountId = account.accountId || account.primaryAccountId || (accountObj && accountObj.accountId) || null;
     const mergedApiCreditBalance =
       accountObj && accountObj.apiCreditBalance != null ? accountObj.apiCreditBalance : account.apiCreditBalance;
@@ -2599,190 +2895,325 @@
     const accountCreditsValue =
       accountObj && accountObj.creditsUsed30d != null ? accountObj.creditsUsed30d : account.creditsUsed30d;
 
-    // { headline, more } — the object's own chips split into what's always
-    // visible and what's behind the MORE toggle (see accountObjectChips).
-    const accountObjectSplit = accountObj ? accountObjectChips(accountObj) : { headline: [], more: [] };
-    const accountChips = (account.hasData
-      ? [
-          chip(
-            "Subscribed",
-            // "0 of 1" is a zero; only a real subscription is worth the words.
-            metric(account.subscribedAccounts) && account.associatedAccounts != null
-              ? `${fmt.number(account.subscribedAccounts)} of ${fmt.number(account.associatedAccounts)}`
-              : metric(account.subscribedAccounts),
-            { title: "Subscribed accounts of associated accounts" }
-          ),
-          chip("API credits", metric(mergedApiCreditBalance), { title: "API credit balance" }),
-          // Superseded by the sparkline row below once there's a real trend to
-          // draw; until then this is the only place the number appears.
-          accountCreditsSpark
-            ? null
-            : chip("Credits 30d", metric(accountCreditsValue), {
-                title: "Credits used in the last 30 days",
-              }),
-          chip(
-            "Purchases",
-            metric(account.timesPurchased) ? `${fmt.number(account.timesPurchased)}×` : null,
-            { title: "Times API credits purchased" }
-          ),
-          chip(
-            "Last purchase",
-            account.lastPurchaseAt ? fmt.relativeTime(account.lastPurchaseAt) : null,
-            {
-              title: account.lastPurchaseAt ? `Last purchase ${fmt.date(account.lastPurchaseAt)}` : null,
-            }
-          ),
-          chip("Use case", account.useCase, { title: "Use case" }),
-        ]
-      : []
-    ).concat(accountObj ? accountObjectSplit.headline : []).filter(Boolean);
-    // Account ID is a raw identifier, not a mid-call fact (design critique,
-    // item d) — it moves behind MORE with the rest of the billing/revenue
-    // detail; the admin/usage links above already carry the "find this
-    // account in Wiza" job a bare ID number doesn't.
-    const accountMoreChips = [chip("Account ID", mergedAccountId, { title: "Wiza account ID" })]
-      .concat(accountObj ? accountObjectSplit.more : [])
-      .filter(Boolean);
-    const hasAccount = !!(accountChips.length || accountMoreChips.length || account.isTargetAccount || hasAccountObj);
+    // The company's own usage rollups (wiza.usage) carry the Usage tile, and
+    // can carry the section on their own. Zero shows here once the rollups
+    // count as data at all (see wizaUsageView): 0 active users and 0 days of
+    // runway are both calls to make.
+    const usage = wiza.usage || null;
+    const hasUsage = !!(usage && usage.hasData);
 
-    // Nothing to say, or nothing left after the zeros went: no section.
-    if (!user.isUser && !hasUserObj && !hasAccount && !hasTrial) {
+    // The Account tile's secondary facts: rollup metrics (zero suppressed, as
+    // before) and the object's billing detail. They show inline when the
+    // tile has room, behind More when it would run past ~6 rows.
+    const secondary = [];
+    if (account.hasData) {
+      secondary.push(
+        statTile(
+          "Subscribed",
+          metric(account.subscribedAccounts) && account.associatedAccounts != null
+            ? `${fmt.number(account.subscribedAccounts)} of ${fmt.number(account.associatedAccounts)}`
+            : metric(account.subscribedAccounts),
+          { size: "sm", title: "Subscribed accounts of associated accounts" }
+        ),
+        statTile("API credits", hasUsage && usage.apiCreditBalance != null ? null : metric(mergedApiCreditBalance), {
+          size: "sm",
+          title: "API credit balance",
+        }),
+        statTile(
+          "Purchases",
+          metric(account.timesPurchased) ? `${fmt.number(account.timesPurchased)}×` : null,
+          { size: "sm", title: "Times API credits purchased" }
+        ),
+        statTile("Last purchase", account.lastPurchaseAt ? fmt.relativeTime(account.lastPurchaseAt) : null, {
+          size: "sm",
+          title: account.lastPurchaseAt ? `Last purchase ${fmt.date(account.lastPurchaseAt)}` : null,
+        }),
+        statTile("Use case", account.useCase, { size: "sm", title: "Use case" })
+      );
+    }
+    // Credits 30d has one home: the Usage tile when it is on screen (see
+    // below), the Account tile's secondary facts otherwise.
+    const accountCreditsNode = hasUsage
+      ? null
+      : accountCreditsSpark
+        ? sparklineRow("Credits 30d", accountCreditsHistory, { title: "Account-wide credits used in the last 30 days" })
+        : account.hasData
+          ? statTile("Credits 30d", metric(accountCreditsValue), { size: "sm", title: "Credits used in the last 30 days" })
+          : null;
+    if (accountObj) {
+      secondary.push(
+        statTile("Renews", accountObj.planPeriodEnd ? fmt.date(accountObj.planPeriodEnd) : null, {
+          size: "sm",
+          title: "Plan period end",
+        }),
+        statTile("Last payment", lastPaymentText(accountObj), { size: "sm", title: "Last payment" })
+      );
+    }
+    const secondaryKept = secondary.filter(Boolean);
+    const hasAccount = !!(
+      secondaryKept.length ||
+      accountCreditsNode ||
+      mergedAccountId ||
+      account.isTargetAccount ||
+      hasAccountObj
+    );
+
+    // No Wiza User, Account or Trial and no usage worth showing (all-zero
+    // rollups don't count): the section stays up with one muted line, so "not
+    // a Wiza customer" reads as an answer rather than a missing section.
+    if (!isUser && !hasAccount && !hasTrial && !hasUsage) {
       setPill(crmEls.wizaPill, null);
-      crmEls.wizaSection.hidden = true;
-      clearNode(body);
+      crmEls.wizaSection.hidden = false;
+      setNote(body, "No Wiza User or Account data found");
       return;
     }
     crmEls.wizaSection.hidden = false;
     setPill(crmEls.wizaPill, pillLabel, pillVariant);
     clearNode(body);
 
-    // The "User"/"Account"/"Trial" sub-labels only earn their line when more
-    // than one half is on screen and a reader could otherwise mix them up.
-    const labelSubs = [user.isUser || hasUserObj, hasAccount, hasTrial].filter(Boolean).length > 1;
+    const grid = el("div", "wz-grid");
+    // "Not a Wiza user" is a fact about the contact, so it rides as a muted
+    // pill on the first tile's header rather than as a line of its own.
+    let notUserPlaced = isUser;
+    const notUserPill = (head) => {
+      if (notUserPlaced) return;
+      notUserPlaced = true;
+      head.appendChild(el("span", "pill info tiny wz-not-user", "Not a Wiza user"));
+    };
 
-    if (user.isUser || hasUserObj) {
-      const sub = el("div", "wiza-sub");
-      const head = el("div", "wiza-head");
-      if (labelSubs) head.appendChild(el("span", "wiza-label", "User"));
-      // The section head's own pill (setPill above) already states this
-      // exact status — it is the SAME pillLabel/pillVariant, not a
-      // coincidentally-matching one — so it is not repeated here (design
-      // critique: "Active" printed 3x). Nothing replaces it: the section
-      // pill is one glance away, immediately above.
-      // Only worth saying when it's false — an unconfirmed email explains a lot
-      // of "signed up but never used it" records.
-      if (user.emailConfirmed === false) {
-        head.appendChild(el("span", "pill info tiny", "Email unconfirmed"));
+    // --- Account tile ---
+    if (hasAccount) {
+      const { tile, head } = wizaTile("Account", ICONS.building, "account");
+      if (account.isTargetAccount) head.appendChild(el("span", "pill stage tiny", "Target account"));
+      notUserPill(head);
+      let rows = 0;
+
+      // Billing state: the Stripe status as a coloured dot and its word, then
+      // card on file and overage as marks.
+      if (accountObj) {
+        const status = el("div", "wz-status");
+        const stripe = accountObj.stripeStatus || accountObj.accountStatus;
+        if (stripe) {
+          const tone = views.stripeDotTone ? views.stripeDotTone(stripe) : "neutral";
+          const s = el("span", "wz-stripe");
+          s.appendChild(el("span", `status-dot dot-${tone}`));
+          s.appendChild(el("span", "wz-stripe-text", stripe));
+          s.title = stripeTitle(accountObj);
+          status.appendChild(s);
+        }
+        if (accountObj.hasCardOnFile != null) {
+          const card = el("span", "wz-flag", "Card on file");
+          // No card is the normal state for a free lead: a grey X, not a red one.
+          card.appendChild(
+            markIcon(accountObj.hasCardOnFile ? "yes" : "no-quiet", accountObj.hasCardOnFile ? "Card on file" : "No card on file")
+          );
+          status.appendChild(card);
+        }
+        if (accountObj.hasOverage === true) {
+          const over = el("span", "pill tiny tone-caution", "Overage");
+          over.title = "This account has overage";
+          status.appendChild(over);
+        } else if (accountObj.hasOverage === false) {
+          status.appendChild(el("span", "wz-flag wz-quiet", "No overage"));
+        }
+        if (status.childElementCount) {
+          tile.appendChild(status);
+          rows++;
+        }
+
+        const plan = planLabel(accountObj);
+        if (plan) {
+          const line = el("div", "wz-line");
+          line.appendChild(el("span", "kv-label", "Plan"));
+          line.appendChild(el("span", "wz-line-value", plan));
+          if (accountObj.planCategory) line.title = accountObj.planCategory;
+          tile.appendChild(line);
+          rows++;
+        }
+
+        // Seats as a meter: "Seats 1 of 1" over a thin bar. No total, the
+        // number alone.
+        const seats = views.seatsMeter ? views.seatsMeter(accountObj.planSeatsUsed, accountObj.planSeatsTotal) : null;
+        if (seats) {
+          const wrap = el("div", "wz-meter-row");
+          const top = el("div", "wz-meter-top");
+          top.appendChild(el("span", "kv-label", "Seats"));
+          top.appendChild(
+            el(
+              "span",
+              seats.over ? "wz-meter-value tone-caution" : "wz-meter-value",
+              seats.total != null ? `${fmt.number(seats.used)} of ${fmt.number(seats.total)}` : fmt.number(seats.used)
+            )
+          );
+          wrap.appendChild(top);
+          if (seats.ratio != null) {
+            wrap.appendChild(
+              meterBar(seats.ratio, seats.over ? "caution" : null, `${fmt.number(seats.used)} of ${fmt.number(seats.total)} seats used`)
+            );
+          }
+          wrap.title = "Plan seats used of total";
+          tile.appendChild(wrap);
+          rows++;
+        }
+
+        // Credit balances: email, phone, export as three mini tiles.
+        const creditTile = (label, n, icon) =>
+          n == null ? null : statTile(label, fmt.credits(n), { icon, size: "sm", muted: n === 0, title: `${label} credit balance` });
+        const credits = statRow([
+          creditTile("Email", accountObj.emailCredits, ICONS.mail),
+          creditTile("Phone", accountObj.phoneCredits, ICONS.phone),
+          creditTile("Export", accountObj.exportCredits, ICONS.download),
+        ]);
+        if (credits) {
+          tile.appendChild(credits);
+          rows++;
+        }
+
+        // Spend: 30 days and lifetime as two mini tiles.
+        const money = (label, n, title) =>
+          n == null ? null : statTile(label, fmt.currencyCompact(n), { icon: ICONS.coin, size: "sm", muted: n === 0, title });
+        const spend = statRow([
+          money("Spend 30d", accountObj.spend30d, "Spend in the last 30 days"),
+          money("Total spend", accountObj.totalSpend, "Lifetime spend"),
+        ]);
+        if (spend) {
+          tile.appendChild(spend);
+          rows++;
+        }
       }
-      if (head.childElementCount) sub.appendChild(head);
 
-      // Plan status and billing frequency read as one value ("Paid monthly");
-      // the credit allowance is its own datapoint, and so is everything else.
-      const plan = [user.planStatus, user.planFrequency ? user.planFrequency.toLowerCase() : null]
-        .filter(Boolean)
-        .join(" ");
-      // Order (design critique, item d): related facts cluster — plan and its
-      // credits together, then the two timing facts — and the wrap breaks on
-      // a meaningful boundary: decision-relevant first (what they're on, when
-      // they last showed up, their role), the one raw identifier last,
-      // demoted below into MORE with the rest of the identifiers (the admin
-      // links a few lines down already carry the "jump to this Wiza user"
-      // job a bare ID number doesn't).
-      const chips = chipRow([
-        chip("Plan", plan, { title: "Plan status and billing frequency" }),
-        chip(
-          "Plan credits",
-          user.planCredits != null ? `${fmt.credits(user.planCredits)} credits` : null,
-          { title: "Credits included in the plan" }
-        ),
-        // Superseded by the sparkline row below once there's a real trend.
-        userCreditsSpark
-          ? null
-          : chip("Credits 30d", metric(userCreditsValue), { title: "Credits used in the last 30 days" }),
-        chip("Last used", lastUsageAt ? fmt.relativeTime(lastUsageAt) : null, {
+      // Secondary facts: inline when the tile stays within ~6 rows, behind
+      // More when it would not.
+      const extras = secondaryKept.slice();
+      const footRows = mergedAccountId || (hasUsage && usage.accountCreatedAt) ? 1 : 0;
+      const extraRow = statRow(extras);
+      const extraRows = (extraRow ? 1 : 0) + (accountCreditsNode ? 1 : 0);
+      if (rows + footRows + extraRows <= WZ_TILE_MAX_ROWS) {
+        if (extraRow) tile.appendChild(extraRow);
+        if (accountCreditsNode) tile.appendChild(accountCreditsNode);
+      } else {
+        const more = moreDisclosure([extraRow, accountCreditsNode], extras.length + (accountCreditsNode ? 1 : 0), "billing details");
+        if (more) tile.appendChild(more);
+      }
+
+      // Footer: the account ID (with copy) and when the account was created.
+      const foot = wizaFoot(
+        mergedAccountId ? { label: "Account ID", value: mergedAccountId, copyLabel: "Copy Wiza account ID" } : null,
+        hasUsage && usage.accountCreatedAt ? `Created ${fmt.date(usage.accountCreatedAt)}` : null
+      );
+      if (foot) tile.appendChild(foot);
+      grid.appendChild(tile);
+    }
+
+    // --- Usage tile ---
+    if (hasUsage) {
+      const { tile, head } = wizaTile("Usage", ICONS.activity, "usage");
+      notUserPill(head);
+      const creditsNode = accountCreditsSpark
+        ? null
+        : statTile("Credits used 30d", usage.creditsUsed30d, { title: "Credits used in the last 30 days" });
+      const primary = statRow([
+        statTile("Active users 30d", usage.activeUsers30d, { title: "Active users in the last 30 days" }),
+        creditsNode,
+        usage.apiCreditBalance != null
+          ? statTile("API balance", fmt.credits(usage.apiCreditBalance), {
+              muted: usage.apiCreditBalance === 0,
+              title: "API credit balance (company)",
+            })
+          : null,
+      ]);
+      if (primary) tile.appendChild(primary);
+      // The account-wide trend, when there is one, stands in for the plain
+      // Credits used tile.
+      if (accountCreditsSpark) {
+        const spark = sparklineRow("Credits used 30d", accountCreditsHistory, {
+          title: "Account-wide credits used in the last 30 days",
+        });
+        if (spark) tile.appendChild(spark);
+      }
+      const minor = statRow([
+        statTile("API / 30d", usage.apiCreditsUsed30d, { size: "sm", title: "API credits used in the last 30 days" }),
+        statTile("API / day", usage.apiCreditsPerDay, { size: "sm", title: "Credit use per day" }),
+      ]);
+      if (minor) tile.appendChild(minor);
+      const runway = views.depletionMeter ? views.depletionMeter(usage.depletionDays) : null;
+      if (runway) {
+        const wrap = el("div", "wz-meter-row wz-depletion");
+        wrap.title = "Days until credits run out at the current rate";
+        const top = el("div", "wz-meter-top");
+        top.appendChild(el("span", "kv-label", "Depletion"));
+        top.appendChild(
+          el("span", `wz-meter-value tone-${runway.tone}`, `${fmt.number(runway.days)}d`)
+        );
+        wrap.appendChild(top);
+        wrap.appendChild(meterBar(runway.ratio, runway.tone, `${fmt.number(runway.days)} days of credits left`));
+        tile.appendChild(wrap);
+      }
+      // No Account tile to carry it: the create date closes this one instead.
+      if (!hasAccount && usage.accountCreatedAt) {
+        const foot = wizaFoot(null, `Created ${fmt.date(usage.accountCreatedAt)}`);
+        if (foot) tile.appendChild(foot);
+      }
+      grid.appendChild(tile);
+    }
+    if (grid.childElementCount) body.appendChild(grid);
+
+    // --- User tile ---
+    if (isUser) {
+      const { tile, head } = wizaTile("User", ICONS.person, "user");
+      // Only worth saying when it's false: an unconfirmed email explains a lot
+      // of "signed up but never used it" records.
+      if (user.emailConfirmed === false) head.appendChild(el("span", "pill info tiny", "Email unconfirmed"));
+      const plan = [user.planStatus, user.planFrequency ? user.planFrequency.toLowerCase() : null].filter(Boolean).join(" ");
+      const tiles = [
+        statTile("Plan", plan, { size: "sm", title: "Plan status and billing frequency" }),
+        statTile("Plan credits", user.planCredits != null ? fmt.credits(user.planCredits) : null, {
+          size: "sm",
+          muted: user.planCredits === 0,
+          title: "Credits included in the plan",
+        }),
+        userCreditsSpark ? null : statTile("Credits 30d", metric(userCreditsValue), { size: "sm", title: "Credits used in the last 30 days" }),
+        statTile("Last used", lastUsageAt ? fmt.relativeTime(lastUsageAt) : null, {
+          size: "sm",
           title: lastUsageAt ? `Last used ${fmt.dateTime(lastUsageAt)}` : null,
         }),
-        chip("Signed up", signedUpAt ? fmt.date(signedUpAt) : null, { title: "Signed up" }),
-        chip("Role", userObj && userObj.role, { title: "Wiza role" }),
-      ]);
-      if (chips) sub.appendChild(chips);
-
-      // The credits-used sparkline: one line, only when there's enough
-      // history to draw — see sparklineRow.
+        statTile("Signed up", signedUpAt ? fmt.date(signedUpAt) : null, { size: "sm", title: "Signed up" }),
+        statTile("Role", userObj && userObj.role, { size: "sm", title: "Wiza role" }),
+        statTile(
+          "Last enrichment",
+          userObj && userObj.lastEnrichmentAt ? fmt.relativeTime(userObj.lastEnrichmentAt) : null,
+          { size: "sm", title: userObj && userObj.lastEnrichmentAt ? `Last enrichment ${fmt.date(userObj.lastEnrichmentAt)}` : null }
+        ),
+        statTile(
+          "Last export",
+          userObj && userObj.lastBulkExportAt ? fmt.relativeTime(userObj.lastBulkExportAt) : null,
+          { size: "sm", title: userObj && userObj.lastBulkExportAt ? `Last bulk export ${fmt.date(userObj.lastBulkExportAt)}` : null }
+        ),
+        statTile("Extension", userObj && userObj.extensionVersion, { size: "sm", title: "Extension version" }),
+      ].filter(Boolean);
+      // Up to six tiles show; the rest wait behind More.
+      const shown = statRow(tiles.slice(0, WZ_TILE_MAX_ROWS));
+      if (shown) tile.appendChild(shown);
+      if (tiles.length > WZ_TILE_MAX_ROWS) {
+        const rest = tiles.slice(WZ_TILE_MAX_ROWS);
+        const more = moreDisclosure([statRow(rest)], rest.length, "user details");
+        if (more) tile.appendChild(more);
+      }
       const spark = userCreditsSpark
         ? sparklineRow("Credits 30d", userCreditsHistory, { title: "Credits used in the last 30 days" })
         : null;
-      if (spark) sub.appendChild(spark);
-
-      // Net-new profile facts only the custom object carries, plus the raw
-      // Wiza ID (an identifier, not a mid-call fact) — behind the same
-      // MORE/LESS toggle the Account sub uses, so a fully-populated record
-      // doesn't spend height on them until asked.
-      const more = chipDisclosure(
-        [
-          chip("Wiza ID", wizaId, { title: "Wiza user ID" }),
-          chip(
-            "Last enrichment",
-            userObj && userObj.lastEnrichmentAt ? fmt.relativeTime(userObj.lastEnrichmentAt) : null,
-            { title: userObj && userObj.lastEnrichmentAt ? `Last enrichment ${fmt.date(userObj.lastEnrichmentAt)}` : null }
-          ),
-          chip(
-            "Last export",
-            userObj && userObj.lastBulkExportAt ? fmt.relativeTime(userObj.lastBulkExportAt) : null,
-            { title: userObj && userObj.lastBulkExportAt ? `Last bulk export ${fmt.date(userObj.lastBulkExportAt)}` : null }
-          ),
-          chip("Extension", userObj && userObj.extensionVersion, { title: "Extension version" }),
-        ],
-        "user details"
-      );
-      if (more) sub.appendChild(more);
-
-      // Both links come from URL properties and are only rendered when set.
+      if (spark) tile.appendChild(spark);
       const links = el("div", "wiza-links");
       appendAll(links, [extLink("Open in Wiza Admin", adminUrl), extLink("Usage logs", usageLogsUrl)]);
-      if (links.childElementCount) sub.appendChild(links);
-
-      if (sub.childElementCount) body.appendChild(sub);
+      if (links.childElementCount) tile.appendChild(links);
+      const foot = wizaFoot(wizaId ? { label: "Wiza ID", value: wizaId, copyLabel: "Copy Wiza user ID" } : null, null);
+      if (foot) tile.appendChild(foot);
+      body.appendChild(tile);
     }
 
-    if (hasAccount) {
-      const sub = el("div", "wiza-sub");
-      if (account.isTargetAccount || labelSubs) {
-        const head = el("div", "wiza-head");
-        if (labelSubs) head.appendChild(el("span", "wiza-label", "Account"));
-        if (account.isTargetAccount) {
-          head.appendChild(el("span", "pill stage tiny", "Target account"));
-        }
-        sub.appendChild(head);
-      }
-      // Account data but nobody signed up: the company is known to us, this
-      // person isn't. One muted line above the chips — it is a statement about
-      // the contact, not a datapoint about the account, so it isn't a chip.
-      if (!user.isUser && !hasUserObj) sub.appendChild(el("p", "crm-note", "Not a Wiza user"));
-      const chips = chipRow(accountChips);
-      if (chips) sub.appendChild(chips);
-
-      // The account-wide credits-used sparkline — the second of the panel's
-      // two usage series.
-      const spark = accountCreditsSpark
-        ? sparklineRow("Credits 30d", accountCreditsHistory, { title: "Account-wide credits used in the last 30 days" })
-        : null;
-      if (spark) sub.appendChild(spark);
-
-      // Billing/revenue detail behind MORE — see chipDisclosure.
-      const more = chipDisclosure(accountMoreChips, "billing details");
-      if (more) sub.appendChild(more);
-
-      if (sub.childElementCount) body.appendChild(sub);
-    }
-
+    // --- Trial tile ---
     if (hasTrial) {
-      const sub = el("div", "wiza-sub");
-      if (labelSubs) {
-        const head = el("div", "wiza-head");
-        head.appendChild(el("span", "wiza-label", "Trial"));
-        sub.appendChild(head);
-      }
+      const { tile } = wizaTile("Trial", ICONS.clock, "trial");
       const dates =
         trialObj.startAt && trialObj.endAt
           ? `${fmt.date(trialObj.startAt)}–${fmt.date(trialObj.endAt)}`
@@ -2791,47 +3222,81 @@
             : trialObj.startAt
               ? `Started ${fmt.date(trialObj.startAt)}`
               : null;
-      const chips = chipRow([
-        chip("Dates", dates, { title: "Trial period" }),
-        chip("Length", trialObj.lengthDays != null ? `${fmt.number(trialObj.lengthDays)}d` : null, {
+      const tiles = statRow([
+        statTile("Dates", dates, { size: "sm", title: "Trial period" }),
+        statTile("Length", trialObj.lengthDays != null ? `${fmt.number(trialObj.lengthDays)}d` : null, {
+          size: "sm",
+          muted: trialObj.lengthDays === 0,
           title: "Trial length",
         }),
-        chip("Paid", trialObj.paid, { title: "Paid trial" }),
-        chip("Amount", trialObj.amount != null ? fmt.currencyCompact(trialObj.amount) : null, {
+        statTile("Paid", trialObj.paid, { size: "sm", title: "Paid trial" }),
+        statTile("Amount", trialObj.amount != null ? fmt.currencyCompact(trialObj.amount) : null, {
+          size: "sm",
+          muted: trialObj.amount === 0,
           title: "Trial amount",
         }),
-        chip("Trial users", trialObj.userCount != null ? fmt.number(trialObj.userCount) : null, {
+        statTile("Trial users", trialObj.userCount != null ? trialObj.userCount : null, {
+          size: "sm",
           title: trialObj.userEmails || "Number of trial users",
         }),
-        chip("Export credits", trialObj.exportCredits, { title: "Trial export credits" }),
-        chip("API credits", trialObj.apiCredits, { title: "Trial API credits" }),
-        chip(
-          "Monitor",
-          trialObj.monitorAccess == null ? null : trialObj.monitorAccess ? "Yes" : "No",
-          { title: "Monitor access" }
-        ),
+        statTile("Export credits", trialObj.exportCredits, { size: "sm", title: "Trial export credits" }),
+        statTile("API credits", trialObj.apiCredits, { size: "sm", title: "Trial API credits" }),
+        statTile("Monitor", trialObj.monitorAccess == null ? null : trialObj.monitorAccess ? "Yes" : "No", {
+          size: "sm",
+          title: "Monitor access",
+        }),
       ]);
-      if (chips) sub.appendChild(chips);
-      // The free-text notes field is hover detail on the sub-card rather than
-      // its own prose block — it keeps this sub-section to one compact card.
-      if (trialObj.notes) sub.title = trialObj.notes;
-      if (sub.childElementCount) body.appendChild(sub);
+      if (tiles) tile.appendChild(tiles);
+      // The free-text notes field is hover detail on the tile.
+      if (trialObj.notes) tile.title = trialObj.notes;
+      body.appendChild(tile);
     }
   }
 
-  // The Wiza Account custom object's own chips — everything the rollup
-  // company properties never carried: plan, seats, the credit balances
-  // "account plan & credits" asks for, and the billing/revenue facts
-  // ("billing & revenue"). Split into `headline` (always visible — Jack's
-  // "seats used vs total, period end, credit balances") and `more` (the
-  // billing/revenue detail, behind the MORE toggle — see chipDisclosure and
-  // the height-budget note on renderWizaSection). The credits-30d fact is
-  // deliberately in neither list — the caller decides between a chip and a
-  // sparkline row for it, from the same rollup+object merge every other
-  // Account chip uses.
-  // "monthly"/"yearly" → "mo"/"yr": short enough that the Plan chip fits
-  // beside Seats on a 320px panel (the whole reason both are the headline).
-  // Anything else prints as-is rather than guessing at an abbreviation.
+  // About six rows is what a tile can carry before it stops scanning; past
+  // that, the rest goes behind More.
+  const WZ_TILE_MAX_ROWS = 6;
+
+  // A tile's muted footer: an identifier with a copy button, and/or a date.
+  function wizaFoot(id, dateText) {
+    if (!id && !dateText) return null;
+    const foot = el("div", "wz-foot");
+    if (id) {
+      const idWrap = el("span", "wz-foot-id");
+      idWrap.appendChild(el("span", null, `${id.label} ${id.value}`));
+      idWrap.appendChild(copyButton(() => id.value, id.copyLabel));
+      foot.appendChild(idWrap);
+    }
+    if (dateText) foot.appendChild(el("span", "wz-foot-date", dateText));
+    return foot;
+  }
+
+  // The More/Less toggle for tiles: same .prose-more button, "More (n)" /
+  // "Less" text and aria-expanded as every other toggle in the panel.
+  function moreDisclosure(nodes, count, noun) {
+    const kept = (nodes || []).filter(Boolean);
+    if (!kept.length) return null;
+    const wrap = el("div", "more-wrap");
+    const inner = el("div", "wz-more");
+    for (const n of kept) inner.appendChild(n);
+    inner.hidden = true;
+    const toggle = el("button", "prose-more hit24", `More (${count})`);
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", `Show ${count} more ${noun}`);
+    toggle.addEventListener("click", () => {
+      const expand = inner.hidden;
+      inner.hidden = !expand;
+      toggle.textContent = expand ? "Less" : `More (${count})`;
+      toggle.setAttribute("aria-expanded", expand ? "true" : "false");
+    });
+    wrap.appendChild(inner);
+    wrap.appendChild(toggle);
+    return wrap;
+  }
+
+  // "monthly"/"yearly" → "mo"/"yr" for the plan line. Anything else prints
+  // as-is rather than guessing at an abbreviation.
   const BILLING_FREQ_SHORT = { monthly: "mo", yearly: "yr", annual: "yr", annually: "yr", weekly: "wk" };
   function shortFrequency(value) {
     const v = String(value == null ? "" : value).toLowerCase();
@@ -2841,117 +3306,41 @@
     return Object.prototype.hasOwnProperty.call(BILLING_FREQ_SHORT, v) ? BILLING_FREQ_SHORT[v] : v;
   }
 
-  function accountObjectChips(accountObj) {
-    const planBits = [accountObj.planName, accountObj.planPrice != null ? `(${fmt.currencyCompact(accountObj.planPrice)}${accountObj.planFrequency ? "/" + shortFrequency(accountObj.planFrequency) : ""})` : null]
-      .filter(Boolean)
-      .join(" ");
-    const seats =
-      accountObj.planSeatsUsed != null && accountObj.planSeatsTotal != null
-        ? `${fmt.number(accountObj.planSeatsUsed)} of ${fmt.number(accountObj.planSeatsTotal)}`
-        : accountObj.planSeatsUsed != null
-          ? fmt.number(accountObj.planSeatsUsed)
-          : null;
-    const credits = [
-      accountObj.emailCredits != null ? `${fmt.credits(accountObj.emailCredits)} email` : null,
-      accountObj.phoneCredits != null ? `${fmt.credits(accountObj.phoneCredits)} phone` : null,
-      accountObj.exportCredits != null ? `${fmt.credits(accountObj.exportCredits)} export` : null,
+  function planLabel(accountObj) {
+    return [
+      accountObj.planName,
+      accountObj.planPrice != null
+        ? `(${fmt.currencyCompact(accountObj.planPrice)}${accountObj.planFrequency ? "/" + shortFrequency(accountObj.planFrequency) : ""})`
+        : null,
     ]
       .filter(Boolean)
-      .join(", ");
-    const lastPayment =
-      accountObj.lastPaymentAmount != null
-        ? `${fmt.currency(accountObj.lastPaymentAmount)}${accountObj.lastPaymentAt ? ` on ${fmt.date(accountObj.lastPaymentAt)}` : ""}`
-        : accountObj.lastPaymentAt
-          ? fmt.date(accountObj.lastPaymentAt)
-          : null;
-    return {
-      // Plan + seats are the headline (Jack's "account plan & credits"
-      // group) — short enough that they share a row on a 320px panel, which
-      // is the point. Period end and the credit BALANCES move to `more` with
-      // billing/revenue: api_credit_balance already has its own
-      // always-visible chip via the rollup merge above, so period end and
-      // email/phone/export are real facts worth one click, not a guaranteed
-      // row on every fully-populated record.
-      headline: [
-        chip("Plan", planBits, { title: accountObj.planCategory }),
-        chip("Seats", seats, { title: "Plan seats used of total" }),
-      ],
-      more: [
-        chip(
-          "Renews",
-          accountObj.planPeriodEnd ? fmt.date(accountObj.planPeriodEnd) : null,
-          { title: "Plan period end" }
-        ),
-        chip("Credits", credits, {
-          title:
-            [
-              accountObj.activeUsers30d != null ? `${fmt.number(accountObj.activeUsers30d)} active users (30d)` : null,
-              accountObj.newUsers30d != null ? `${fmt.number(accountObj.newUsers30d)} new users (30d)` : null,
-              accountObj.listsCount30d != null ? `${fmt.number(accountObj.listsCount30d)} lists (30d)` : null,
-            ]
-              .filter(Boolean)
-              .join(", ") || "Email / phone / export credit balances",
-        }),
-        // Spend and total spend read as one datapoint — a rep asks "how much
-        // are they worth", not two separate questions — which also halves the
-        // two chips this used to be.
-        chip(
-          "Spend",
-          [
-            accountObj.spend30d != null ? `${fmt.currencyCompact(accountObj.spend30d)} (30d)` : null,
-            accountObj.totalSpend != null ? `${fmt.currencyCompact(accountObj.totalSpend)} total` : null,
-          ]
-            .filter(Boolean)
-            .join(", "),
-          { title: "Spend in the last 30 days and lifetime" }
-        ),
-        chip("Last payment", lastPayment, { title: "Last payment" }),
-        chip("Overage", accountObj.hasOverage == null ? null : accountObj.hasOverage ? "Yes" : "No", {
-          title: "Has overage",
-          tone: accountObj.hasOverage === true ? "caution" : undefined,
-        }),
-        // A free prospect with no card on file is the normal SDR-lead state,
-        // not a warning — no tone (design critique: never falsely alarm on a
-        // routine fact).
-        chip(
-          "Card on file",
-          accountObj.hasCardOnFile == null ? null : accountObj.hasCardOnFile ? "Yes" : "No",
-          { title: "Has a card on file" }
-        ),
-        // Stripe status is the headline fact (it's the one explicitly asked
-        // for); account status stands in for it on a record with no Stripe
-        // subscription at all — never BOTH silently, and never neither when
-        // either exists. CRM-connected and the account's own trial flag are
-        // hover detail rather than two more chips.
-        //
-        // Tone: only when the actual Stripe fact is bad (past_due/canceled —
-        // see STATUS_TONES.stripe_plan_subscription_status). "Active" and the
-        // account-status stand-in stay plain — billing is a different fact
-        // than the section's own Active/Trial pill and doesn't need its own
-        // color to repeat "things are fine".
-        chip("Stripe status", accountObj.stripeStatus || accountObj.accountStatus, {
-          tone:
-            accountObj.stripeStatus && data && data.status
-              ? (() => {
-                  const t = data.status.tone("stripe_plan_subscription_status", accountObj.stripeStatus);
-                  return t === "neutral" ? undefined : t;
-                })()
-              : undefined,
-          title:
-            [
-              accountObj.stripeStatus && accountObj.accountStatus && accountObj.accountStatus !== accountObj.stripeStatus
-                ? `Account status: ${accountObj.accountStatus}`
-                : null,
-              accountObj.crmConnected ? `CRM connected: ${accountObj.crmConnected}` : null,
-              accountObj.trialStatus
-                ? `Trial status: ${accountObj.trialStatus}${accountObj.trialEndsAt ? ` (ends ${fmt.date(accountObj.trialEndsAt)})` : ""}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(", ") || "Stripe subscription status",
-        }),
-      ],
-    };
+      .join(" ");
+  }
+
+  function lastPaymentText(accountObj) {
+    if (accountObj.lastPaymentAmount != null) {
+      return `${fmt.currency(accountObj.lastPaymentAmount)}${accountObj.lastPaymentAt ? ` on ${fmt.date(accountObj.lastPaymentAt)}` : ""}`;
+    }
+    return accountObj.lastPaymentAt ? fmt.date(accountObj.lastPaymentAt) : null;
+  }
+
+  // Hover detail on the Stripe status: the account's own status when it
+  // differs, the CRM it is connected to, and its trial state.
+  function stripeTitle(accountObj) {
+    return (
+      [
+        accountObj.stripeStatus ? "Stripe subscription status" : "Account status",
+        accountObj.stripeStatus && accountObj.accountStatus && accountObj.accountStatus !== accountObj.stripeStatus
+          ? `Account status: ${accountObj.accountStatus}`
+          : null,
+        accountObj.crmConnected ? `CRM connected: ${accountObj.crmConnected}` : null,
+        accountObj.trialStatus
+          ? `Trial status: ${accountObj.trialStatus}${accountObj.trialEndsAt ? ` (ends ${fmt.date(accountObj.trialEndsAt)})` : ""}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(". ")
+    );
   }
 
   function renderDealsSection(bundle) {
@@ -2994,6 +3383,10 @@
       const close = d.closeDate ? fmt.date(d.closeDate) : "";
       if (close) meta.appendChild(el("span", null, `Closes ${close}`));
       if (d.ownerName) meta.appendChild(el("span", null, d.ownerName));
+      // v0.8.1: who we're up against, and when they renew. Each omitted when
+      // the deal doesn't say ("Unknown"/"None" already arrive as null).
+      if (d.competitor) meta.appendChild(el("span", null, `vs ${d.competitor}`));
+      if (d.competitorRenewalAt) meta.appendChild(el("span", null, `renews ${fmt.date(d.competitorRenewalAt)}`));
       if (meta.childElementCount) row.appendChild(meta);
 
       // Why it ended (Phase 8) — closed rows only, and only when the portal
@@ -3280,6 +3673,7 @@
     if (crmEls.refreshNote) crmEls.refreshNote.textContent = refreshNoteText();
     setPill(crmEls.identityPill, null);
     setPill(crmEls.accountPill, null);
+    setAccountTypePill(null);
     setPill(crmEls.wizaPill, null);
     setPill(crmEls.dealsPill, null);
     setPill(crmEls.activityPill, null);
@@ -3297,7 +3691,6 @@
     crmEls.dealsSection.hidden = false;
     crmEls.activitySection.hidden = false;
     setColleaguesCount(null);
-    setColleaguesOwnerNote(null);
     // Nothing below this point shows tabs unless a bundle is actually rendered.
     hideActivityTabs();
 
@@ -3632,6 +4025,7 @@
   const sourceEl = document.getElementById("notes-source");
   const savedEl = document.getElementById("notes-saved");
   const savedBodyEl = document.getElementById("notes-saved-body");
+  const detailsEl = document.getElementById("notes-details");
   const syncBtn = document.getElementById("notes-sync");
   const blockersEl = document.getElementById("notes-blockers");
   const resultEl = document.getElementById("notes-result");
@@ -3821,11 +4215,34 @@
     }
   }
 
+  // v0.8.1: Dialer notes is collapsible and starts closed, but a note that
+  // has not reached HubSpot must never sit hidden. So each new unsynced note
+  // (a new hash) opens the section once; a rep who closes it again keeps it
+  // closed until the next new note. The layout module reads the two data
+  // flags: this open is not saved as the rep's preference, and a settings
+  // restore does not snap it shut.
+  let autoOpenedFor = null;
+  function autoOpenNotes(unsynced) {
+    if (!detailsEl) return;
+    if (!unsynced) {
+      autoOpenedFor = null;
+      return;
+    }
+    const hash = currentHash();
+    if (hash === autoOpenedFor) return;
+    autoOpenedFor = hash;
+    if (detailsEl.open) return;
+    detailsEl.dataset.autoOpening = "1";
+    detailsEl.dataset.autoOpened = "1";
+    detailsEl.open = true;
+  }
+
   function render() {
     const api = notesApi();
     const text = state.text;
     const trimmed = text.trim();
     const synced = alreadySynced();
+    autoOpenNotes(!!trimmed && !synced);
 
     if (textEl.value !== text) textEl.value = text;
     textEl.disabled = state.syncing;
@@ -5184,8 +5601,9 @@
     btn.dataset.dir = dir;
     btn.dataset.sec = id;
     btn.appendChild(chevron(dir === "up"));
-    // "Others at this account" is a collapsible section, so its head is a
-    // <summary>: without these two, every press would also open or close it.
+    // "Others at this account" and Activity are collapsible sections, so their
+    // heads are <summary>s: without these two, every press would also open or
+    // close the section.
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -5361,6 +5779,63 @@
     announceChange();
   }
 
+  // --- Open / collapsed sections (v0.8.1) ---------------------------------
+  // "Others at this account", Activity, Dialer notes and its Saved notes are
+  // all collapsible and start closed. A rep who opens one keeps it open: the
+  // state is saved under eb:settings.sectionOpen on every toggle and restored
+  // on load. The key is the section's id, or data-open-key for a nested one
+  // (Saved notes). Only `true` opens, so a missing or malformed value means
+  // closed, never a section that can't be found.
+  //
+  // One exception, owned by the notes module: Dialer notes opens itself when
+  // a captured note has not been synced (autoOpenNotes). That open is the
+  // panel's, not the rep's, so it is never saved (data-auto-opening), and a
+  // restore does not close it again (data-auto-opened) until the rep does.
+  const collapsibles = Array.prototype.slice.call(mainEl.querySelectorAll("details.sec-details"));
+  const openKey = (d) => d.dataset.openKey || d.parentElement.id;
+  const openState = {};
+
+  function applyOpen(stored) {
+    const map = stored && typeof stored === "object" ? stored : {};
+    for (const d of collapsibles) {
+      const id = openKey(d);
+      const want = map[id] === true;
+      openState[id] = want;
+      if (!want && d.open && d.dataset.autoOpened === "1") continue;
+      if (d.open !== want) d.open = want;
+    }
+  }
+
+  async function saveOpen() {
+    try {
+      const res = (await chrome.storage.local.get(SETTINGS_KEY)) || {};
+      const prev = res[SETTINGS_KEY] || {};
+      const sectionOpen = { ...(prev.sectionOpen && typeof prev.sectionOpen === "object" ? prev.sectionOpen : {}), ...openState };
+      await chrome.storage.local.set({ [SETTINGS_KEY]: { ...prev, sectionOpen } });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] layout: could not save open sections:", (e && e.message) || e);
+    }
+  }
+
+  for (const d of collapsibles) {
+    d.addEventListener("toggle", () => {
+      const id = openKey(d);
+      // The panel opened this for an unsynced note: not the rep's choice.
+      if (d.dataset.autoOpening === "1") {
+        delete d.dataset.autoOpening;
+        if (d.open) return;
+      }
+      if (!d.open) delete d.dataset.autoOpened;
+      // A restore sets .open itself and records it first, so its own toggle
+      // event lands here as "no change" and writes nothing.
+      if (openState[id] === d.open) return;
+      openState[id] = d.open;
+      saveOpen();
+    });
+  }
+  applyOpen(null);
+
   // --- Wiring ---------------------------------------------------------------
   if (toggleEl) {
     toggleEl.addEventListener("click", () => setArranging(!state.arranging));
@@ -5378,21 +5853,24 @@
     if (area !== "local" || !changes[SETTINGS_KEY]) return;
     const next = changes[SETTINGS_KEY].newValue;
     adopt(next && typeof next === "object" ? next.sectionOrder : null);
+    if (next && typeof next === "object" && next.sectionOpen) applyOpen(next.sectionOpen);
   });
 
   (async () => {
     let stored = null;
+    let storedOpen = null;
     try {
       const res = (await chrome.storage.local.get(SETTINGS_KEY)) || {};
-      stored = res[SETTINGS_KEY] && typeof res[SETTINGS_KEY] === "object"
-        ? res[SETTINGS_KEY].sectionOrder
-        : null;
+      const settings = res[SETTINGS_KEY] && typeof res[SETTINGS_KEY] === "object" ? res[SETTINGS_KEY] : null;
+      stored = settings ? settings.sectionOrder : null;
+      storedOpen = settings ? settings.sectionOpen : null;
     } catch (e) {
       // eslint-disable-next-line no-console
       console.debug("[EasyBooking] layout: could not read the section order:", (e && e.message) || e);
     }
     state.order = normalize(stored);
     applyOrder();
+    applyOpen(storedOpen);
     announceChange();
   })();
 
@@ -5406,6 +5884,8 @@
     reset,
     setArranging,
     applyOrder,
+    applyOpen,
+    openState,
     state,
   };
 })();

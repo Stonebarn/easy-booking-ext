@@ -6,6 +6,214 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-21
+
+### Added — Inbound-ready panel: account type, contact owners everywhere, and the new company rollups
+
+Reps asked the same question before every inbound dial: did this account come
+to us, or did we go to them? The panel now answers it in the Account context
+head, beside the grade, as one of three pills:
+
+- **Inbound · PLG Signup** (teal) when the company has an `inbound_source`,
+  with how long ago it was set ("12d ago") inside the pill.
+- **Prospected** (lavender) when there is no inbound source but the account's
+  contacts were bulk-enriched, with "enriched 12d ago".
+- **Unknown** (grey outline) when the record says neither. The panel does not
+  guess.
+
+The contact gets the same treatment. A contact with its own `inbound_source`
+shows an **Inbound · Abandoned Booking** pill next to its lifecycle stage in
+Contact & company, in the same teal, so "inbound" reads as one thing wherever
+it shows.
+
+**Others at this account** now names an owner on every row: "Owned by you",
+"Owned by Jasper", or a muted "Owner unresolved" / "No owner". The section head
+used to say "all owned by Jasper" and drop the name from every row when they
+matched, which meant a rep reading one row had to look back up to learn whose
+it was, and a missing name read as nobody's.
+
+Account context also picks up what reps and the company rollups have been
+writing to the record:
+
+- **In HubSpot**, a count row under the team-size estimate: SDR 4, AE 12,
+  AM/CS 3, Leaders 2, GTM Ops 1, Total 22. These count the account's associated
+  contacts by role, which is a different source from the estimate above it, so
+  both stay.
+- **Call intel**, what automations pulled out of previous calls: Using (the
+  tech they run today), Renews (amber within 30 days, red within 7, muted once
+  passed, with "in 12d" beside the date), Next check-in (amber and "overdue"
+  once the date has passed) and Missing features.
+- **Account notes**, what reps keep on the record: Source, the communications
+  channels as small tags, and the company research brief, which keeps its
+  paragraph breaks.
+
+**Wiza usage** gains a Usage tile from the company's own rollups: Active
+users 30d, Credits used 30d, API balance, API / 30d, API / day and a Depletion
+bar, with the account's create date on the Account tile's footer. Depletion is
+green from 14 days of runway, amber under 14 and red under 7. The
+section now shows on these alone, so a company with usage data and no Wiza
+Account object is no longer an empty space. All-zero rollups no longer count
+as usage (a lone "API / DAY 0" chip is gone); a company with no Wiza User,
+Account, Trial or usage shows one muted "No Wiza User or Account data found"
+line. The section head now carries the Wiza logo instead of a W glyph.
+
+**Deals** rows now say who we are up against and when they renew: "vs
+Cognism" and "renews Nov 14, 2026" join the amount, close date and owner on the
+row's meta line. The portal stores a few competitors as lowercase keys
+(`seamlessai`, `hunterio`); those print as Seamless.ai and Hunter.io. A
+competitor of Unknown or None prints nothing.
+
+Decisions worth knowing:
+
+- **Inbound beats Prospected.** A company that raised its hand is inbound even
+  if we also enriched its contacts; the enrichment date only decides the type
+  when there is no inbound source.
+- **Unknown is not data.** A company whose only fact is "Unknown" still hides
+  Account context, same as before.
+- **Company and deal renewal dates stay separate.** Call intel's Renews only
+  ever shows the company's own `competitor_renewal_date`. A deal's renewal date
+  shows on that deal's row and is never borrowed to fill it.
+- **Zero shows in Usage, but only alongside real data.** Elsewhere in Wiza
+  usage a zero is suppressed. Here 0 active users and 0 days of runway are both
+  reasons to call, so once any rollup is above 0 (or the account create date is
+  set) zeros print; all-zero/blank rollups show no Usage row at all.
+- **Credits 30d is not printed twice.** It has one home: the Usage tile when
+  that tile is on screen (as a sparkline when the account has history to
+  draw), the Account tile otherwise.
+- **No middle dots anywhere.** An earlier cut of this release drew "·"
+  between the team counts, company facts and the owner line. Reps still read it
+  as clutter, so each of those rows has real structure now (stat tiles, icon
+  rows, label and value rows) and the `.dot-list` rule is gone.
+- **Owner lookups for colleagues go from 10 to 25** (`ACCOUNT_OWNER_LOOKUP_MAX`),
+  matching the 25-row cap, so with every row showing an owner a name the panel
+  could have had is never cut off. Owner names stay cached for the session.
+- **`CACHE_VERSION` 12 → 14** for the new bundle fields (13 for account type,
+  team mix, rep notes and usage; 14 for GTM tech and the two status rows).
+- **Tracked view-model tests.** `scripts/test-views.mjs` (no dependencies, run
+  by CI after the validator) covers the account-type, usage, renewal and
+  research views, including the local-date overdue rule and table-cell spacing,
+  plus the three Wiza tile shapers: the Stripe status dot tone, the seats meter
+  and the depletion meter.
+
+**Company Status, Prospecting Status and ICP** now lead the Account context grid,
+in that order, three to a row (2 + 1 under 340px), under the portal's own names (`prospecting_status` is new to the
+panel; Company Status is `company_lifecycle_stage`, which used to show as
+"Lifecycle", and a stored "Open Deal" reads "Active Deal"), with a quiet red
+for Do Not Outbound or Disqualified and green for Demo Outstanding, Actively
+Engaged, Active Deal or Customer.
+
+### Added — GTM tech
+
+The old Tech line in Account context was every technology on the company's
+website, so the tools a rep could actually talk about were buried among
+WordPress and jQuery. It is now **GTM tech**: only the sales and marketing
+tools the company runs (CRM, engagement, dialers, chat, ABM, analytics and the
+like) as one row of small pills, all of them, clamped to three lines with
+More/Less when there are more than twelve. A company whose site shows no GTM
+tools says "No GTM tech found." Under the pills, a small closed **All tech
+(n)** toggle opens the full list for anyone who wants it. The match is exact
+against the portal's `web_technologies` options, using the 249 of 712 options
+classified as GTM in the new `gtm-tech.js`; nothing is guessed from a name.
+
+One thing worth saying plainly: the old violet competitor highlight on that
+line could never fire. None of the competitor names it looked for (ZoomInfo,
+Apollo, Lusha, Cognism and the rest) exist as options in the portal's
+`web_technologies` enum, so no company record could ever carry one. The check
+is kept, so a future option would be flagged, but competitor signal comes from
+**Call intel** (Using, Renews) and from the deal rows' "vs" line, not from
+website tech.
+
+### Changed — layout
+
+- **Extra phones drop the "Mobile" / "Phone 2" text label.** The 2nd and 3rd phone rows show a 9px numeral badge at the phone icon's bottom-right (hover still names the field); the first row has no badge.
+
+Reps sent screenshots of the live panel with the parts that read as crowded.
+What changed, from the rep's chair:
+
+- **Contact card.** The photo sits on the left. Beside it, centred on it, a
+  two-line block: the name, LinkedIn badge and lifecycle pill on line 1, the
+  job title muted on line 2. When a pill does not fit beside the name it wraps
+  to its own line under it instead of running past the card's edge (the
+  "Inbound · Abandoned Booking" pill did at about 420px). The captured email
+  is the first row of the card: a mail icon, the email, its copy button and a
+  small "auto-fill" badge with a green dot (amber and "may be stale" when the
+  capture is old). Then a clock icon, "9:40 AM their time" and a small muted
+  "PDT, UTC-7" tag. Everything below uses the company card's icon-led rows at
+  the same spacing: one phone row per number (the 2nd and 3rd carry a
+  tiny numeral badge on the phone icon instead of a text label, each with its own copy button,
+  and a muted "Wrong number?" at the end of the first), lead status, a paper
+  plane and "In sequence: Outbound Q3" (or a muted "Not in a sequence"), a
+  person icon and the owner with its mark, and a history icon with a muted
+  "1d ago" (the exact date on hover). A fact the record does not have is no
+  row; the owner row stays and says "Owner not set" when there is none. Fill
+  form is a full-width button at the bottom of the card.
+- **No more purple booking box.** Email, their time and Fill form were crammed
+  into one filled box; they are now ordinary rows of the contact card, and the
+  auto-fill badge says the email came from the dialer.
+- **Owner marks instead of "(not you)".** Every owner name (contact, outbound,
+  company) gets a small green check when it is you and a red X when it is
+  someone else. Hover says "Owned by you" or "Owned by someone else". No mark
+  when the panel cannot tell. Colleague rows keep their "Owned by" text.
+- **Company card.** Logo on the left, and beside it the name, the LinkedIn
+  badge and a small open-in-HubSpot icon. Under that, one row per fact, each
+  led by a small grey icon: a globe and the domain (a link to the site), a
+  briefcase and the industry, people and "53 employees". A fact the record
+  does not have is no row. Then Outbound owner and Company owner as a label
+  and value list. The "Company LinkedIn" button is gone; the badge replaces
+  it. Below about 390px of panel width the two cards stack, company under
+  contact, instead of squeezing into two 130px columns.
+- **No dots between facts.** The "a · b · c" lines are gone everywhere.
+- **Account context reads as a list, not a chip grid.** Company Status,
+  Prospecting Status and ICP in one row, then ICP fit and Industry as labelled
+  values; "Their team (est.)" and "In HubSpot" as rows of small number tiles
+  (label over count) that wrap when the panel is narrow; then About, GTM tech,
+  Why ICP, Call intel and Account notes, each showing three lines with
+  More/Less.
+- **Wiza usage is tiles, not a wall of chips.** One tile component across the
+  section, each tile with a small icon header:
+  - **Account** (building icon): the Stripe status as a coloured dot and its
+    word (green for Active, amber for Past due or Unpaid, grey for Canceled or
+    anything else), Card on file with a check (a grey X when there is none, the
+    normal state for a free lead), and Overage (an amber pill when there is
+    one, a muted "No overage" when not). Then the plan, Seats as "1 of 1" over
+    a thin meter, the email, phone and export credits as three mini tiles,
+    Spend 30d and Total spend as two more, and a muted footer with the Account
+    ID (with a copy button) and the Created date. Any other facts (Subscribed,
+    Purchases, Renews, Last payment and the rest) show inline when the tile has
+    room and go behind More only when it would run past about six rows.
+  - **Usage** (activity icon): Active users 30d, Credits used 30d and API
+    balance as three main tiles, API / 30d and API / day smaller underneath,
+    and the Depletion bar with its day count.
+  - **User** (person icon) under the Account and Usage row when the contact is
+    a Wiza user: plan, credits, last used, signed up, role, last enrichment,
+    last export and extension as tiles, the admin links, and the Wiza ID with
+    a copy button. When the contact is not a user, "Not a Wiza user" is a
+    muted pill on the first tile's header instead of a line of text.
+  - **Trial** (clock icon): the same facts as before, in the same tile.
+  - A zero prints muted and light, never at full weight. Account and Usage sit
+    side by side once the card is about 420px wide (a panel around 460px) and
+    stack below that, which covers the usual 320 to 400px panel.
+- **Dialer notes and Saved notes fold away.** Both are collapsible now, like
+  Activity and Others. Dialer notes starts closed and opens itself the moment
+  there is a note that has not synced to HubSpot, so an unsynced note is never
+  hidden. Close it and it stays closed until the next new note. Saved notes
+  starts closed. Whatever you open or close is remembered
+  (`eb:settings.sectionOpen`); the panel opening Dialer notes for you is not
+  saved as your choice. The Synced pill stays visible in the closed head, and
+  sync, auto-sync and save detection work the same open or closed.
+- **Closed sections look closed.** Others, Activity, Dialer notes and Saved
+  notes, when closed, read as one outlined grey bar: the title in a white pill
+  on the left, the count pill and the arrow on the right. Open, they go back to
+  the normal section head. The arrow is bigger (14px) and turns to point down
+  when open. Arrange mode's up and down buttons still sit in the head.
+- **Others at this account and Activity start collapsed.** Open one and it
+  stays open the next time the panel loads (`eb:settings.sectionOpen`). The
+  Activity count still shows in the closed head.
+- **No more doubled colleagues.** Two HubSpot records with the same email now
+  show as one row, the one contacted most recently. Two records with the same
+  name and different emails still show as two: those are real duplicates in
+  the CRM, worth seeing.
+
 ## [0.7.1] - 2026-08-11
 
 ### Fixed — Account context's tech stack and rationale are readable
