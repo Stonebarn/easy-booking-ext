@@ -34,14 +34,52 @@
     // origin-locked to this extension; see lovable/hubspot-token-function.ts.
     TOKEN_PROXY_URL: "https://wiza-hs-connect.lovable.app/api/public/hubspot-token",
 
-    // Must match a redirect URL registered on the app's Auth tab exactly, and
-    // also the REDIRECT_URL constant inside the edge function — the function
-    // sends its own redirect_uri to HubSpot, and the two must agree or the
-    // exchange fails. chrome.identity.launchWebAuthFlow only intercepts this
-    // host, and the extension ID is pinned by the "key" field in manifest.json;
-    // if that key is ever removed the ID changes and this URL stops matching
-    // (hubspot-auth logs loudly when that happens).
-    REDIRECT_URL: "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot",
+    // The OAuth redirect URL for THIS install, derived from the running
+    // extension's ID. chrome.identity.launchWebAuthFlow only intercepts
+    // https://<this-extension's-id>.chromiumapp.org/, so a URL built from any
+    // other ID loads as a real page and dies on DNS_PROBE_POSSIBLE.
+    //
+    // There are two IDs, and both have to work:
+    //   - the Chrome Web Store install: the store strips manifest.json's
+    //     "key" (scripts/package-store.mjs) and assigns its own ID;
+    //   - the unpacked/dev install: the "key" in manifest.json pins it.
+    // Each one's redirect URL must be registered in TWO other places, or that
+    // install cannot connect:
+    //   1. the HubSpot app's Auth tab (hubspot-app/src/app/app-hsmeta.json
+    //      redirectUrls, shipped with `hs project upload`);
+    //   2. ALLOWED_EXTENSION_IDS in lovable/hubspot-token-function.ts, which
+    //      origin-locks the function and derives the redirect_uri it sends
+    //      HubSpot from the caller's ID (the two must agree or the exchange
+    //      fails).
+    // KNOWN_EXTENSION_IDS below is the extension's copy of that list;
+    // hubspot-auth logs loudly when the running ID is not on it.
+    REDIRECT_URL: (() => {
+      try {
+        if (typeof chrome !== "undefined" && chrome.identity && chrome.identity.getRedirectURL) {
+          return chrome.identity.getRedirectURL("hubspot");
+        }
+      } catch (_) {
+        /* fall through to the dev URL below */
+      }
+      // No identity API here (a context without the permission, or a test
+      // harness). The dev URL is the least-wrong guess, and only works for the
+      // unpacked install.
+      console.error(
+        "[EasyBooking] chrome.identity unavailable — falling back to the dev redirect URL; HubSpot sign-in from a store install will fail"
+      );
+      return "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot";
+    })(),
+
+    // Every extension ID whose redirect URL is registered on the HubSpot app
+    // and allowlisted in the edge function. Keep in lockstep with
+    // ALLOWED_EXTENSION_IDS in lovable/hubspot-token-function.ts and
+    // redirectUrls in hubspot-app/src/app/app-hsmeta.json;
+    // scripts/validate.mjs fails on any chromiumapp.org/hubspot URL whose ID
+    // is not on this list.
+    KNOWN_EXTENSION_IDS: [
+      "dhmhnhegpigpedbfpplkodihmljhkcff", // Chrome Web Store install
+      "ihajiebioinbhaljdmaihgonjglhalpa", // unpacked/dev install (manifest "key")
+    ],
 
     // Every scope checked as *required* in the app's Auth settings must appear
     // in the authorize URL's `scope` parameter, or HubSpot refuses the install

@@ -8,6 +8,7 @@
     "auth": {
       "type": "oauth",
       "redirectUrls": [
+        "https://dhmhnhegpigpedbfpplkodihmljhkcff.chromiumapp.org/hubspot",
         "https://ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org/hubspot"
       ],
       "requiredScopes": [

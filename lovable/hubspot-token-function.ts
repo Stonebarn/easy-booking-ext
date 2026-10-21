@@ -12,7 +12,21 @@
 //   HUBSPOT_CLIENT_SECRET
 //
 // All CRM traffic still flows extension -> api.hubapi.com directly; this
-// function only mints tokens. It is locked to the extension's origin.
+// function only mints tokens. It is locked to the extension's origins.
+//
+// Two extension IDs, both allowlisted (ALLOWED_EXTENSION_IDS):
+//   - dhmhnhegpigpedbfpplkodihmljhkcff: the Chrome Web Store install (the
+//     store zip strips manifest.json's "key", so the store assigns this ID);
+//   - ihajiebioinbhaljdmaihgonjglhalpa: the unpacked/dev install (pinned by
+//     the "key" in manifest.json).
+// The request's Origin must be chrome-extension://<one of them>; CORS echoes
+// that exact origin back (never a wildcard). The redirect_uri sent to HubSpot
+// on exchange is DERIVED from the validated origin's ID, never taken from the
+// request body: a body redirect_uri is only checked against the derived one
+// (400 redirect_mismatch if they differ). Each ID's
+// https://<id>.chromiumapp.org/hubspot must also be registered on the HubSpot
+// app's Auth tab (hubspot-app/src/app/app-hsmeta.json) and listed in the
+// extension's KNOWN_EXTENSION_IDS (hubspot-config.js). All three must agree.
 //
 // Hardening notes (all fail-open / best-effort — see each section below):
 //   - Introspection now sends the field HubSpot's endpoint actually requires
@@ -40,9 +54,10 @@
 //      clean 4xx JSON error back), then check Lovable's function logs for
 //      the matching `[hubspot-token]` line.
 
-const EXTENSION_ID = "ihajiebioinbhaljdmaihgonjglhalpa";
-const ALLOWED_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
-const REDIRECT_URL = `https://${EXTENSION_ID}.chromiumapp.org/hubspot`;
+const ALLOWED_EXTENSION_IDS = [
+  "dhmhnhegpigpedbfpplkodihmljhkcff", // Chrome Web Store install
+  "ihajiebioinbhaljdmaihgonjglhalpa", // unpacked/dev install (manifest "key")
+];
 const TOKEN_URL = "https://api.hubapi.com/oauth/v3/token";
 const INTROSPECT_URL = "https://api.hubapi.com/oauth/v3/token/introspect";
 
@@ -50,17 +65,35 @@ const INTROSPECT_URL = "https://api.hubapi.com/oauth/v3/token/introspect";
 // introspects to a different hub is rejected — see checkHubAllowlist below.
 const WIZA_HUB_ID = 40063500;
 
-const CORS = {
-  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Vary": "Origin",
-};
+// The extension ID behind an allowlisted Origin, or null for anything else
+// (a web page, curl, an unknown extension).
+function allowedExtensionId(origin: string): string | null {
+  const m = /^chrome-extension:\/\/([a-p]{32})$/.exec(origin);
+  return m && ALLOWED_EXTENSION_IDS.includes(m[1]) ? m[1] : null;
+}
 
-function json(body: unknown, status: number): Response {
+// CORS echoes the caller's exact origin when it is allowlisted, and omits
+// Allow-Origin entirely otherwise (so the browser blocks the read). Vary:
+// Origin keeps any cache in front of us from serving one origin's headers to
+// another.
+function corsHeaders(extensionId: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin",
+  };
+  if (extensionId) headers["Access-Control-Allow-Origin"] = `chrome-extension://${extensionId}`;
+  return headers;
+}
+
+function redirectUrlFor(extensionId: string): string {
+  return `https://${extensionId}.chromiumapp.org/hubspot`;
+}
+
+function json(body: unknown, status: number, cors: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS },
+    headers: { "Content-Type": "application/json", ...cors },
   });
 }
 
@@ -140,46 +173,59 @@ function isRateLimited(key: string): boolean {
 }
 
 Deno.serve(async (req: Request) => {
+  // Only the allowlisted extensions may mint tokens here. Resolved once, up
+  // front, so the preflight and every response carry the same CORS headers.
+  const extensionId = allowedExtensionId(req.headers.get("Origin") ?? "");
+  const cors = corsHeaders(extensionId);
+
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, { status: extensionId ? 204 : 403, headers: cors });
   }
   if (req.method !== "POST") {
-    return json({ error: "method_not_allowed" }, 405);
+    return json({ error: "method_not_allowed" }, 405, cors);
   }
 
-  // Only the pinned extension may mint tokens here.
-  if ((req.headers.get("Origin") ?? "") !== ALLOWED_ORIGIN) {
-    return json({ error: "forbidden_origin" }, 403);
+  if (!extensionId) {
+    return json({ error: "forbidden_origin" }, 403, cors);
   }
 
   const clientKey = (req.headers.get("X-Forwarded-For") ?? "").split(",")[0].trim() || "no-ip";
   if (isRateLimited(clientKey)) {
     console.error(`[hubspot-token] rate limit hit for ${clientKey}`);
-    return json({ error: "rate_limited" }, 429);
+    return json({ error: "rate_limited" }, 429, cors);
   }
 
-  let payload: { action?: string; code?: string; refresh_token?: string };
+  let payload: { action?: string; code?: string; refresh_token?: string; redirect_uri?: string };
   try {
     payload = await req.json();
   } catch {
-    return json({ error: "invalid_json" }, 400);
+    return json({ error: "invalid_json" }, 400, cors);
   }
 
   if (payload.action === "exchange") {
-    if (!payload.code) return json({ error: "missing_code" }, 400);
+    if (!payload.code) return json({ error: "missing_code" }, 400, cors);
+    // Derived from the validated Origin, never from the body. The extension
+    // sends its own redirect_uri; a mismatch means its config and this
+    // allowlist disagree, so fail loudly here rather than as an opaque
+    // HubSpot error.
+    const redirectUri = redirectUrlFor(extensionId);
+    if (payload.redirect_uri != null && payload.redirect_uri !== redirectUri) {
+      console.error(`[hubspot-token] redirect_uri mismatch for ${extensionId}: body=${String(payload.redirect_uri).slice(0, 200)} derived=${redirectUri}`);
+      return json({ error: "redirect_mismatch" }, 400, cors);
+    }
     const result = await hubspotForm(TOKEN_URL, {
       grant_type: "authorization_code",
-      redirect_uri: REDIRECT_URL,
+      redirect_uri: redirectUri,
       code: payload.code,
     });
     if (!result.ok) {
-      return json({ error: "exchange_failed", detail: result.data }, result.status);
+      return json({ error: "exchange_failed", detail: result.data }, result.status, cors);
     }
     // Server-side identity lookup (introspect also requires the secret).
     const intro = await introspectToken(result.data.access_token);
     const { allowed, hubId } = checkHubAllowlist("exchange", intro);
     if (!allowed) {
-      return json({ error: "forbidden_hub" }, 403);
+      return json({ error: "forbidden_hub" }, 403, cors);
     }
     const who: { user?: string; user_id?: number } | null = intro.ok ? intro.data : null;
     return json(
@@ -192,22 +238,23 @@ Deno.serve(async (req: Request) => {
         user_id: who?.user_id ?? null,
       },
       200,
+      cors,
     );
   }
 
   if (payload.action === "refresh") {
-    if (!payload.refresh_token) return json({ error: "missing_refresh_token" }, 400);
+    if (!payload.refresh_token) return json({ error: "missing_refresh_token" }, 400, cors);
     const result = await hubspotForm(TOKEN_URL, {
       grant_type: "refresh_token",
       refresh_token: payload.refresh_token,
     });
     if (!result.ok) {
-      return json({ error: "refresh_failed", detail: result.data }, result.status);
+      return json({ error: "refresh_failed", detail: result.data }, result.status, cors);
     }
     const intro = await introspectToken(result.data.access_token);
     const { allowed, hubId } = checkHubAllowlist("refresh", intro);
     if (!allowed) {
-      return json({ error: "forbidden_hub" }, 403);
+      return json({ error: "forbidden_hub" }, 403, cors);
     }
     // Visibility only — timestamp and hub_id, NEVER the token itself — so an
     // unexpected caller (wrong hub, unexpected volume) is at least visible in
@@ -216,8 +263,9 @@ Deno.serve(async (req: Request) => {
     return json(
       { access_token: result.data.access_token, expires_in: result.data.expires_in },
       200,
+      cors,
     );
   }
 
-  return json({ error: "unknown_action" }, 400);
+  return json({ error: "unknown_action" }, 400, cors);
 });

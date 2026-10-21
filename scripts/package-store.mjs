@@ -85,6 +85,10 @@ rmSync(stage, { recursive: true, force: true });
 console.log(
   `dist/${zipName} ready (${dev ? "DEV zip — key kept, do not upload to the store" : "key stripped"}, description ${storeManifest.description.length}/132 chars).`
 );
-console.log("Upload it at https://chrome.google.com/webstore/devconsole — after the first upload,");
-console.log("copy the listing's extension ID and hand it to Claude so the HubSpot app's OAuth");
-console.log("redirect URL can be registered for store installs.");
+if (!dev) {
+  // The store listing's ID (dhmhnhegpigpedbfpplkodihmljhkcff) is already
+  // registered for OAuth; see "Store vs dev extension ID" in the README.
+  console.log("Upload it at https://chrome.google.com/webstore/devconsole. Store installs run as");
+  console.log("dhmhnhegpigpedbfpplkodihmljhkcff, already on KNOWN_EXTENSION_IDS / the edge function /");
+  console.log("the HubSpot app's redirect URLs (see README: Store vs dev extension ID).");
+}

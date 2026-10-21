@@ -690,7 +690,8 @@ map is empty and every value lands in All tech.
 |---|---|---|
 | `CLIENT_ID` | HubSpot app client ID (public identifier, not a secret) | `8d295d37-…-1565ed99025f` |
 | `TOKEN_PROXY_URL` | Deployed Lovable Cloud token-exchange function | `https://wiza-hs-connect.lovable.app/api/public/hubspot-token` |
-| `REDIRECT_URL` | Must exactly match a redirect URL registered on the Auth tab **and** the function's own `REDIRECT_URL` | `https://<ext-id>.chromiumapp.org/hubspot` |
+| `REDIRECT_URL` | Derived at runtime from `chrome.identity.getRedirectURL("hubspot")`, so it is always this install's own ID. That ID must be registered on the app's Auth tab **and** allowlisted in the edge function (see [Store vs dev extension ID](#store-vs-dev-extension-id)) | `https://<this-install's-id>.chromiumapp.org/hubspot` |
+| `KNOWN_EXTENSION_IDS` | Every extension ID registered on the HubSpot app and allowlisted in the edge function. The panel warns in the console when the running ID is not on it; `scripts/validate.mjs` fails on any `chromiumapp.org/hubspot` URL whose ID is not on it | `dhmhnhegpigpedbfpplkodihmljhkcff` (store), `ihajiebioinbhaljdmaihgonjglhalpa` (dev) |
 | `SCOPES` | Scopes requested at install; must include every scope marked *required* on the app (including `oauth`) | `oauth` + contacts/companies read-write, deals read, owners read, **custom objects read** (Phase 12 — a rep's token only gets this on the next reconnect; see "Wiza custom objects" under [CRM sidebar](#crm-sidebar)) |
 | `AUTHORIZE_URL` | HubSpot's consent endpoint (browser-side; no secret involved) | `https://app.hubspot.com/oauth/authorize` |
 | `API_BASE` | CRM API host; must stay covered by `host_permissions` | `https://api.hubapi.com` |
@@ -700,6 +701,41 @@ map is empty and every value lands in All tech.
 > secret store, and only the hosted token function reads it — which is why
 > `TOKEN_URL` and `INTROSPECT_URL` are absent above: the extension never calls
 > HubSpot's token endpoints.
+
+### Store vs dev extension ID
+
+The extension runs under two IDs, and HubSpot sign-in has to work under both:
+
+| Install | Extension ID | Where the ID comes from |
+|---|---|---|
+| Chrome Web Store | `dhmhnhegpigpedbfpplkodihmljhkcff` | Assigned by the store. `scripts/package-store.mjs` strips manifest.json's `key` from the store zip, so the store's own key decides the ID |
+| Unpacked / dev (`--dev` zip, or Load unpacked on the repo) | `ihajiebioinbhaljdmaihgonjglhalpa` | Pinned by the `key` in manifest.json |
+
+`chrome.identity.launchWebAuthFlow` only intercepts
+`https://<this-extension's-id>.chromiumapp.org/`. A redirect URL built from the
+other ID is loaded as a real page and fails with `DNS_PROBE_POSSIBLE`, which is
+exactly what store installs hit before 0.8.2.
+
+Three places must list the same IDs, or that install cannot connect:
+
+1. **`hubspot-config.js` → `KNOWN_EXTENSION_IDS`.** The extension's own copy.
+   `REDIRECT_URL` itself is derived at runtime, so it never needs editing.
+2. **`lovable/hubspot-token-function.ts` → `ALLOWED_EXTENSION_IDS`.** The
+   function accepts `Origin: chrome-extension://<id>` only for these IDs,
+   echoes that exact origin in `Access-Control-Allow-Origin` (with
+   `Vary: Origin`), and derives the `redirect_uri` it sends HubSpot from the
+   validated origin. It never trusts a `redirect_uri` from the request body;
+   one that disagrees with the derived URL is refused with `400
+   redirect_mismatch`. Deploy by pasting the file into Lovable (see the file
+   header).
+3. **The HubSpot app's redirect URLs** (`hubspot-app/src/app/app-hsmeta.json`
+   → `auth.redirectUrls`), one `https://<id>.chromiumapp.org/hubspot` per ID.
+   Ship with `hs project upload` from `hubspot-app/`.
+
+Adding a third ID (a second store listing, say) means touching all three.
+`node scripts/validate.mjs` fails on any `chromiumapp.org/hubspot` URL in the
+repo whose ID is not on `KNOWN_EXTENSION_IDS`, and the panel logs a console
+warning on **Connect HubSpot** when the running ID is not on it.
 
 **`content-nooks.js` → `NOTES_CONFIG`** (notes capture → `chrome.storage.local`
 key `eb:notes`):
@@ -814,6 +850,7 @@ DOM**, not the static HTML snapshots:
 | Panel or badge not showing | Reload the tab after updating the extension; both appear only for a fresh (<30 min) capture. |
 | Stale email | Captures older than 30 min are skipped; re-open the prospect in the dialer. |
 | Extension doesn't run on booking page | Confirm the URL matches `https://scheduler.default.com/*` in `manifest.json`. |
+| **Connect HubSpot** opens a page that fails with `DNS_PROBE_POSSIBLE` on `…chromiumapp.org/hubspot` | The redirect URL was built for a different extension ID than the one running. Fixed in 0.8.2 (the URL is now derived at runtime); if it recurs, the running ID is missing from one of the three lists in [Store vs dev extension ID](#store-vs-dev-extension-id). The panel's console names the ID. |
 | CRM sections say "Connect HubSpot to see CRM data" | You're signed out — click **Connect** in that empty state, or the **gear** → **Connect HubSpot**. |
 | The header dot is amber | HubSpot isn't connected (hover it for the detail). Open the **gear** and connect. |
 | "HubSpot isn't set up in this build" | `hubspot-config.js` is missing its client ID or token-endpoint URL — the checked-in file has both, so this means a modified/partial copy. Reload the extension from a clean checkout. |

@@ -2,10 +2,11 @@
 // Validates manifest.json: well-formed JSON, required fields, and that every
 // file it references actually exists — plus the side panel's own <script src>
 // list, because a renamed panel script breaks the panel silently (the manifest
-// never mentions it, so nothing else would notice). Run locally or in CI (no
-// deps).
+// never mentions it, so nothing else would notice). Also checks that every
+// HubSpot OAuth redirect URL in the repo names a known extension ID (see the
+// extension-ID drift section below). Run locally or in CI (no deps).
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -105,6 +106,61 @@ for (const set of iconSets) {
   } else {
     for (const [size, path] of Object.entries(set)) {
       need(fileExists(path), `icon (${size}px) missing: ${path}`);
+    }
+  }
+}
+
+// Extension-ID drift. The store install and the unpacked/dev install run under
+// different IDs, and each ID's https://<id>.chromiumapp.org/hubspot must be
+// registered in three places that know nothing of each other: KNOWN_EXTENSION_IDS
+// in hubspot-config.js, ALLOWED_EXTENSION_IDS in the edge function, and the
+// HubSpot app's redirectUrls. A hardcoded redirect URL for an ID on none of
+// those lists is how store installs broke before 0.8.2 (DNS_PROBE_POSSIBLE on
+// connect). Read-only: a text scan of *.js/*.mjs/*.ts/*.json outside dist/.
+const ID_LIST = (src, name) => {
+  const m = new RegExp(name + "\\s*[:=]\\s*\\[([^\\]]*)\\]").exec(src);
+  return m ? [...m[1].matchAll(/"([a-p]{32})"/g)].map((x) => x[1]) : null;
+};
+const knownIds = ID_LIST(readFileSync(join(root, "hubspot-config.js"), "utf8"), "KNOWN_EXTENSION_IDS");
+need(knownIds && knownIds.length > 0, "hubspot-config.js has no KNOWN_EXTENSION_IDS list");
+if (knownIds && knownIds.length) {
+  const SKIP_DIRS = new Set(["dist", "node_modules", ".git"]);
+  const walk = (dir) => readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => {
+    const rel = dir ? `${dir}/${e.name}` : e.name;
+    if (e.isDirectory()) return SKIP_DIRS.has(e.name) ? [] : walk(rel);
+    return /\.(?:m?js|ts|json)$/.test(e.name) ? [rel] : [];
+  });
+  for (const rel of walk("")) {
+    const src = readFileSync(join(root, rel), "utf8");
+    for (const m of src.matchAll(/https:\/\/([a-z0-9]+)\.chromiumapp\.org\/hubspot/g)) {
+      need(knownIds.includes(m[1]),
+        `${rel} hardcodes a HubSpot redirect URL for unknown extension ID ${m[1]} (not in KNOWN_EXTENSION_IDS)`);
+    }
+  }
+
+  // The other two lists must carry every known ID, or that install can't connect.
+  const fnPath = "lovable/hubspot-token-function.ts";
+  if (fileExists(fnPath)) {
+    const fnIds = ID_LIST(readFileSync(join(root, fnPath), "utf8"), "ALLOWED_EXTENSION_IDS");
+    need(fnIds && fnIds.length > 0, `${fnPath} has no ALLOWED_EXTENSION_IDS list`);
+    for (const id of knownIds) {
+      need(!fnIds || fnIds.includes(id), `${fnPath} ALLOWED_EXTENSION_IDS is missing ${id}`);
+    }
+    for (const id of fnIds ?? []) {
+      need(knownIds.includes(id), `${fnPath} allowlists ${id}, which is not in KNOWN_EXTENSION_IDS`);
+    }
+  }
+  const appPath = "hubspot-app/src/app/app-hsmeta.json";
+  if (fileExists(appPath)) {
+    let urls = [];
+    try {
+      urls = JSON.parse(readFileSync(join(root, appPath), "utf8")).config?.auth?.redirectUrls ?? [];
+    } catch (e) {
+      errors.push(`${appPath} is not valid JSON: ${e.message}`);
+    }
+    for (const id of knownIds) {
+      need(urls.includes(`https://${id}.chromiumapp.org/hubspot`),
+        `${appPath} redirectUrls is missing https://${id}.chromiumapp.org/hubspot`);
     }
   }
 }

@@ -34,8 +34,10 @@ already uses Wiza — context no generic CRM sidebar could show.
 
 ## Operating Context
 
-- Chrome MV3 side panel (minimum Chrome 114), pinned extension ID
-  `ihajiebioinbhaljdmaihgonjglhalpa`.
+- Chrome MV3 side panel (minimum Chrome 114). Two extension IDs: the Chrome
+  Web Store install is `dhmhnhegpigpedbfpplkodihmljhkcff`; the unpacked/dev
+  install is pinned to `ihajiebioinbhaljdmaihgonjglhalpa` by manifest.json's
+  `key`.
 - Reads the Nooks dialer DOM via stable `data-testid` anchors (documented in
   docs/nooks-dom-recon.md); fills the booking form at scheduler.default.com.
 - HubSpot portal 40063500; per-SDR OAuth. Token exchange runs on a Lovable

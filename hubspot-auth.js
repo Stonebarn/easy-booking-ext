@@ -163,7 +163,9 @@
       res = await fetch(CFG.TOKEN_PROXY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...payload }),
+        // redirect_uri rides along so the function can confirm it matches the
+        // one it derives from our Origin (it never trusts this value itself).
+        body: JSON.stringify({ action, redirect_uri: CFG.REDIRECT_URL, ...payload }),
       });
     } catch (e) {
       // Offline, DNS, TLS, or a CORS rejection — all transient as far as our
@@ -192,8 +194,8 @@
 
     // "exchange_failed"/"refresh_failed" mean HubSpot itself rejected us and the
     // function passed HubSpot's status through. Any other slug is the function
-    // refusing the request (forbidden_origin, missing_refresh_token,
-    // unknown_action, invalid_json, method_not_allowed) — our bug or a
+    // refusing the request (forbidden_origin, redirect_mismatch,
+    // missing_refresh_token, unknown_action, invalid_json, method_not_allowed) — our bug or a
     // deployment problem, never evidence that the SDR's token is bad.
     const fromHubSpot = slug === "exchange_failed" || slug === "refresh_failed";
     const err = new HubSpotAuthError(fromHubSpot ? failCode : "PROXY_ERROR", message, res.status);
@@ -221,24 +223,29 @@
     return `${CFG.AUTHORIZE_URL}?${query}`;
   }
 
-  // The registered redirect URL is hard-coded in config (it has to match what
-  // HubSpot *and* the edge function both have on file) but it derives from the
-  // extension ID, which is only stable because of manifest.json's "key". Catch
-  // a drift here rather than in an opaque HubSpot error page.
+  // The redirect URL is derived from the running extension's ID (see
+  // hubspot-config.js), so it is always the one Chrome intercepts. What can
+  // still drift is registration: an ID that is not on KNOWN_EXTENSION_IDS has
+  // no redirect URL on the HubSpot app's Auth tab and is not allowlisted in the
+  // edge function, so sign-in would die on an opaque HubSpot error page (or a
+  // forbidden_origin from the function). Catch that here instead.
   function warnOnRedirectDrift() {
     try {
-      const expected = chrome.identity.getRedirectURL("hubspot");
-      if (expected !== CFG.REDIRECT_URL) {
-        log(
-          "redirect URL mismatch — this browser expects",
-          expected,
-          "but hubspot-config.js registers",
+      const id = chrome.runtime.id;
+      const known = CFG.KNOWN_EXTENSION_IDS || [];
+      if (!known.includes(id)) {
+        console.warn(
+          "[EasyBooking] unregistered extension ID",
+          id,
+          "— its redirect URL",
           CFG.REDIRECT_URL,
-          "(is manifest.json's 'key' still present?)"
+          "is not on the HubSpot app's Auth tab or in the edge function's allowlist",
+          "(known IDs:",
+          known.join(", ") + ")"
         );
       }
     } catch (_) {
-      /* identity API unavailable; login() will fail with a clearer error */
+      /* runtime API unavailable; login() will fail with a clearer error */
     }
   }
 

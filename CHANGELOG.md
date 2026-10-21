@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-21
+
+### Fixed — Connect to HubSpot works from the Chrome Web Store install
+
+Reps who installed the extension from the Chrome Web Store clicked **Connect
+HubSpot**, approved the consent screen, and landed on a Chrome error page
+(`DNS_PROBE_POSSIBLE` on `ihajiebioinbhaljdmaihgonjglhalpa.chromiumapp.org`).
+Unpacked installs were fine. Now both connect.
+
+Why it broke: the store install runs under a different extension ID
+(`dhmhnhegpigpedbfpplkodihmljhkcff`) from the unpacked one
+(`ihajiebioinbhaljdmaihgonjglhalpa`), because the store zip strips manifest.json's
+`key` and the store assigns its own. Chrome only catches the HubSpot redirect
+when it comes back to the running extension's own ID, and the dev ID was pinned
+in three places:
+
+1. **`hubspot-config.js`**: `REDIRECT_URL` was a hardcoded dev URL. It is now
+   derived at runtime with `chrome.identity.getRedirectURL("hubspot")`, so each
+   install asks HubSpot to send the rep back to itself. A new
+   `KNOWN_EXTENSION_IDS` lists both IDs; on connect, the panel warns in the
+   console if the running ID is not one of them.
+2. **The token function** (`lovable/hubspot-token-function.ts`): it accepted
+   only the dev origin and always told HubSpot the dev redirect URL. It now
+   allowlists both IDs, echoes the caller's exact origin in CORS (with
+   `Vary: Origin`), and derives the redirect URL from the validated origin
+   rather than trusting the request. The extension now sends its own
+   `redirect_uri` too, and the function refuses a mismatch with
+   `redirect_mismatch` instead of failing inside HubSpot. Refresh is unchanged.
+   This file must be redeployed to Lovable for store installs to connect.
+3. **The HubSpot app** (`hubspot-app/src/app/app-hsmeta.json`): only the dev
+   redirect URL was registered. The store URL is added; it ships with
+   `hs project upload`.
+
+`scripts/validate.mjs` now fails the build if any `chromiumapp.org/hubspot` URL
+in the repo names an ID that is not on `KNOWN_EXTENSION_IDS`, so a fourth
+pinned copy cannot sneak back in. See **Store vs dev extension ID** in the
+README for the three places that must agree.
+
 ## [0.8.1] - 2026-10-21
 
 ### Added — Inbound-ready panel: account type, contact owners everywhere, and the new company rollups
