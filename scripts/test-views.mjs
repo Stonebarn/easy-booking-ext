@@ -27,7 +27,7 @@ const NOW = Date.UTC(2026, 9, 21, 15, 0, 0);
 const co = (props) => ({ id: "1", properties: props });
 const ctxOf = (props) => D.view.accountContext(co(props), { now: NOW });
 
-eq(D.CONFIG.CACHE_VERSION, 14, "cache version");
+eq(D.CONFIG.CACHE_VERSION, 16, "cache version");
 eq(D.CONFIG.ACCOUNT_OWNER_LOOKUP_MAX, 25, "owner lookup max");
 for (const p of ["inbound_source", "inbound_source_last_updated"]) ok(D.CONFIG.CONTACT_PROPERTIES.includes(p), "contact prop " + p);
 for (const p of ["inbound_source","inbound_source_last_updated","last_bulk_contact_enrichment_date","company_source","communications_channel_company","ae_contacts","amcs_contacts","gtm_ops_contacts","sales_leader_contacts","sdr_contacts","number_of_associated_sales_team_contacts","wiza_credit_depletion_days_company","api_credit_balance_company","api_credits_used__30_days_cloned","credit_use_per_day_company","number_of_credits_used_in_last_30_days","number_of_active_users_last_30_days","next_checkin","company_research","competitor_tech","missing_wiza_features","wiza_account_create_date"]) ok(D.CONFIG.COMPANY_PROPERTIES.includes(p), "company prop " + p);
@@ -270,6 +270,81 @@ eq(ctxOf({ company_research: "<table><tr><th>Tool</th><th>Seats</th></tr><tr><td
   eq(["Do Not Outbound", "Demo Outstanding", "Actively Engaged", "Outreach Initiated"].map((v) => ctxOf({ prospecting_status: v }).prospectingStatusTone),
     ["negative", "positive", "positive", null], "prospecting status tones");
   eq([ctxOf({}).prospectingStatus, ctxOf({}).status, ctxOf({}).hasData], [null, null, false], "neither set: no data");
+}
+
+// Call brief (v0.9.0)
+{
+  ok(D.CONFIG.CONTACT_PROPERTIES.includes("sdr_call_brief"), "contact prop sdr_call_brief");
+  ok(D.CONFIG.COMPANY_PROPERTIES.includes("sdr_call_brief"), "company prop sdr_call_brief");
+  const brief = [
+    "• CALLING: Gerri Alaniz, Community Relations and Business Development Manager – NEW contact, not on the original deal. Last time we spoke with Roxanne Alaniz.",
+    "• LOST: Oct 2025 at Validation stage ($4,788) – Timing Issue",
+    "• WHY WE LOST: Busy launching campaigns and hiring; felt set on lists for now.",
+    "• LAST TOUCH: 2026-11-02 – Matt called Roxanne Alaniz – no answer · since Oct 29: 2 dials, no conversation · AE on deal: McKenna Sivula (inactive)",
+    "• ANGLE: They asked us to come back and we didn't – own the gap and reopen.",
+  ].join("\n");
+  const items = D.view.callBrief(brief);
+  eq(items.length, 5, "example parses to 5 items");
+  eq(items.map((i) => i.label), ["CALLING", "LOST", "WHY WE LOST", "LAST TOUCH", "ANGLE"], "example labels");
+  eq(items[1].text, "Oct 2025 at Validation stage ($4,788) – Timing Issue", "text after the first colon");
+  eq(items[3].text, "2026-11-02 – Matt called Roxanne Alaniz – no answer · since Oct 29: 2 dials, no conversation · AE on deal: McKenna Sivula (inactive)", "inline · and later colons stay in the text");
+  eq(D.view.callBrief("LOST: Oct 2025\nANGLE: reopen"), [{ label: "LOST", text: "Oct 2025" }, { label: "ANGLE", text: "reopen" }], "no bullet prefix");
+  eq(D.view.callBrief("- LOST: Oct 2025\n* ANGLE: reopen"), [{ label: "LOST", text: "Oct 2025" }, { label: "ANGLE", text: "reopen" }], "- and * bullets");
+  eq(D.view.callBrief("• LOST: Oct 2025\r\n\r\n• ANGLE: reopen\r\n"), [{ label: "LOST", text: "Oct 2025" }, { label: "ANGLE", text: "reopen" }], "CRLF and blank lines");
+  eq(D.view.callBrief("• Call them back after the holidays"), [{ label: null, text: "Call them back after the holidays" }], "no colon: label null");
+  eq(D.view.callBrief("• Note: lowercase is not a label"), [{ label: null, text: "Note: lowercase is not a label" }], "mixed-case prefix is not a label");
+  eq(D.view.callBrief("<p>• LOST: Oct 2025 &amp; again</p><p>• ANGLE: <b>reopen</b></p>"), [{ label: "LOST", text: "Oct 2025 & again" }, { label: "ANGLE", text: "reopen" }], "HTML input");
+  eq([D.view.callBrief(""), D.view.callBrief(null), D.view.callBrief(undefined), D.view.callBrief("  \n \r\n")], [[], [], [], []], "empty input is []");
+  eq(D.view.contact({ id: "1", properties: { sdr_call_brief: "• LOST: Oct 2025" } }, null).callBrief, [{ label: "LOST", text: "Oct 2025" }], "contact view carries callBrief");
+  eq(D.view.company({ id: "2", properties: {} }, null).callBrief, [], "company view with no brief");
+}
+
+// Activity fetch hardening (v0.9.0)
+{
+  const A = D.activity;
+  eq([D.CONFIG.ACTIVITY_ASSOC_MAX, D.CONFIG.ACTIVITY_ASSOC_READ, D.CONFIG.ACTIVITY_DEAL_MAX], [500, 100, 10], "assoc constants");
+  ok(D.CONFIG.ACTIVITY_ASSOC_READ <= D.CONFIG.ACTIVITY_ASSOC_MAX, "read <= collected");
+  // merge, dedupe, numeric-desc sort, top N
+  eq(A.topIds([["9", "10", "100"], ["10", "2"], null, ["x", "", "100"]], 3), ["100", "10", "9"], "merge dedupe numeric sort top 3");
+  eq(A.topIds([["99999999999999999", "100000000000000000"]], 1), ["100000000000000000"], "exact past 2^53");
+  eq(A.topIds([[1, "3", 2]]), ["3", "2", "1"], "no max keeps all");
+  eq(A.topIds([], 5), [], "empty");
+  eq(A.topIds([["5", "4"]], 0), [], "max 0");
+  // paging cursor
+  eq(A.nextAfter({ paging: { next: { after: "MTAw" } } }), "MTAw", "next after");
+  eq([A.nextAfter({ results: [] }), A.nextAfter(null), A.nextAfter({ paging: { next: { after: "" } } })], [null, null, null], "last page");
+  // v4 batch association read
+  eq(A.batchIds({ results: [{ from: { id: "1" }, to: [{ toObjectId: 5 }, { toObjectId: "7" }] }, { from: { id: "2" }, to: [{ toObjectId: "7" }, { id: "3" }] }, { from: { id: "3" } }] }), ["7", "5", "3"], "batch ids merged and deduped");
+  eq(A.batchIds(null), [], "batch ids null");
+  // failure shape + text
+  const f403 = A.failure("notes", { status: 403, code: "FORBIDDEN" }, false);
+  eq(f403, { type: "notes", status: 403, code: "FORBIDDEN", partial: false }, "failure shape");
+  eq(A.failureText(f403), "Notes unavailable (HTTP 403)", "failure text");
+  eq(A.failureText(A.failure("emails", { code: "TRANSIENT" }, true)), "Some company or deal emails unavailable (Transient)", "partial failure text");
+  eq(A.failure("calls", null, false), { type: "calls", status: null, code: "TRANSIENT", partial: false }, "failure with no error");
+  eq(A.failureText(null), "", "no failure text");
+  // tabs: an outright failure is not a disabled 0; a partial keeps its count
+  const items = [{ type: "calls", id: "1", timestamp: 2 }, { type: "calls", id: "2", timestamp: 1 }];
+  const tabs = A.tabs(items, [f403, A.failure("calls", { status: 500 }, true)]);
+  const notes = tabs.find((t) => t.key === "notes");
+  eq([notes.count, notes.disabled, notes.unavailable], [0, false, true], "failed notes tab enabled, unavailable");
+  const calls = tabs.find((t) => t.key === "calls");
+  eq([calls.count, calls.disabled, calls.unavailable, calls.failure.partial], [2, false, false, true], "partial calls tab keeps count");
+  eq(tabs.find((t) => t.key === "tasks").disabled, true, "untouched empty tab still disabled");
+  eq(A.tabs(items).find((t) => t.key === "notes").disabled, true, "no failures: old behavior");
+  eq(A.resolveTab(items, "notes", [f403]), "notes", "failed tab can stay selected");
+  eq(A.resolveTab(items, "notes"), "all", "empty tab without failure falls back");
+  // every engagement type has a scope, and every scope is requested
+  const types = D.CONFIG.ACTIVITY_TYPES.map((s) => s.type);
+  eq(Object.keys(D.CONFIG.ACTIVITY_SCOPES).sort(), [...types].sort(), "ACTIVITY_SCOPES covers exactly ACTIVITY_TYPES");
+  const cfgBox = { console: { ...console, error() {}, debug() {} }, chrome: { runtime: { id: "test" } }, URL };
+  cfgBox.self = cfgBox; cfgBox.window = cfgBox;
+  vm.createContext(cfgBox);
+  vm.runInContext(fs.readFileSync(ROOT + "hubspot-config.js", "utf8"), cfgBox, { filename: "hubspot-config.js" });
+  const scopes = cfgBox.EB.hubspotConfig.SCOPES;
+  for (const t of types) ok(scopes.includes(D.CONFIG.ACTIVITY_SCOPES[t]), `scope for ${t} is requested`);
+  const appScopes = JSON.parse(fs.readFileSync(ROOT + "hubspot-app/src/app/app-hsmeta.json", "utf8")).config.auth.requiredScopes;
+  eq(appScopes, Array.from(scopes), "app requiredScopes match SCOPES, same order");
 }
 
 console.log(`PASS: ${n} assertions`);

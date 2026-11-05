@@ -84,6 +84,18 @@
     // tab bar shows a per-type list in a fixed-height scroller, so this is what
     // one tab can hold — not a merged total.
     ACTIVITY_PER_TYPE_LIMIT: 25,
+    // v0.9.0: association ids collected per engagement type, across every page
+    // of the v4 associations read (contact + company + deals merged). A hard
+    // cap so a 3,000-call account can't turn one prospect into 30 requests.
+    ACTIVITY_ASSOC_MAX: 500,
+    // Of those ids, how many get a batch read. Engagement ids grow over time,
+    // so the numerically largest ids are the newest; reading the top 100 and
+    // then sorting by hs_timestamp is what "most recent 25" really needs.
+    ACTIVITY_ASSOC_READ: 100,
+    // Deals whose engagements are merged into Activity. One v4 batch
+    // association read per type covers all of them, so this caps that call's
+    // input size, not a request count.
+    ACTIVITY_DEAL_MAX: 10,
     // HubSpot's own ceiling for a batch/read call.
     BATCH_MAX: 100,
     // Used when a 429 arrives with no (or an unparseable) Retry-After header.
@@ -99,7 +111,8 @@
     // 13 = v0.8.1's accountContext.accountType / teamMix / rep notes,
     // contact.inboundSource and wiza.usage. 14 = v0.8.1's accountContext
     // gtmTech / allTech / techCount (the GTM tech block).
-    CACHE_VERSION: 14,
+    // 15 = v0.9.0's callBrief. 16 = v0.9.0's activityFailed.
+    CACHE_VERSION: 16,
     // Colleagues shown for the account (Phase 9). This is the *association page
     // limit we ask for* as well as the row cap, which is the point: one page, one
     // batch read, no paging, ever. 25 names is already more than a rep reads
@@ -208,6 +221,10 @@
       // identity block shows it as an "Inbound" pill when set.
       "inbound_source",
       "inbound_source_last_updated",
+      // --- v0.9.0: Win back mode -------------------------------------------
+      // The SDR Call Brief: newline-separated "• LABEL: text" lines written by
+      // an automation. Same internal name on the company (see below).
+      "sdr_call_brief",
     ],
     COMPANY_PROPERTIES: [
       "name",
@@ -287,6 +304,8 @@
       "api_credits_used__30_days_cloned",
       "credit_use_per_day_company",
       "wiza_credit_depletion_days_company",
+      // v0.9.0: the company's SDR Call Brief (Win back mode).
+      "sdr_call_brief",
     ],
     // --- Phase 9: the other contacts on the account ------------------------
     // Deliberately NOT CONTACT_PROPERTIES: that array carries the whole Wiza
@@ -495,6 +514,22 @@
         ],
       },
     ],
+
+    // v0.9.0: the OAuth scope that lets a token read each engagement type.
+    // scripts/test-views.mjs asserts every ACTIVITY_TYPES entry has one and
+    // that each is requested in hubspot-config.js SCOPES, so a new type can't
+    // ship without its scope. HubSpot documents sales-email-read as "read and
+    // manage one-to-one email engagements"; it names no granular scope for
+    // calls, meetings, notes, or tasks, and rejected the crm.objects.notes.*
+    // style names when they were tried (see request()'s 403 comment), so those
+    // ride on the contact read scope.
+    ACTIVITY_SCOPES: {
+      calls: "crm.objects.contacts.read",
+      emails: "sales-email-read",
+      meetings: "crm.objects.contacts.read",
+      notes: "crm.objects.contacts.read",
+      tasks: "crm.objects.contacts.read",
+    },
 
     // A company search on one of these would match some unrelated record that
     // happens to have the domain on file, so the domain fallback skips them.
@@ -1660,6 +1695,30 @@
       .join("\n");
   }
 
+  // v0.9.0: the SDR Call Brief as a list. The property is plain text, one
+  // "• LABEL: text" line per bullet, but it is written by an automation and
+  // edited by hand, so every line is read defensively: HTML goes through
+  // htmlToText (which also splits CRLF and drops blank lines), a leading "•",
+  // "-" or "*" bullet is optional, and the label is only the text before the
+  // first colon when that text is an UPPERCASE label. Anything else is a line
+  // with no label. Inline " · " separators stay inside the text. Pure: string
+  // in, [{ label, text }] out ([] for nothing), and only ever textContent.
+  const BRIEF_BULLET = /^(?:[\u2022\u25CF\u25AA]\s*|[-*]\s+)/;
+  const BRIEF_LABEL = /^([A-Z][A-Z0-9 &/'().-]{0,39}?)\s*:\s*([\s\S]*)$/;
+  function callBriefView(value) {
+    const raw = asText(value);
+    if (!raw) return [];
+    const items = [];
+    for (const line of htmlToText(raw).split("\n")) {
+      const body = line.replace(BRIEF_BULLET, "").trim();
+      if (!body) continue;
+      const m = BRIEF_LABEL.exec(body);
+      if (m && m[1].trim()) items.push({ label: m[1].trim(), text: m[2].trim() });
+      else items.push({ label: null, text: body });
+    }
+    return items;
+  }
+
   // HubSpot's own vocabulary is SCREAMING_SNAKE ("SALES_QUALIFIED_LEAD"); the
   // panel shows it as "Sales qualified lead".
   function humanizeEnum(value) {
@@ -2259,8 +2318,15 @@
   // [{ key, label, count, disabled }] — "All" first, then one per type in
   // ACTIVITY_TYPES order. A tab with nothing in it is disabled rather than
   // hidden, so the bar doesn't reflow as you move between prospects.
-  function activityTabs(items) {
+  //
+  // v0.9.0: `failed` is the bundle's activityFailed list. A type that failed
+  // outright stays clickable (its tab shows "n/a", and the list says why)
+  // instead of reading as a believable "0". A partial failure (company or
+  // deal leg only) keeps its count and just carries the failure along.
+  function activityTabs(items, failed) {
     const list = items || [];
+    const failures = new Map();
+    for (const f of failed || []) if (f && f.type) failures.set(f.type, f);
     const counts = new Map();
     for (const item of list) {
       const t = item && item.type;
@@ -2270,56 +2336,175 @@
     const tabs = [{ key: "all", label: "All", count: list.length, disabled: !list.length }];
     for (const spec of CONFIG.ACTIVITY_TYPES) {
       const count = counts.get(spec.type) || 0;
-      tabs.push({ key: spec.type, label: spec.tab || spec.label, count, disabled: count === 0 });
+      const failure = failures.get(spec.type) || null;
+      const unavailable = !!(failure && !failure.partial);
+      tabs.push({
+        key: spec.type,
+        label: spec.tab || spec.label,
+        count,
+        disabled: count === 0 && !unavailable,
+        failure,
+        unavailable,
+      });
     }
     return tabs;
+  }
+
+  // --- v0.9.0 activity fetch helpers (pure; unit-tested) --------------------
+  // Merge association id lists from every object (contact, company, deals),
+  // dedupe, and keep the `max` newest. Ids are digit strings that grow over
+  // time; comparing length first then lexically is a numeric sort that stays
+  // exact past 2^53.
+  function topActivityIds(lists, max) {
+    const seen = new Set();
+    for (const list of lists || []) {
+      for (const id of list || []) if (isId(id)) seen.add(String(id));
+    }
+    const ids = Array.from(seen).sort((a, b) =>
+      b.length !== a.length ? b.length - a.length : b < a ? -1 : b > a ? 1 : 0
+    );
+    return max == null ? ids : ids.slice(0, Math.max(0, max));
+  }
+
+  // The `after` cursor of a v4 associations page, or null on the last page.
+  function assocNextAfter(body) {
+    const after = body && body.paging && body.paging.next && body.paging.next.after;
+    return after != null && after !== "" ? String(after) : null;
+  }
+
+  // v4 batch association read: { results: [{ from: { id }, to: [{ toObjectId }] }] }.
+  function v4BatchIds(body) {
+    const ids = [];
+    for (const r of (body && body.results) || []) {
+      for (const t of (r && r.to) || []) {
+        const id = t && (t.toObjectId != null ? t.toObjectId : t.id);
+        if (isId(id)) ids.push(String(id));
+      }
+    }
+    return topActivityIds([ids]);
+  }
+
+  // The shape a per-type failure takes on the bundle. `partial` means the
+  // contact's own engagements loaded and only a company/deal leg failed.
+  function activityFailure(type, err, partial) {
+    const status = err && Number(err.status);
+    return {
+      type: String(type),
+      status: status > 0 ? status : null,
+      code: (err && err.code) || "TRANSIENT",
+      partial: !!partial,
+    };
+  }
+
+  // "Notes unavailable (HTTP 403)": the one string a failed tab shows.
+  function activityFailureText(failure) {
+    if (!failure) return "";
+    const spec = CONFIG.ACTIVITY_TYPES.find((s) => s.type === failure.type);
+    const label = (spec && (spec.tab || spec.label)) || failure.type;
+    const why = failure.status ? `HTTP ${failure.status}` : humanizeEnum(failure.code) || "network error";
+    return failure.partial
+      ? `Some company or deal ${label.toLowerCase()} unavailable (${why})`
+      : `${label} unavailable (${why})`;
   }
 
   // The tab to actually render: the remembered one if it still has rows, else
   // "All". Keeps a rep's choice across prospect switches without ever showing
   // them an empty list they can't explain.
-  function resolveActivityTab(items, preferred) {
-    const tabs = activityTabs(items);
+  function resolveActivityTab(items, preferred, failed) {
+    const tabs = activityTabs(items, failed);
     const hit = tabs.find((t) => t.key === preferred);
     return hit && !hit.disabled ? hit.key : "all";
   }
 
-  // v4 associations per type in parallel, then one batch read per type that
-  // actually has associations — types with none cost exactly one association
-  // read and no batch call. Worst case ~10 general-pool requests, cached per
-  // contact for the bundle's TTL.
-  // Each type is fetched and failed independently: one engagement type the token
-  // can't read must not blank the four it can. Every per-type failure logs its
-  // HTTP status, because "which type, what status" is the only thing that makes a
-  // 403 here diagnosable from the panel's console. Only a total failure — every
-  // type erroring — is reported to the panel as a section error; anything less
-  // renders the rows that did come back, and a genuinely empty result stays
-  // empty rather than looking broken.
-  async function getActivity(contactId) {
-    if (!isId(contactId)) return [];
-    const failures = [];
+  // Every page of one object's v4 associations to an engagement type, capped
+  // at ACTIVITY_ASSOC_MAX ids. A missing record (404) is "no associations".
+  async function fetchAssocIds(fromType, fromId, toType) {
+    const ids = new Set();
+    let after = null;
+    do {
+      const q = `limit=${CONFIG.BATCH_MAX}` + (after ? `&after=${encodeURIComponent(after)}` : "");
+      const body = await orNull(
+        request(`/crm/v4/objects/${fromType}/${encodeURIComponent(fromId)}/associations/${toType}?${q}`)
+      );
+      for (const id of v4Ids(body)) ids.add(id);
+      after = assocNextAfter(body);
+    } while (after && ids.size < CONFIG.ACTIVITY_ASSOC_MAX);
+    return Array.from(ids).slice(0, CONFIG.ACTIVITY_ASSOC_MAX);
+  }
+
+  // All of the deals' associations to one engagement type in ONE request.
+  async function fetchDealAssocIds(dealIds, toType) {
+    const ids = (dealIds || []).filter(isId).slice(0, CONFIG.ACTIVITY_DEAL_MAX);
+    if (!ids.length) return [];
+    const body = await post(`/crm/v4/associations/deals/${toType}/batch/read`, {
+      inputs: ids.map((id) => ({ id: String(id) })),
+    });
+    return v4BatchIds(body);
+  }
+
+  // Per engagement type, in parallel: the contact's associations (every page),
+  // the company's, and one batch association read for the deals, all at once.
+  // The merged ids are deduped and only the ACTIVITY_ASSOC_READ newest get
+  // batch-read, then sorted by hs_timestamp and cut to ACTIVITY_PER_TYPE_LIMIT.
+  // Typical cost: 3 association reads + 1 batch read per type.
+  //
+  // Each type fails independently and the failure is returned, not just
+  // logged: { items, failed: [{ type, status, code, partial }] }. The contact
+  // leg failing fails the type; a company or deal leg failing keeps the
+  // contact's rows and marks the type `partial`. buildBundle never caches a
+  // bundle with any failed type. Only a total failure (every type erroring
+  // outright) throws, so the panel shows a section error.
+  async function getActivity(contactId, options) {
+    if (!isId(contactId)) return { items: [], failed: [] };
+    const opts = options || {};
+    const companyId = isId(opts.companyId) ? String(opts.companyId) : null;
+    const dealIds = (opts.dealIds || []).filter(isId);
+    const failed = [];
+    const errors = [];
     const perType = await Promise.all(
       CONFIG.ACTIVITY_TYPES.map(async (spec) => {
         try {
-          const body = await orNull(
-            request(
-              `/crm/v4/objects/contacts/${encodeURIComponent(contactId)}/associations/${spec.type}?limit=${CONFIG.BATCH_MAX}`
+          const legs = [fetchAssocIds("contacts", contactId, spec.type)];
+          if (companyId) legs.push(fetchAssocIds("companies", companyId, spec.type));
+          if (dealIds.length) legs.push(fetchDealAssocIds(dealIds, spec.type));
+          const settled = await Promise.all(
+            legs.map((p, i) => p.then((ids) => ({ ids }), (err) => ({ err, primary: i === 0 })))
+          );
+          const primary = settled.find((r) => r.err && r.primary);
+          if (primary) throw primary.err;
+          const secondary = settled.find((r) => r.err);
+          if (secondary) {
+            failed.push(activityFailure(spec.type, secondary.err, true));
+            log(
+              `activity: company/deal ${spec.type} could not be read: HTTP ${(secondary.err && secondary.err.status) || "?"}`
+            );
+          }
+          const ids = topActivityIds(
+            settled.filter((r) => r.ids).map((r) => r.ids),
+            CONFIG.ACTIVITY_ASSOC_READ
+          );
+          if (!ids.length) return [];
+          const chunks = [];
+          for (let i = 0; i < ids.length; i += CONFIG.BATCH_MAX) chunks.push(ids.slice(i, i + CONFIG.BATCH_MAX));
+          const reads = await Promise.all(
+            chunks.map((chunk) =>
+              post(`/crm/v3/objects/${spec.type}/batch/read`, {
+                properties: spec.properties,
+                inputs: chunk.map((id) => ({ id })),
+              })
             )
           );
-          const ids = v4Ids(body).slice(0, CONFIG.BATCH_MAX);
-          if (!ids.length) return [];
-          const read = await post(`/crm/v3/objects/${spec.type}/batch/read`, {
-            properties: spec.properties,
-            inputs: ids.map((id) => ({ id })),
-          });
-          const items = ((read && read.results) || []).map((obj) => activityItem(spec, obj));
-          // Association reads come back in id order, not time order, so the cap
-          // is applied *after* sorting — otherwise "25 most recent calls" would
-          // really mean "25 oldest". Reading up to BATCH_MAX ids and keeping 25
-          // costs the same one request either way.
+          const items = [];
+          for (const read of reads) {
+            for (const obj of (read && read.results) || []) items.push(activityItem(spec, obj));
+          }
+          // Sorted by time, then cut: ids only approximate recency.
           return sortActivity(items).slice(0, CONFIG.ACTIVITY_PER_TYPE_LIMIT);
         } catch (e) {
-          failures.push(e);
+          errors.push(e);
+          // A type that failed outright replaces any partial entry for it.
+          for (let i = failed.length - 1; i >= 0; i--) if (failed[i].type === spec.type) failed.splice(i, 1);
+          failed.push(activityFailure(spec.type, e, false));
           log(
             `activity: ${spec.type} could not be read — HTTP ${(e && e.status) || "?"}`,
             (e && e.code) || "?",
@@ -2331,19 +2516,22 @@
     );
 
     const usable = perType.filter((rows) => rows !== null);
-    if (!usable.length && failures.length) {
+    if (!usable.length && errors.length) {
       log("activity: every engagement type failed; reporting it to the panel");
-      throw failures[0];
+      throw errors[0];
     }
-    if (failures.length) {
+    if (errors.length) {
       log(
-        `activity: ${failures.length} of ${CONFIG.ACTIVITY_TYPES.length} engagement types unavailable; showing the rest`
+        `activity: ${errors.length} of ${CONFIG.ACTIVITY_TYPES.length} engagement types unavailable; showing the rest`
       );
     }
+    // Stable order for the panel and tests: ACTIVITY_TYPES order.
+    failed.sort((a, b) => typeOrder(a.type) - typeOrder(b.type));
 
     // Attribution is part of a row, not a later decoration: callers of
     // getActivity always get rows they can render as-is.
-    return attributeActivity(sortActivity([].concat.apply([], usable)));
+    const items = await attributeActivity(sortActivity([].concat.apply([], usable)));
+    return { items, failed };
   }
 
   // Puts a name on every activity row it can, in two batched passes over the
@@ -2549,6 +2737,8 @@
       // Null for a prospected contact, which is the common case.
       inboundSource: humanizeEnum(p.inbound_source) || null,
       inboundSourceAt: toMillis(p.inbound_source_last_updated) || null,
+      // v0.9.0: the SDR Call Brief, parsed. [] when the record has none.
+      callBrief: callBriefView(p.sdr_call_brief),
       url: recordUrl("contact", contact.id),
     };
   }
@@ -2565,6 +2755,8 @@
       ownerId: p.hubspot_owner_id || null,
       ownerName: ownerName(owners, p.hubspot_owner_id),
       linkedinUrl: linkedInUrl(p.linkedin_company_page),
+      // v0.9.0: the company's SDR Call Brief, parsed. [] when it has none.
+      callBrief: callBriefView(p.sdr_call_brief),
       url: recordUrl("company", company.id),
     };
   }
@@ -3312,6 +3504,7 @@
     const errors = {};
     let deals = [];
     let activity = [];
+    let activityFailed = [];
     let wizaUserObj = null;
 
     // Phase 9's colleagues read is gated on the COMPANY, not the contact (an
@@ -3367,11 +3560,13 @@
           log("deals fetch failed:", e && e.message);
           return [];
         }),
-        getActivity(contact.id).catch((e) => {
+        // v0.9.0: the company's and deals' engagements merge in, so a note
+        // logged on the account (or a call logged on the deal) shows here too.
+        getActivity(contact.id, { companyId: company && company.id, dealIds }).catch((e) => {
           errors.activity = isDataError(e) ? e.code : "TRANSIENT";
           if (isDataError(e) && e.retryAfterMs) errors.activityRetryAfterMs = e.retryAfterMs;
           log("activity fetch failed:", e && e.message);
-          return [];
+          return { items: [], failed: [] };
         }),
         fetchCustomObject(
           "wiza_user",
@@ -3382,7 +3577,8 @@
         ),
       ]);
       deals = dealResult;
-      activity = activityResult;
+      activity = activityResult.items;
+      activityFailed = activityResult.failed;
       wizaUserObj = wizaUserObjResult;
     }
 
@@ -3447,6 +3643,9 @@
       },
       deals,
       activity,
+      // v0.9.0: [{ type, status, code, partial }] for every engagement type
+      // that could not be read. Non-empty means the bundle is never cached.
+      activityFailed,
       contactVia,
       companyVia,
       errors: Object.keys(errors).length ? errors : null,
@@ -3478,7 +3677,10 @@
         const bundle = await buildBundle({ ...ctx, email });
         // A partially failed bundle is renderable but must not be pinned for
         // five minutes — the next render should try the failed section again.
-        if (!bundle.errors) bundleCache.set(key, { at: Date.now(), bundle });
+        // Same for a bundle with any engagement type unreadable (v0.9.0).
+        if (!bundle.errors && !(bundle.activityFailed || []).length) {
+          bundleCache.set(key, { at: Date.now(), bundle });
+        }
         return bundle;
       } finally {
         if (bundleInFlight.get(key) === p) bundleInFlight.delete(key);
@@ -3555,6 +3757,8 @@
       gtmTech: gtmTechView,
       companyStatusLabel,
       accountStatusTone,
+      // v0.9.0: SDR Call Brief text -> [{ label, text }]
+      callBrief: callBriefView,
       // (ownerId, selfOwnerId, resolvedName) → true | false | null. Exported
       // because the three-state rule is the part a renderer can get wrong: null
       // must never be drawn as "not yours".
@@ -3585,6 +3789,12 @@
       tabs: activityTabs,
       filter: filterActivity,
       resolveTab: resolveActivityTab,
+      // v0.9.0 fetch hardening
+      topIds: topActivityIds,
+      nextAfter: assocNextAfter,
+      batchIds: v4BatchIds,
+      failure: activityFailure,
+      failureText: activityFailureText,
     },
     // Formatting (shared with the panel; unit-tested)
     format: {

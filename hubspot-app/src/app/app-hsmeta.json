@@ -18,7 +18,8 @@
         "crm.objects.companies.read",
         "crm.objects.deals.read",
         "crm.objects.owners.read",
-        "crm.objects.custom.read"
+        "crm.objects.custom.read",
+        "sales-email-read"
       ],
       "optionalScopes": [],
       "conditionallyRequiredScopes": []

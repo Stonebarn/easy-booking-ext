@@ -1043,6 +1043,36 @@
       /* A pasted brief keeps its paragraph breaks. */
       .prose.research { white-space: pre-line; }
 
+      /* v0.9.0 Call brief: a sub-label per record, then a tight list whose
+         bullet is drawn in the accent so no default indent eats the width. */
+      .brief-group { display: flex; flex-direction: column; gap: 4px; }
+      .brief-group + .brief-group { padding-top: 8px; border-top: 1px solid var(--line); }
+      .brief-sub {
+        font-size: 10px;
+        line-height: 12px;
+        font-weight: var(--fw-head);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .brief-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+      .brief-item {
+        position: relative;
+        padding-left: 12px;
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+      .brief-item::before {
+        content: "\2022";
+        position: absolute;
+        left: 2px;
+        top: 0;
+        color: var(--accent-soft);
+      }
+      .brief-label { font-weight: var(--fw-head); color: var(--accent-ink); }
+
       /* Contact | Company: two separated columns. Values wrap rather than
          truncate — at the 320px floor each column is ~130px, which is tight
          but explicit: the split is the requirement, wrapping is the cost. */
@@ -2593,6 +2623,22 @@
           </p>
         </div>
 
+        <!-- Win back mode (v0.9.0). Off by default: the Call brief section
+             only earns its place on a win back call list. Behavior belongs to
+             the CRM IIFE in sidepanel.js (renderBriefSection). -->
+        <div class="pop-sec">
+          <div class="pop-sec-head">
+            <span class="pop-label">Win back mode</span>
+          </div>
+          <label class="pop-check" for="setting-winback">
+            <input type="checkbox" id="setting-winback" />
+            <span>Show the call brief</span>
+          </label>
+          <p class="pop-note" id="setting-winback-note">
+            Shows the SDR Call Brief from HubSpot on each record.
+          </p>
+        </div>
+
         <!-- Layout. Reps read the panel in different orders — one opens with
              Activity, another wants Dialer notes under their thumb — so the
              order of the sections is theirs, not ours. The controls appear in
@@ -2742,6 +2788,24 @@
           <span class="pill info" id="crm-identity-pill" style="display: none"></span>
         </div>
         <div class="card crm-body" id="crm-identity"></div>
+      </section>
+
+      <!-- ===== Call brief (v0.9.0, Win back mode) =====
+           The SDR Call Brief from HubSpot as a list: contact brief first, then
+           company, each under a small sub-label. Hidden unless Win back mode
+           is on in settings; on with no brief anywhere, it says so. -->
+      <section id="crm-brief-section" data-arrange data-sec-name="Call brief" hidden>
+        <div class="section-head">
+          <span class="sec-head-main">
+            <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M8 4h8v3H8z" />
+              <path d="M16 5.5h2a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1h2" />
+              <path d="M9 11h6M9 15h6" />
+            </svg>
+            <span class="section-title">Call brief</span>
+          </span>
+        </div>
+        <div class="card crm-body" id="crm-brief-body"></div>
       </section>
 
       <!-- ===== Account context (Phase 8) =====

@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-05
+
+### Added: Win back mode and the Call brief section
+
+- **Win back mode** in the settings popover (gear). Off by default. Stored as
+  `winBack` in the shared `eb:settings` object (read-merge-write, live across
+  panels, same as the celebrate toggle).
+- **Call brief** section, directly under Contact & company and arrangeable like
+  every other section. While Win back mode is on it shows HubSpot's
+  `sdr_call_brief` (SDR Call Brief) as a bulleted list: the contact's brief
+  first, then the company's, each under a small "Contact" / "Company"
+  sub-label. Each line's UPPERCASE label (CALLING, LOST, WHY WE LOST, ...) is
+  set in bold before its text. With neither record carrying a brief, the
+  section says "No call brief on this record." With the mode off, the section
+  is hidden entirely.
+- `sdr_call_brief` is requested on both the contact and the company read; no
+  extra request. Parsing is a pure, tested view-model
+  (`EB.hubspotData.view.callBrief`) that tolerates HTML, CRLF, missing or
+  `-` / `*` bullets, and lines with no label.
+- `CACHE_VERSION` 14 to 15: the bundle's contact and company views gained
+  `callBrief`.
+
+### Fixed: Activity shows every recent note, call and email
+
+- **Association paging.** Activity used to read only the first 100
+  associations per type, in id order, so a busy contact's newest notes could
+  fall off entirely. It now follows `paging.next.after` up to
+  `ACTIVITY_ASSOC_MAX` (500) ids, batch-reads the `ACTIVITY_ASSOC_READ` (100)
+  newest, then sorts by time and keeps 25 per type as before.
+- **Company and deal activity.** Engagements on the associated company and on
+  up to `ACTIVITY_DEAL_MAX` (10) associated deals are merged in, deduped by id.
+  All legs run in parallel; deals cost one batch association read per type.
+- **A synced note shows at once.** A successful note sync clears that
+  prospect's cached bundle and refetches it, the same path as **Refresh**,
+  instead of waiting out the 5-minute cache.
+- **Failed types are visible.** An engagement type HubSpot refuses no longer
+  reads as "0": its tab shows "n/a" and the list says, for example, "Notes
+  unavailable (HTTP 403)". A company or deal leg failing keeps the contact's
+  rows and adds a line. A bundle with any failed type is never cached. New
+  bundle field `activityFailed`; `CACHE_VERSION` 15 to 16.
+- **Scope.** `sales-email-read` (HubSpot: "read and manage one-to-one email
+  engagements") added to `SCOPES` and the app's `requiredScopes`. HubSpot's
+  docs name no granular scope for calls, meetings, notes or tasks, so none was
+  added for them. `CONFIG.ACTIVITY_SCOPES` maps every type to its scope and the
+  tests fail if one is missing. Upload the app build first; reps disconnect
+  and reconnect HubSpot once.
+
 ## [0.8.2] - 2026-10-21
 
 ### Fixed — Connect to HubSpot works from the Chrome Web Store install

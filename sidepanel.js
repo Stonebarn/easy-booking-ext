@@ -609,6 +609,10 @@
     // display headline above already carries that one fact, so this section
     // defers to it instead of repeating it a line lower.
     identitySection: document.getElementById("crm-identity-section"),
+    // v0.9.0: Call brief (Win back mode). Hidden outright unless the rep turned
+    // Win back mode on in settings; see renderBriefSection.
+    briefSection: document.getElementById("crm-brief-section"),
+    briefBody: document.getElementById("crm-brief-body"),
     // Account context (Phase 8). The section element itself is held because this
     // is the one section that hides entirely when the company has nothing worth
     // a card.
@@ -643,6 +647,7 @@
   };
   const crmBodies = [
     crmEls.identity,
+    crmEls.briefBody,
     crmEls.account,
     crmEls.colleagues,
     crmEls.wiza,
@@ -2326,6 +2331,50 @@
     return true;
   }
 
+  // --- Call brief (v0.9.0, Win back mode) ----------------------------------
+  // The SDR Call Brief from HubSpot, contact first, then company, each under a
+  // small sub-label so a rep always knows whose brief they are reading. The
+  // section exists only while Win back mode is on; on with no brief on either
+  // record, it says so rather than vanishing (the rep asked to see it). Labels
+  // and text are HubSpot values: textContent and text nodes only.
+  const winBack = { on: false }; // eb:settings.winBack, default off
+  function renderBriefSection(bundle) {
+    const section = crmEls.briefSection;
+    const body = crmEls.briefBody;
+    if (!section || !body) return;
+    clearNode(body);
+    if (!winBack.on) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    const b = bundle || {};
+    const groups = [
+      ["Contact", b.contact && b.contact.callBrief],
+      ["Company", b.company && b.company.callBrief],
+    ].filter((g) => Array.isArray(g[1]) && g[1].length);
+    if (!groups.length) {
+      body.appendChild(el("p", "crm-note", "No call brief on this record."));
+      return;
+    }
+    for (const [who, items] of groups) {
+      const group = el("div", "brief-group");
+      group.appendChild(el("div", "brief-sub", who));
+      const list = el("ul", "brief-list");
+      for (const item of items) {
+        const li = el("li", "brief-item");
+        if (item.label) {
+          li.appendChild(el("span", "brief-label", item.label));
+          li.appendChild(document.createTextNode(": "));
+        }
+        li.appendChild(document.createTextNode(item.text || ""));
+        list.appendChild(li);
+      }
+      group.appendChild(list);
+      body.appendChild(group);
+    }
+  }
+
   // --- Account context (Phase 8) -------------------------------------------
   // "Worth calling?" up top (grade in the section pill, then the team sizes and
   // company status), then "what do I open with" (the company's own blurb, ICP,
@@ -3484,9 +3533,9 @@
   // "Meetings 0", "Notes 0" used to take ~40% of the bar to report three
   // absences, and if only one type has rows the bar is hidden entirely — a tab
   // bar with one real choice in it is not a choice.
-  function renderActivityTabs(items) {
+  function renderActivityTabs(items, failed) {
     const bar = crmEls.activityTabs;
-    const tabs = data.activity.tabs(items).filter((t) => !t.disabled);
+    const tabs = data.activity.tabs(items, failed).filter((t) => !t.disabled);
     // "All" plus exactly one type means both tabs show the same list.
     if (tabs.length < 3) {
       crm.activeTab = "all";
@@ -3508,7 +3557,10 @@
       btn.appendChild(el("span", null, tab.label));
       // Leading space so the accessible name reads "Calls 12", not "Calls12";
       // CSS collapses it and adds the visual gap.
-      btn.appendChild(el("span", "tab-count", ` ${tab.count}`));
+      // v0.9.0: a type HubSpot refused reads "n/a", never a believable "0";
+      // the list (and this title) say why.
+      btn.appendChild(el("span", "tab-count", tab.unavailable ? " n/a" : ` ${tab.count}`));
+      if (tab.failure) btn.title = data.activity.failureText(tab.failure);
       bar.appendChild(btn);
     }
     crmEls.activity.setAttribute("aria-labelledby", `crm-tab-${crm.activeTab}`);
@@ -3536,18 +3588,29 @@
       console.debug("[EasyBooking] activity section unavailable:", errors.activity);
       return;
     }
+    // v0.9.0: engagement types HubSpot refused, e.g. "Notes unavailable
+    // (HTTP 403)". Shown in place of a type's list, and under "All", so a
+    // missing scope never passes for "no notes".
+    const failed = bundle.activityFailed || [];
+    const failureLines = failed.map((f) => data.activity.failureText(f));
     setPill(crmEls.activityPill, items.length ? String(items.length) : null);
     if (!items.length) {
-      setNote(body, "No activity found");
+      if (failureLines.length) setNote(body, failureLines.join(" · "), true);
+      else setNote(body, "No activity found");
       return;
     }
     // Keep the rep's tab if it still has rows for this prospect, else "All".
     // renderActivityTabs may force it back to "all" when there is no real
     // choice to make, so it runs before the list is filtered.
-    crm.activeTab = data.activity.resolveTab(items, crm.activeTab);
-    renderActivityTabs(items);
+    crm.activeTab = data.activity.resolveTab(items, crm.activeTab, failed);
+    renderActivityTabs(items, failed);
 
     clearNode(body);
+    const tabFailure = failed.find((f) => f.type === crm.activeTab) || null;
+    if (tabFailure && !tabFailure.partial) {
+      body.appendChild(el("p", "crm-note bad", data.activity.failureText(tabFailure)));
+      return;
+    }
     let prevOwner = null;
     for (const item of data.activity.filter(items, crm.activeTab)) {
       body.appendChild(activityRow(item, prevOwner));
@@ -3555,6 +3618,8 @@
       // in the middle must not make the next identical name look like a change.
       if (item.ownerName) prevOwner = item.ownerName;
     }
+    const tail = crm.activeTab === "all" ? failureLines : tabFailure ? [data.activity.failureText(tabFailure)] : [];
+    for (const line of tail) body.appendChild(el("p", "crm-note bad", line));
   }
 
   // Tab interaction lives on the container so it survives the rebuild above.
@@ -3648,6 +3713,7 @@
   // `false` at the top of crmRender before this could ever apply, so it
   // never leaks into a state that has something to show.
   function hideDownstreamCrmSections() {
+    crmEls.briefSection.hidden = true;
     crmEls.accountSection.hidden = true;
     crmEls.colleaguesSection.hidden = true;
     crmEls.wizaSection.hidden = true;
@@ -3685,6 +3751,8 @@
     // before) purely so the dedup below can hide it — it must come back here
     // every render or it would stay hidden the first time that ever fires.
     crmEls.identitySection.hidden = false;
+    // Call brief is the exception: it exists only while Win back mode is on.
+    crmEls.briefSection.hidden = !winBack.on;
     crmEls.accountSection.hidden = false;
     crmEls.colleaguesSection.hidden = false;
     crmEls.wizaSection.hidden = false;
@@ -3723,6 +3791,7 @@
     }
     if (crm.status === "loading") {
       skeleton(crmEls.identity, 3);
+      skeleton(crmEls.briefBody, 3);
       skeleton(crmEls.account, 3);
       skeleton(crmEls.colleagues, 3);
       skeleton(crmEls.wiza, 3);
@@ -3740,6 +3809,7 @@
       return;
     }
     renderIdentitySection(crm.bundle);
+    renderBriefSection(crm.bundle);
     renderAccountSection(crm.bundle);
     renderColleaguesSection(crm.bundle);
     renderWizaSection(crm.bundle);
@@ -3918,6 +3988,18 @@
     crmFetch({ force: true });
   });
 
+  // v0.9.0: a note the panel just synced must show in Activity at once, not
+  // after the 5-minute cache. Same path as the Refresh button. The notes
+  // module is a separate IIFE, so it signals with a same-document event.
+  window.addEventListener("eb:note-synced", (ev) => {
+    const email = lower(ev && ev.detail && ev.detail.email);
+    if (!data || !email) return;
+    data.clearCache(email);
+    // eslint-disable-next-line no-console
+    console.debug("[EasyBooking] CRM refetch after note sync for", email);
+    if (email === crmEmail()) crmFetch({ force: true });
+  });
+
   // The connection state is owned by the HubSpot section above; this is the one
   // signal the two share.
   function crmOnAuth(connected) {
@@ -3952,6 +4034,66 @@
     if (touched) crmSync();
   });
 
+  // 2b) Win back mode (v0.9.0). Same shape as the celebrate setting: one key
+  //     in the shared eb:settings object, read-merge-write so the notes,
+  //     celebration and layout modules' keys survive, and live sync so a
+  //     second panel (or this one's checkbox) re-renders the section at once.
+  const WINBACK_SETTINGS_KEY = "eb:settings";
+  const winBackEl = document.getElementById("setting-winback");
+  function readWinBack(stored) {
+    const raw = stored && typeof stored === "object" ? stored : {};
+    return raw.winBack === true; // default off
+  }
+  function renderWinBackSetting() {
+    if (winBackEl) winBackEl.checked = !!winBack.on;
+  }
+  // Only the Call brief section depends on this, so a rendered bundle redraws
+  // just that section; every other state goes through crmRender, which owns
+  // the section's visibility there (hidden while signed out / no prospect).
+  function applyWinBack() {
+    if (data && crm.connected && crmEmail() && crm.status !== "loading" && crm.status !== "error" && crm.bundle) {
+      renderBriefSection(crm.bundle);
+    } else {
+      crmRender();
+    }
+  }
+  async function setWinBack(on) {
+    winBack.on = !!on;
+    renderWinBackSetting();
+    applyWinBack();
+    try {
+      const res = (await chrome.storage.local.get(WINBACK_SETTINGS_KEY)) || {};
+      // Merge: the notes, celebration and layout modules own keys here too.
+      const merged = { ...(res[WINBACK_SETTINGS_KEY] || {}), winBack: !!on };
+      await chrome.storage.local.set({ [WINBACK_SETTINGS_KEY]: merged });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] could not save the win back setting:", (e && e.message) || e);
+    }
+  }
+  if (winBackEl) {
+    winBackEl.addEventListener("change", () => setWinBack(winBackEl.checked));
+  }
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[WINBACK_SETTINGS_KEY]) return;
+    const next = readWinBack(changes[WINBACK_SETTINGS_KEY].newValue);
+    if (next === winBack.on) return; // another module's key changed
+    winBack.on = next;
+    renderWinBackSetting();
+    applyWinBack();
+  });
+  (async () => {
+    try {
+      const res = (await chrome.storage.local.get(WINBACK_SETTINGS_KEY)) || {};
+      winBack.on = readWinBack(res[WINBACK_SETTINGS_KEY]);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.debug("[EasyBooking] could not read the win back setting:", (e && e.message) || e);
+    }
+    renderWinBackSetting();
+    applyWinBack();
+  })();
+
   // 3) The rep reordering their sections changes exactly one thing in here:
   //    whether Contact & company still leads the column, and so which of the
   //    booking cluster's two homes it belongs in. Only that is re-decided — a
@@ -3978,6 +4120,8 @@
       // bundle: its two long facts (Tech, Why) are the ones reps read most
       // closely, and their legibility is worth a measured check.
       renderAccountSection,
+      // v0.9.0: Call brief, for rendering a fixture bundle in the harness.
+      renderBriefSection,
     };
   }
 })();
@@ -4545,6 +4689,11 @@
       };
       await chrome.storage.local.set({ [SYNCED_KEY]: record });
       state.lastSynced = record;
+      // v0.9.0: tell the prospect card to drop its cached bundle and refetch,
+      // so the new note is in Activity immediately.
+      window.dispatchEvent(
+        new CustomEvent("eb:note-synced", { detail: { email: record.prospectEmail } })
+      );
       // An auto-sync normally leaves `result` null so render()'s standing line
       // ("Auto-synced to … just now ✓") owns the message and keeps its timestamp
       // honest. That line only appears when the editor still holds the synced
