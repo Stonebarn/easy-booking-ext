@@ -106,12 +106,16 @@
       "crm.objects.deals.read",
       "crm.objects.owners.read",
       "crm.objects.custom.read",
-      // sales-email-read (v0.9.1): lets the Activity section's Emails tab read
-      // one-to-one email engagements. It is in the app's optionalScopes, not
-      // requiredScopes, so the 0.9.0 store build (which never asks for it)
-      // keeps connecting. Reps on 0.9.1 disconnect and reconnect once to grant it.
-      "sales-email-read",
     ],
+
+    // Sent as the authorize URL's `optional_scope` parameter, which HubSpot
+    // drops silently when the portal or user can't grant it, so connect still
+    // succeeds. Must equal the app's optionalScopes.
+    // sales-email-read (v0.9.1): lets the Activity section's Emails tab read
+    // one-to-one email engagements. It is in the app's optionalScopes, not
+    // requiredScopes, so the 0.9.0 store build (which never asks for it)
+    // keeps connecting. Reps on 0.9.1 disconnect and reconnect once to grant it.
+    OPTIONAL_SCOPES: ["sales-email-read"],
 
     // Browser-side authorize step — no secret involved.
     AUTHORIZE_URL: "https://app.hubspot.com/oauth/authorize",

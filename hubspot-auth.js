@@ -214,10 +214,15 @@
   function buildAuthorizeUrl(state) {
     // Built by hand rather than with URLSearchParams: that encodes spaces as
     // "+", and HubSpot's scope parameter wants %20-separated values.
+    // Optional scopes go in their own `optional_scope` parameter: HubSpot
+    // treats everything in `scope` as required and refuses the install when
+    // one isn't on the app's requiredScopes.
+    const optional = CFG.OPTIONAL_SCOPES || [];
     const query = [
       `client_id=${encodeURIComponent(CFG.CLIENT_ID)}`,
       `redirect_uri=${encodeURIComponent(CFG.REDIRECT_URL)}`,
       `scope=${encodeURIComponent(CFG.SCOPES.join(" "))}`,
+      ...(optional.length ? [`optional_scope=${encodeURIComponent(optional.join(" "))}`] : []),
       `state=${encodeURIComponent(state)}`,
     ].join("&");
     return `${CFG.AUTHORIZE_URL}?${query}`;

@@ -517,12 +517,13 @@
 
     // v0.9.0: the OAuth scope that lets a token read each engagement type.
     // scripts/test-views.mjs asserts every ACTIVITY_TYPES entry has one and
-    // that each is requested in hubspot-config.js SCOPES, so a new type can't
+    // that each is requested in hubspot-config.js SCOPES or OPTIONAL_SCOPES, so a new type can't
     // ship without its scope. HubSpot names no granular scope for these
     // engagement types, and rejected the crm.objects.notes.* style names when
     // they were tried (see request()'s 403 comment), so they ride on the
     // contact read scope. Emails is the exception (v0.9.1): one-to-one email
-    // engagements need sales-email-read, an optional scope on the app.
+    // engagements need sales-email-read, requested via OPTIONAL_SCOPES
+    // (the authorize URL's optional_scope parameter).
     ACTIVITY_SCOPES: {
       calls: "crm.objects.contacts.read",
       emails: "sales-email-read",

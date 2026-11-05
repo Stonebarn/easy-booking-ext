@@ -342,10 +342,13 @@ eq(ctxOf({ company_research: "<table><tr><th>Tool</th><th>Seats</th></tr><tr><td
   vm.createContext(cfgBox);
   vm.runInContext(fs.readFileSync(ROOT + "hubspot-config.js", "utf8"), cfgBox, { filename: "hubspot-config.js" });
   const scopes = cfgBox.EB.hubspotConfig.SCOPES;
-  for (const t of types) ok(scopes.includes(D.CONFIG.ACTIVITY_SCOPES[t]), `scope for ${t} is requested`);
+  const optionalScopes = cfgBox.EB.hubspotConfig.OPTIONAL_SCOPES;
+  for (const t of types) ok(scopes.includes(D.CONFIG.ACTIVITY_SCOPES[t]) || optionalScopes.includes(D.CONFIG.ACTIVITY_SCOPES[t]), `scope for ${t} is requested`);
   const appAuth = JSON.parse(fs.readFileSync(ROOT + "hubspot-app/src/app/app-hsmeta.json", "utf8")).config.auth;
-  const appScopes = [...appAuth.requiredScopes, ...appAuth.optionalScopes];
-  for (const s of scopes) ok(appScopes.includes(s), `requested scope ${s} is on the app (required or optional)`);
+  // `scope` must carry exactly the app's required scopes; optional ones ride
+  // in `optional_scope` so HubSpot can drop them instead of failing connect.
+  eq([...new Set(scopes)].sort(), [...new Set(appAuth.requiredScopes)].sort(), "SCOPES equals app requiredScopes");
+  eq([...new Set(optionalScopes)].sort(), [...new Set(appAuth.optionalScopes)].sort(), "OPTIONAL_SCOPES equals app optionalScopes");
   // sales-email-read must stay optional on the app: the 0.9.0 store build
   // never requests it, so making it required would break that build's connect.
   ok(appAuth.optionalScopes.includes("sales-email-read"), "sales-email-read is an optional app scope");
