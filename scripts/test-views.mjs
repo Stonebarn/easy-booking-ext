@@ -343,8 +343,13 @@ eq(ctxOf({ company_research: "<table><tr><th>Tool</th><th>Seats</th></tr><tr><td
   vm.runInContext(fs.readFileSync(ROOT + "hubspot-config.js", "utf8"), cfgBox, { filename: "hubspot-config.js" });
   const scopes = cfgBox.EB.hubspotConfig.SCOPES;
   for (const t of types) ok(scopes.includes(D.CONFIG.ACTIVITY_SCOPES[t]), `scope for ${t} is requested`);
-  const appScopes = JSON.parse(fs.readFileSync(ROOT + "hubspot-app/src/app/app-hsmeta.json", "utf8")).config.auth.requiredScopes;
-  eq(appScopes, Array.from(scopes), "app requiredScopes match SCOPES, same order");
+  const appAuth = JSON.parse(fs.readFileSync(ROOT + "hubspot-app/src/app/app-hsmeta.json", "utf8")).config.auth;
+  const appScopes = [...appAuth.requiredScopes, ...appAuth.optionalScopes];
+  for (const s of scopes) ok(appScopes.includes(s), `requested scope ${s} is on the app (required or optional)`);
+  // sales-email-read must stay optional on the app: the 0.9.0 store build
+  // never requests it, so making it required would break that build's connect.
+  ok(appAuth.optionalScopes.includes("sales-email-read"), "sales-email-read is an optional app scope");
+  ok(!appAuth.requiredScopes.includes("sales-email-read"), "sales-email-read is not a required app scope");
 }
 
 console.log(`PASS: ${n} assertions`);

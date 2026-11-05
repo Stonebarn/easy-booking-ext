@@ -106,6 +106,11 @@
       "crm.objects.deals.read",
       "crm.objects.owners.read",
       "crm.objects.custom.read",
+      // sales-email-read (v0.9.1): lets the Activity section's Emails tab read
+      // one-to-one email engagements. It is in the app's optionalScopes, not
+      // requiredScopes, so the 0.9.0 store build (which never asks for it)
+      // keeps connecting. Reps on 0.9.1 disconnect and reconnect once to grant it.
+      "sales-email-read",
     ],
 
     // Browser-side authorize step — no secret involved.

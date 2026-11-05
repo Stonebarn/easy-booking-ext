@@ -26,6 +26,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   unavailable (HTTP 403)". A company or deal leg failing keeps the contact's
   rows and adds a line. A bundle with any failed type is never cached. New
   bundle field `activityFailed`; `CACHE_VERSION` 15 to 16.
+- **Emails tab scope.** The Emails tab now requests `sales-email-read` (an
+  optional scope on the HubSpot app). Reps reconnect HubSpot once after
+  updating to grant it.
 
 ## [0.9.0] - 2026-11-05
 
