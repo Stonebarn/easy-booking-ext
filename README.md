@@ -590,10 +590,10 @@ email does not disturb the booking tab.
 |---|---|---|
 | `CACHE_TTL_MS` | How long a resolved prospect bundle is reused before refetching (**Refresh** ignores it) | `5 * 60 * 1000` (5 min) |
 | `ACTIVITY_PER_TYPE_LIMIT` | Rows kept **per engagement type** (newest first) — what one Activity tab can hold | `25` |
-| `ACTIVITY_ASSOC_MAX` | Association ids collected per engagement type, paging past 100 and merging the contact's, company's and deals' engagements (v0.9.0) | `500` |
-| `ACTIVITY_ASSOC_READ` | Of those, the newest ids (largest first) batch-read before the time sort and the per-type cut (v0.9.0) | `100` |
-| `ACTIVITY_DEAL_MAX` | Deals whose engagements merge into Activity; one batch association read per type covers them all (v0.9.0) | `10` |
-| `ACTIVITY_SCOPES` | The OAuth scope that covers each engagement type. `scripts/test-views.mjs` fails if a type has none or its scope isn't in `SCOPES` (v0.9.0) | emails → `sales-email-read`, the rest → `crm.objects.contacts.read` |
+| `ACTIVITY_ASSOC_MAX` | Association ids collected per engagement type, paging past 100 and merging the contact's, company's and deals' engagements (v0.9.1) | `500` |
+| `ACTIVITY_ASSOC_READ` | Of those, the newest ids (largest first) batch-read before the time sort and the per-type cut (v0.9.1) | `100` |
+| `ACTIVITY_DEAL_MAX` | Deals whose engagements merge into Activity; one batch association read per type covers them all (v0.9.1) | `10` |
+| `ACTIVITY_SCOPES` | The OAuth scope that covers each engagement type. `scripts/test-views.mjs` fails if a type has none or its scope isn't in `SCOPES` (v0.9.1) | every type → `crm.objects.contacts.read` |
 | `BATCH_MAX` | Objects per `batch/read` and IDs per association read (HubSpot's own ceiling) | `100` |
 | `RETRY_AFTER_FALLBACK_S` | Wait used when a `429` carries no usable `Retry-After` header | `10` |
 | `CACHE_VERSION` | Namespaces the per-prospect cache; bump it whenever the bundle's shape changes so older cached data can't be rendered by newer code | `16` |
@@ -699,7 +699,7 @@ map is empty and every value lands in All tech.
 | `TOKEN_PROXY_URL` | Deployed Lovable Cloud token-exchange function | `https://wiza-hs-connect.lovable.app/api/public/hubspot-token` |
 | `REDIRECT_URL` | Derived at runtime from `chrome.identity.getRedirectURL("hubspot")`, so it is always this install's own ID. That ID must be registered on the app's Auth tab **and** allowlisted in the edge function (see [Store vs dev extension ID](#store-vs-dev-extension-id)) | `https://<this-install's-id>.chromiumapp.org/hubspot` |
 | `KNOWN_EXTENSION_IDS` | Every extension ID registered on the HubSpot app and allowlisted in the edge function. The panel warns in the console when the running ID is not on it; `scripts/validate.mjs` fails on any `chromiumapp.org/hubspot` URL whose ID is not on it | `dhmhnhegpigpedbfpplkodihmljhkcff` (store), `ihajiebioinbhaljdmaihgonjglhalpa` (dev) |
-| `SCOPES` | Scopes requested at install; must include every scope marked *required* on the app (including `oauth`) | `oauth` + contacts/companies read-write, deals read, owners read, **custom objects read** (Phase 12: a rep's token only gets this on the next reconnect; see "Wiza custom objects" under [CRM sidebar](#crm-sidebar)), **`sales-email-read`** (v0.9.0, for the Emails tab). Upload the HubSpot app build carrying a new scope **before** shipping the extension that requests it, and every rep must **disconnect and reconnect HubSpot once** to pick it up |
+| `SCOPES` | Scopes requested at install; must include every scope marked *required* on the app (including `oauth`) | `oauth` + contacts/companies read-write, deals read, owners read, **custom objects read** (Phase 12: a rep's token only gets this on the next reconnect; see "Wiza custom objects" under [CRM sidebar](#crm-sidebar)) |
 | `AUTHORIZE_URL` | HubSpot's consent endpoint (browser-side; no secret involved) | `https://app.hubspot.com/oauth/authorize` |
 | `API_BASE` | CRM API host; must stay covered by `host_permissions` | `https://api.hubapi.com` |
 | `PORTAL_ID` | Wiza portal, for record deep links | `40063500` |
@@ -856,7 +856,7 @@ DOM**, not the static HTML snapshots:
 | Timezone shows a raw name like `Asia/Calcutta` | That's correct — it's Default's own value for that zone (= IST / India; the dropdown labels it "India, Sri Lanka Time"). Default just displays the selected value using its IANA name. |
 | Panel or badge not showing | Reload the tab after updating the extension; both appear only for a fresh (<30 min) capture. |
 | Stale email | Captures older than 30 min are skipped; re-open the prospect in the dialer. |
-| Notes tab (or any Activity tab) shows "unavailable (HTTP 403)" or "n/a" | Your HubSpot token lacks the scope for that engagement type, often because it was issued before v0.9.0 added `sales-email-read`. Open the gear, **disconnect HubSpot, then reconnect** to grant it. Another status (e.g. HTTP 500) is HubSpot-side; **Refresh** retries, and the bundle is never cached while a type is failing. |
+| Notes tab (or any Activity tab) shows "unavailable (HTTP 403)" or "n/a" | Check the panel console for the HTTP status, then open the gear, **disconnect HubSpot and reconnect**. A 5xx status is HubSpot-side; **Refresh** retries, and the bundle is never cached while a type is failing. |
 | Extension doesn't run on booking page | Confirm the URL matches `https://scheduler.default.com/*` in `manifest.json`. |
 | **Connect HubSpot** opens a page that fails with `DNS_PROBE_POSSIBLE` on `…chromiumapp.org/hubspot` | The redirect URL was built for a different extension ID than the one running. Fixed in 0.8.2 (the URL is now derived at runtime); if it recurs, the running ID is missing from one of the three lists in [Store vs dev extension ID](#store-vs-dev-extension-id). The panel's console names the ID. |
 | CRM sections say "Connect HubSpot to see CRM data" | You're signed out — click **Connect** in that empty state, or the **gear** → **Connect HubSpot**. |

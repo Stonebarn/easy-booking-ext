@@ -98,15 +98,6 @@
     // and degrades silently to the rollup properties, exactly as it did
     // before this scope existed — see the Wiza custom objects note in the
     // README.
-    //
-    // sales-email-read (v0.9.0): HubSpot's scopes reference names it as the
-    // scope that reads one-to-one email engagements, which the Activity
-    // section's Emails tab batch-reads. It is ALSO in requiredScopes in
-    // hubspot-app/src/app/app-hsmeta.json; the app build carrying it must be
-    // uploaded before an extension build with this list ships, or every
-    // connect asks for a scope the app doesn't have. Reps reconnect once.
-    // EB.hubspotData.CONFIG.ACTIVITY_SCOPES maps each engagement type to the
-    // scope here that covers it (scripts/test-views.mjs enforces both).
     SCOPES: [
       "oauth",
       "crm.objects.contacts.read",
@@ -115,7 +106,6 @@
       "crm.objects.deals.read",
       "crm.objects.owners.read",
       "crm.objects.custom.read",
-      "sales-email-read",
     ],
 
     // Browser-side authorize step — no secret involved.
